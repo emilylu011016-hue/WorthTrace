@@ -141,6 +141,345 @@ button {
   padding: 32px 0 48px;
 }
 
+.onboarding-shell {
+  display: grid;
+  gap: 26px;
+  padding-bottom: 48px;
+}
+
+.onboarding-hero {
+  min-height: 260px;
+  padding: 58px 56px;
+  border: 1px solid rgba(196, 164, 106, 0.24);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 76% 22%, rgba(196, 164, 106, 0.18), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(247, 239, 225, 0.88));
+  box-shadow: 0 28px 80px rgba(43, 37, 28, 0.08);
+}
+
+.onboarding-hero h1 {
+  max-width: 760px;
+  font-size: clamp(38px, 6vw, 76px);
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.onboarding-hero p:not(.eyebrow) {
+  max-width: 560px;
+  margin-top: 22px;
+  color: #647067;
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.onboarding-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 22px;
+}
+
+.onboarding-rail {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  position: sticky;
+  top: 24px;
+}
+
+.onboarding-rail button {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid rgba(192, 176, 148, 0.42);
+  border-radius: 18px;
+  color: #5d675f;
+  background: rgba(255, 255, 255, 0.68);
+  text-align: left;
+}
+
+.onboarding-rail button strong {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 999px;
+  color: #15211d;
+  background: #f2eadf;
+  font-size: 13px;
+}
+
+.onboarding-rail button.active {
+  border-color: rgba(185, 154, 96, 0.64);
+  color: #17231e;
+  background: #fffaf0;
+  box-shadow: 0 16px 34px rgba(92, 77, 48, 0.12);
+}
+
+.onboarding-panel {
+  min-height: 620px;
+  padding: 30px;
+  border: 1px solid rgba(192, 176, 148, 0.34);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 22px 70px rgba(43, 37, 28, 0.08);
+}
+
+.onboarding-step-pill {
+  align-self: start;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: #6a5730;
+  background: #f7ead0;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.onboarding-step {
+  display: grid;
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.saving-rate-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(220px, 0.85fr);
+  gap: 18px;
+}
+
+.saving-rate-editor label,
+.custom-analysis-box label,
+.onboarding-form-grid label {
+  display: grid;
+  gap: 8px;
+  color: #4e5b53;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.saving-rate-editor label > div {
+  display: grid;
+  grid-template-columns: 1fr 52px;
+  align-items: center;
+  overflow: hidden;
+  height: 108px;
+  border: 1px solid rgba(192, 176, 148, 0.46);
+  border-radius: 24px;
+  background: #fffdf8;
+}
+
+.saving-rate-editor input {
+  width: 100%;
+  height: 100%;
+  padding: 0 24px;
+  border: 0;
+  color: #14201c;
+  background: transparent;
+  font-size: 48px;
+  font-weight: 760;
+  outline: none;
+}
+
+.saving-rate-editor label > div span {
+  color: #b99a60;
+  font-size: 26px;
+  font-weight: 760;
+}
+
+.saving-rate-editor aside,
+.onboarding-preview-card {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 22px;
+  border-radius: 24px;
+  background: #f5efe4;
+}
+
+.saving-rate-editor aside strong,
+.onboarding-preview-card strong {
+  color: #17231e;
+  font-size: 26px;
+}
+
+.saving-rate-editor aside span,
+.onboarding-preview-card span,
+.onboarding-inline-choice span {
+  color: #68746c;
+  line-height: 1.6;
+}
+
+.onboarding-preview-card {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.onboarding-inline-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid rgba(192, 176, 148, 0.32);
+  border-radius: 18px;
+  background: rgba(251, 250, 247, 0.86);
+}
+
+.onboarding-inline-choice label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #17231e;
+  font-weight: 760;
+}
+
+.onboarding-asset-builder {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid rgba(192, 176, 148, 0.32);
+  border-radius: 24px;
+  background: #fffdf8;
+}
+
+.onboarding-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.onboarding-form-grid input,
+.onboarding-form-grid select,
+.onboarding-dca-row input,
+.onboarding-dca-row select,
+.onboarding-target-row input,
+.onboarding-target-row select,
+.custom-analysis-box textarea {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #ded4c2;
+  border-radius: 12px;
+  color: #17231e;
+  background: #fff;
+  outline: none;
+}
+
+.onboarding-form-grid input,
+.onboarding-form-grid select,
+.onboarding-dca-row input,
+.onboarding-dca-row select,
+.onboarding-target-row input,
+.onboarding-target-row select {
+  padding: 0 12px;
+}
+
+.onboarding-dca-list,
+.onboarding-target-list,
+.custom-analysis-box {
+  display: grid;
+  gap: 12px;
+}
+
+.onboarding-dca-row,
+.onboarding-target-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.onboarding-target-row {
+  grid-template-columns: 130px minmax(0, 1fr) minmax(120px, 0.8fr) auto;
+}
+
+.onboarding-list {
+  display: grid;
+  gap: 10px;
+}
+
+.onboarding-list-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.6fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid rgba(192, 176, 148, 0.28);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.onboarding-list-row strong {
+  color: #17231e;
+}
+
+.onboarding-list-row span {
+  color: #68746c;
+  font-size: 13px;
+}
+
+.onboarding-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.onboarding-chart-grid button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 11px;
+  min-height: 124px;
+  padding: 18px;
+  border: 1px solid rgba(192, 176, 148, 0.32);
+  border-radius: 20px;
+  color: #647067;
+  background: #fffdf8;
+  text-align: left;
+}
+
+.onboarding-chart-grid button svg {
+  color: #c2b6a1;
+}
+
+.onboarding-chart-grid button strong {
+  color: #17231e;
+}
+
+.onboarding-chart-grid button span {
+  grid-column: 2;
+  line-height: 1.55;
+}
+
+.onboarding-chart-grid button.selected {
+  border-color: rgba(111, 146, 127, 0.52);
+  background: #f2f7f1;
+}
+
+.onboarding-chart-grid button.selected svg {
+  color: #6f927f;
+}
+
+.custom-analysis-box textarea {
+  min-height: 96px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(192, 176, 148, 0.26);
+}
+
+.onboarding-notice {
+  margin-top: 18px;
+}
+
 .topbar {
   display: flex;
   align-items: center;

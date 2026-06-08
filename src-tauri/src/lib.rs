@@ -2,7 +2,7 @@ use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -207,6 +207,16 @@ struct PortfolioTargetSummary {
 }
 
 #[derive(Serialize)]
+struct OnboardingStatus {
+  completed: bool,
+  target_saving_rate: f64,
+  dashboard_enabled_sections: Vec<String>,
+  custom_analysis_prompts: Vec<String>,
+  asset_count: i64,
+  portfolio_target_count: i64,
+}
+
+#[derive(Serialize)]
 struct SecurityStatus {
   password_set: bool,
   unlocked: bool,
@@ -383,6 +393,27 @@ struct NewAssetInput {
   status: String,
   note: Option<String>,
   dca_plans: Vec<NewDcaPlanInput>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct OnboardingAllocationTargetInput {
+  level: String,
+  parent_category_id: Option<String>,
+  category_id: Option<String>,
+  asset_id: Option<String>,
+  label: String,
+  target_percent: f64,
+}
+
+#[derive(Deserialize)]
+struct OnboardingInput {
+  target_saving_rate: f64,
+  assets: Vec<NewAssetInput>,
+  allocation_targets: Vec<OnboardingAllocationTargetInput>,
+  dashboard_sections: Vec<String>,
+  custom_analysis_prompts: Vec<String>,
+  skip_asset_entry: bool,
+  skip_allocation_targets: bool,
 }
 
 #[derive(Deserialize)]
@@ -2433,6 +2464,293 @@ fn upsert_setting(connection: &Connection, key: &str, value_json: &str) -> Resul
   Ok(())
 }
 
+fn upsert_setting_tx(tx: &Transaction<'_>, key: &str, value_json: &str) -> Result<(), AppError> {
+  tx.execute(
+    "
+    insert into app_settings (key, value_json, updated_at)
+    values (?1, ?2, current_timestamp)
+    on conflict(key) do update set
+      value_json = excluded.value_json,
+      updated_at = current_timestamp
+    ",
+    params![key, value_json],
+  )?;
+  Ok(())
+}
+
+fn default_dashboard_sections() -> Vec<String> {
+  vec![
+    "总览".to_string(),
+    "收支储蓄".to_string(),
+    "支出结构".to_string(),
+    "资产配置".to_string(),
+    "投资表现".to_string(),
+    "月报".to_string(),
+  ]
+}
+
+fn setting_string_array(connection: &Connection, key: &str, fallback: Vec<String>) -> Result<Vec<String>, AppError> {
+  let value: Result<String, rusqlite::Error> = connection.query_row(
+    "select value_json from app_settings where key = ?1",
+    params![key],
+    |row| row.get(0),
+  );
+
+  match value {
+    Ok(raw) => Ok(serde_json::from_str::<Vec<String>>(&raw).unwrap_or(fallback)),
+    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(fallback),
+    Err(error) => Err(error.into()),
+  }
+}
+
+fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, AppError> {
+  let target_saving_rate = setting_number(connection, "target_saving_rate", 0.3)?;
+  let dashboard_enabled_sections = setting_string_array(
+    connection,
+    "dashboard_enabled_sections",
+    default_dashboard_sections(),
+  )?;
+  let custom_analysis_prompts = setting_string_array(
+    connection,
+    "dashboard_custom_analysis_prompts",
+    Vec::new(),
+  )?;
+  let asset_count: i64 = connection.query_row(
+    "
+    select count(*)
+    from assets
+    where status = 'active'
+      and coalesce(monthly_update_managed, 0) = 1
+    ",
+    [],
+    |row| row.get(0),
+  )?;
+  let portfolio_target_count: i64 = connection.query_row(
+    "
+    select count(*)
+    from portfolio_target_items pti
+    join portfolio_targets pt on pt.id = pti.target_id
+    where pt.is_active = 1
+    ",
+    [],
+    |row| row.get(0),
+  )?;
+  let business_count: i64 = connection.query_row(
+    "
+    select
+      (select count(*) from monthly_closes) +
+      (select count(*) from monthly_update_runs) +
+      (select count(*) from confirmed_transactions) +
+      (select count(*) from monthly_asset_snapshots) +
+      (select count(*) from investment_cashflows) +
+      (select count(*) from monthly_credit_card_entries) +
+      (select count(*) from assets where coalesce(monthly_update_managed, 0) = 1)
+    ",
+    [],
+    |row| row.get(0),
+  )?;
+  let completed = setting_bool(connection, "onboarding_completed", false)? || business_count > 0;
+
+  Ok(OnboardingStatus {
+    completed,
+    target_saving_rate,
+    dashboard_enabled_sections,
+    custom_analysis_prompts,
+    asset_count,
+    portfolio_target_count,
+  })
+}
+
+fn save_onboarding_to_connection(connection: &mut Connection, input: &OnboardingInput) -> Result<(), AppError> {
+  if !input.target_saving_rate.is_finite() || input.target_saving_rate < 0.0 || input.target_saving_rate > 1.0 {
+    return Err(AppError::InvalidCsvValue("期望储蓄率需要在 0% 到 100% 之间".to_string()));
+  }
+
+  let tx = connection.transaction()?;
+  upsert_setting_tx(&tx, "target_saving_rate", &serde_json::to_string(&input.target_saving_rate).unwrap())?;
+  upsert_setting_tx(&tx, "onboarding_completed", "true")?;
+  upsert_setting_tx(&tx, "onboarding_asset_entry_skipped", if input.skip_asset_entry { "true" } else { "false" })?;
+  upsert_setting_tx(&tx, "onboarding_allocation_targets_skipped", if input.skip_allocation_targets { "true" } else { "false" })?;
+  upsert_setting_tx(
+    &tx,
+    "dashboard_enabled_sections",
+    &serde_json::to_string(&input.dashboard_sections).unwrap_or_else(|_| "[]".to_string()),
+  )?;
+  upsert_setting_tx(
+    &tx,
+    "dashboard_custom_analysis_prompts",
+    &serde_json::to_string(&input.custom_analysis_prompts).unwrap_or_else(|_| "[]".to_string()),
+  )?;
+  upsert_setting_tx(
+    &tx,
+    "dashboard_custom_allocation_targets",
+    &serde_json::to_string(&input.allocation_targets).unwrap_or_else(|_| "[]".to_string()),
+  )?;
+
+  for asset in input.assets.iter().filter(|asset| !asset.name.trim().is_empty()) {
+    if asset.is_dca && asset.dca_plans.is_empty() {
+      return Err(AppError::InvalidCsvValue(format!("{} 已选择定投，但没有定投计划", asset.name)));
+    }
+    let normalized_platform = asset.platform.clone().unwrap_or_default();
+    let existing_asset_id: Option<String> = tx
+      .query_row(
+        "
+        select id
+        from assets
+        where name = ?1
+          and coalesce(platform, '') = ?2
+        order by created_at
+        limit 1
+        ",
+        params![asset.name.trim(), normalized_platform],
+        |row| row.get(0),
+      )
+      .optional()?;
+    let asset_id = existing_asset_id.unwrap_or_else(|| {
+      make_id(
+        "asset",
+        &format!(
+          "onboarding|{}|{}|{:?}",
+          asset.name.trim(),
+          asset.platform.clone().unwrap_or_default(),
+          SystemTime::now()
+        ),
+      )
+    });
+    tx.execute(
+      "
+      insert into assets (
+        id, name, asset_type, main_asset_category_id, sub_asset_category_id,
+        currency, platform, is_dca, status, note, monthly_update_managed
+      )
+      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', ?9, 1)
+      on conflict(id) do update set
+        name = excluded.name,
+        asset_type = excluded.asset_type,
+        main_asset_category_id = excluded.main_asset_category_id,
+        sub_asset_category_id = excluded.sub_asset_category_id,
+        currency = excluded.currency,
+        platform = excluded.platform,
+        is_dca = excluded.is_dca,
+        status = 'active',
+        note = excluded.note,
+        monthly_update_managed = 1,
+        updated_at = current_timestamp
+      ",
+      params![
+        asset_id,
+        asset.name.trim(),
+        asset.asset_type,
+        asset.main_asset_category_id,
+        asset.sub_asset_category_id,
+        asset.currency,
+        asset.platform,
+        if asset.is_dca { 1 } else { 0 },
+        asset.note
+      ],
+    )?;
+
+    tx.execute("delete from asset_tag_links where asset_id = ?1", params![asset_id])?;
+    for tag_name in asset.tags.iter().filter(|name| !name.trim().is_empty()) {
+      let tag_id = make_id("tag", tag_name.trim());
+      tx.execute(
+        "
+        insert into tags (id, name, group_name, is_system)
+        values (?1, ?2, '自定义', 0)
+        on conflict(name) do nothing
+        ",
+        params![tag_id, tag_name.trim()],
+      )?;
+      let actual_tag_id: String = tx.query_row(
+        "select id from tags where name = ?1",
+        params![tag_name.trim()],
+        |row| row.get(0),
+      )?;
+      tx.execute(
+        "insert or ignore into asset_tag_links (asset_id, tag_id) values (?1, ?2)",
+        params![asset_id, actual_tag_id],
+      )?;
+    }
+
+    tx.execute(
+      "update dca_plans set is_active = 0, updated_at = current_timestamp where asset_id = ?1",
+      params![asset_id],
+    )?;
+    if asset.is_dca {
+      for (index, plan) in asset.dca_plans.iter().enumerate() {
+        if plan.amount <= 0.0 {
+          continue;
+        }
+        let plan_id = make_id("dca", &format!("{}|onboarding|{}|{}|{}", asset_id, index, plan.frequency, plan.start_date));
+        tx.execute(
+          "
+          insert into dca_plans (
+            id, asset_id, name, frequency, amount, currency, start_date, end_date,
+            weekly_rules_json, monthly_day, is_active
+          )
+          values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1)
+          on conflict(id) do update set
+            frequency = excluded.frequency,
+            amount = excluded.amount,
+            currency = excluded.currency,
+            start_date = excluded.start_date,
+            end_date = excluded.end_date,
+            weekly_rules_json = excluded.weekly_rules_json,
+            monthly_day = excluded.monthly_day,
+            is_active = 1,
+            updated_at = current_timestamp
+          ",
+          params![
+            plan_id,
+            asset_id,
+            format!("{} 定投 {}", asset.name.trim(), index + 1),
+            plan.frequency,
+            plan.amount,
+            asset.currency,
+            plan.start_date,
+            plan.end_date,
+            plan.weekly_rules_json,
+            plan.monthly_day
+          ],
+        )?;
+      }
+    }
+  }
+
+  tx.execute("update portfolio_targets set is_active = 0, updated_at = current_timestamp", [])?;
+  if !input.skip_allocation_targets && !input.allocation_targets.is_empty() {
+    let target_id = make_unique_id("target", "onboarding");
+    tx.execute(
+      "
+      insert into portfolio_targets (id, version_name, effective_from, is_active, note)
+      values (?1, '初始化目标配比', date('now'), 1, '用户初始化设置')
+      ",
+      params![target_id],
+    )?;
+    for target in input.allocation_targets.iter().filter(|target| target.level == "main") {
+      let Some(category_id) = target.category_id.as_ref().filter(|value| !value.trim().is_empty()) else {
+        continue;
+      };
+      if !target.target_percent.is_finite() || target.target_percent < 0.0 || target.target_percent > 1.0 {
+        return Err(AppError::InvalidCsvValue(format!("{} 的目标比例需要在 0% 到 100% 之间", target.label)));
+      }
+      let item_id = make_id("target_item", &format!("{}|{}", target_id, category_id));
+      tx.execute(
+        "
+        insert into portfolio_target_items (
+          id, target_id, main_asset_category_id, target_percent, risk_level
+        )
+        values (?1, ?2, ?3, ?4, null)
+        ",
+        params![item_id, target_id, category_id, target.target_percent],
+      )?;
+    }
+  }
+
+  tx.commit()?;
+  Ok(())
+}
+
 fn password_hash_exists(connection: &Connection) -> Result<bool, AppError> {
   let count: i64 = connection.query_row(
     "select count(*) from app_settings where key = 'security_password_hash'",
@@ -2584,7 +2902,7 @@ fn template_variables(
   period_month: &str,
   privacy_mode: bool,
 ) -> Result<HashMap<String, String>, AppError> {
-  let target_saving_rate = setting_number(connection, "target_saving_rate", 0.5)?;
+  let target_saving_rate = setting_number(connection, "target_saving_rate", 0.3)?;
   let confirmed_income: f64 = connection.query_row(
     "
     select coalesce(sum(amount), 0)
@@ -2819,6 +3137,34 @@ fn wrap_plain_template_html(rendered: &str) -> String {
         .join("<br />")
     )
   }
+}
+
+#[tauri::command]
+fn get_onboarding_status(
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<OnboardingStatus, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  read_onboarding_status(&connection)
+}
+
+#[tauri::command]
+fn save_onboarding(
+  input: OnboardingInput,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<OnboardingStatus, AppError> {
+  let mut work_connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&work_connection, &security)?;
+  save_onboarding_to_connection(&mut work_connection, &input)?;
+
+  if db.split_databases {
+    let mut dashboard_connection = db.dashboard_connection.lock().expect("database mutex poisoned");
+    save_onboarding_to_connection(&mut dashboard_connection, &input)?;
+  }
+
+  read_onboarding_status(&work_connection)
 }
 
 #[tauri::command]
@@ -5454,7 +5800,7 @@ fn get_dashboard_seed_summary(
   let connection = db.dashboard_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
   let official_start_date = setting_string(&connection, "official_start_date", "2026-04-30")?;
-  let target_saving_rate = setting_number(&connection, "target_saving_rate", 0.5)?;
+  let target_saving_rate = setting_number(&connection, "target_saving_rate", 0.3)?;
   let snapshot_month = latest_completed_period_month(&connection)?;
 
   let asset_count: i64 =
@@ -5648,6 +5994,8 @@ pub fn run() {
       unlock_app,
       lock_app,
       set_privacy_mode,
+      get_onboarding_status,
+      save_onboarding,
       list_content_templates,
       save_content_template,
       copy_content_template,

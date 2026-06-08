@@ -1,7 +1,7 @@
 insert or ignore into app_settings (key, value_json) values
   ('official_start_date', '"2026-04-30"'),
   ('base_currency', '"CNY"'),
-  ('target_saving_rate', '0.5');
+  ('target_saving_rate', '0.3');
 
 insert or ignore into categories (id, name, category_kind, rigidity, is_personal, sort_order) values
   ('cat_expense_housing', '房租+住房', 'expense', 'fixed', 0, 10),
@@ -97,38 +97,3 @@ insert or ignore into tags (id, name, group_name, is_system) values
   ('tag_gold', '黄金', '资产类别', 1),
   ('tag_dividend_low_vol', '红利低波', '策略', 1),
   ('tag_bangnitou', '帮你投', '产品', 1);
-
-insert or ignore into assets (id, name, asset_type, main_asset_category_id, sub_asset_category_id, currency, platform, is_dca, note) values
-  ('asset_huabao_nasdaq_a', '华宝纳斯达克a', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_efund_sp500_a', '易方达标普a', 'fund', 'asset_cat_us_equity', 'asset_sub_sp500', 'CNY', null, 0, null),
-  ('asset_tianhong_sp500_a', '天虹标普a', 'fund', 'asset_cat_us_equity', 'asset_sub_sp500', 'CNY', null, 0, null),
-  ('asset_morgan_sp500_a', '摩根标普a', 'fund', 'asset_cat_us_equity', 'asset_sub_sp500', 'CNY', null, 0, null),
-  ('asset_efund_sp500_c', '易方达标普c', 'fund', 'asset_cat_us_equity', 'asset_sub_sp500', 'CNY', null, 0, null),
-  ('asset_southern_nasdaq_a', '南方纳斯达克a', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_jiashi_nasdaq_a', '嘉实纳斯达克a', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_tianhong_nasdaq_c', '天虹纳斯达克c', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_tianhong_nasdaq_a', '天虹纳斯达克a', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_guangfa_nasdaq_a', '广发纳斯达克a', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_guangfa_nasdaq_c', '广发纳斯达克c', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_morgan_nasdaq_a', '摩根纳斯达克a', 'fund', 'asset_cat_us_equity', 'asset_sub_nasdaq', 'CNY', null, 0, null),
-  ('asset_efund_sp500_info_tech_a', '易方达标普信息科技a', 'fund', 'asset_cat_us_equity', 'asset_sub_info_tech', 'CNY', null, 0, null),
-  ('asset_bangnitou_90', '帮你投精选90', 'fund', 'asset_cat_us_equity', 'asset_sub_other_us', 'CNY', null, 0, null),
-  ('asset_bangnitou_100', '帮你投100进攻', 'fund', 'asset_cat_us_equity', 'asset_sub_other_us', 'CNY', null, 0, null),
-  ('asset_southern_dividend_low_vol', '南方红利低波', 'fund', 'asset_cat_dividend_low_vol', 'asset_sub_dividend_low_vol', 'CNY', null, 0, null),
-  ('asset_cmb_bond', '招商债券', 'bond_fund', 'asset_cat_bond', 'asset_sub_bond_fund', 'CNY', null, 0, null),
-  ('asset_western_bond_a', '西部债券a', 'bond_fund', 'asset_cat_bond', 'asset_sub_bond_fund', 'CNY', null, 0, null),
-  ('asset_efund_bond_a', '易方达债券a', 'bond_fund', 'asset_cat_bond', 'asset_sub_bond_fund', 'CNY', null, 0, null),
-  ('asset_bond_cash', '债券现金', 'cash_account', 'asset_cat_cash', 'asset_sub_bond_cash', 'CNY', null, 0, null),
-  ('asset_cash', '现金', 'cash_account', 'asset_cat_cash', 'asset_sub_cash', 'CNY', null, 0, null),
-  ('asset_receivable_deposit', '应收押金', 'receivable', 'asset_cat_cash', 'asset_sub_receivable', 'CNY', null, 0, null),
-  ('asset_gold', '黄金', 'gold', 'asset_cat_gold', 'asset_sub_gold', 'CNY', null, 0, null);
-
-insert or ignore into portfolio_targets (id, version_name, effective_from, note) values
-  ('target_v1_default', 'v1 default', '2026-04-30', 'confirmed by user');
-
-insert or ignore into portfolio_target_items (id, target_id, main_asset_category_id, target_percent, risk_level) values
-  ('target_v1_us_equity', 'target_v1_default', 'asset_cat_us_equity', 0.70, 'high'),
-  ('target_v1_dividend_low_vol', 'target_v1_default', 'asset_cat_dividend_low_vol', 0.10, 'medium'),
-  ('target_v1_gold', 'target_v1_default', 'asset_cat_gold', 0.10, 'medium'),
-  ('target_v1_bond', 'target_v1_default', 'asset_cat_bond', 0.10, 'low'),
-  ('target_v1_cash', 'target_v1_default', 'asset_cat_cash', 0.00, 'low');
