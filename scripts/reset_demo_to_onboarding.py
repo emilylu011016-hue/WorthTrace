@@ -51,15 +51,14 @@ ASSET_CATEGORIES = [
     ("asset_sub_us_tech", "科技", "asset_cat_us_equity", "sub", 23),
     ("asset_sub_other_us", "其他", "asset_cat_us_equity", "sub", 24),
     ("asset_cat_dividend_low_vol", "红利低波", None, "main", 30),
-    ("asset_sub_dividend", "红利", "asset_cat_dividend_low_vol", "sub", 31),
-    ("asset_sub_low_vol", "低波", "asset_cat_dividend_low_vol", "sub", 32),
+    ("asset_sub_dividend", "红利/高股息", "asset_cat_dividend_low_vol", "sub", 31),
+    ("asset_sub_low_vol", "低波/红利低波", "asset_cat_dividend_low_vol", "sub", 32),
     ("asset_cat_bond", "债券", None, "main", 40),
-    ("asset_sub_short_bond", "短债", "asset_cat_bond", "sub", 41),
-    ("asset_sub_pure_bond", "纯债", "asset_cat_bond", "sub", 42),
-    ("asset_sub_treasury_bond", "国债", "asset_cat_bond", "sub", 43),
+    ("asset_sub_short_bond", "短债/中短债", "asset_cat_bond", "sub", 41),
+    ("asset_sub_pure_bond", "纯债/信用债", "asset_cat_bond", "sub", 42),
+    ("asset_sub_treasury_bond", "国债/政策金融债", "asset_cat_bond", "sub", 43),
     ("asset_cat_gold", "黄金", None, "main", 50),
     ("asset_sub_gold_etf", "黄金ETF", "asset_cat_gold", "sub", 51),
-    ("asset_sub_physical_paper_gold", "实物/纸黄金", "asset_cat_gold", "sub", 52),
     ("asset_cat_a_share", "A股权益", None, "main", 60),
     ("asset_sub_a_share_broad", "宽基", "asset_cat_a_share", "sub", 61),
     ("asset_sub_a_share_sector_active", "行业/主动", "asset_cat_a_share", "sub", 62),
@@ -94,17 +93,17 @@ ASSET_CATEGORY_TREE = [
         "id": "asset_cat_dividend_low_vol",
         "label": "红利低波",
         "children": [
-            {"id": "asset_sub_dividend", "label": "红利", "children": []},
-            {"id": "asset_sub_low_vol", "label": "低波", "children": []},
+            {"id": "asset_sub_dividend", "label": "红利/高股息", "children": []},
+            {"id": "asset_sub_low_vol", "label": "低波/红利低波", "children": []},
         ],
     },
     {
         "id": "asset_cat_bond",
         "label": "债券",
         "children": [
-            {"id": "asset_sub_short_bond", "label": "短债", "children": []},
-            {"id": "asset_sub_pure_bond", "label": "纯债", "children": []},
-            {"id": "asset_sub_treasury_bond", "label": "国债", "children": []},
+            {"id": "asset_sub_short_bond", "label": "短债/中短债", "children": []},
+            {"id": "asset_sub_pure_bond", "label": "纯债/信用债", "children": []},
+            {"id": "asset_sub_treasury_bond", "label": "国债/政策金融债", "children": []},
         ],
     },
     {
@@ -112,7 +111,6 @@ ASSET_CATEGORY_TREE = [
         "label": "黄金",
         "children": [
             {"id": "asset_sub_gold_etf", "label": "黄金ETF", "children": []},
-            {"id": "asset_sub_physical_paper_gold", "label": "实物/纸黄金", "children": []},
         ],
     },
     {
@@ -162,7 +160,7 @@ def reset_database(path: Path) -> None:
         update_setting(conn, "target_saving_rate", 0.3)
         update_setting(conn, "onboarding_completed", False)
         update_setting(conn, "onboarding_asset_entry_skipped", False)
-        update_setting(conn, "onboarding_allocation_targets_skipped", True)
+        update_setting(conn, "onboarding_allocation_targets_skipped", False)
         update_setting(conn, "dashboard_enabled_sections", ["总览", "收支储蓄", "支出结构", "资产配置", "投资表现", "月报"])
         update_setting(conn, "dashboard_custom_analysis_prompts", [])
         update_setting(conn, "dashboard_custom_allocation_targets", [])

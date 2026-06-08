@@ -603,17 +603,16 @@ const subAllocationOptions: Record<string, string[][]> = {
   asset_cat_us_equity: usEquityCategoryOptions,
   asset_cat_cash: cashCategoryOptions,
   asset_cat_dividend_low_vol: [
-    ["asset_sub_dividend", "红利"],
-    ["asset_sub_low_vol", "低波"]
+    ["asset_sub_dividend", "红利/高股息"],
+    ["asset_sub_low_vol", "低波/红利低波"]
   ],
   asset_cat_bond: [
-    ["asset_sub_short_bond", "短债"],
-    ["asset_sub_pure_bond", "纯债"],
-    ["asset_sub_treasury_bond", "国债"]
+    ["asset_sub_short_bond", "短债/中短债"],
+    ["asset_sub_pure_bond", "纯债/信用债"],
+    ["asset_sub_treasury_bond", "国债/政策金融债"]
   ],
   asset_cat_gold: [
-    ["asset_sub_gold_etf", "黄金ETF"],
-    ["asset_sub_physical_paper_gold", "实物/纸黄金"]
+    ["asset_sub_gold_etf", "黄金ETF"]
   ],
   asset_cat_a_share: [
     ["asset_sub_a_share_broad", "宽基"],
@@ -651,25 +650,24 @@ const defaultAssetCategoryTree: AssetCategoryNode[] = [
     id: "asset_cat_dividend_low_vol",
     label: "红利低波",
     children: [
-      { id: "asset_sub_dividend", label: "红利", children: [] },
-      { id: "asset_sub_low_vol", label: "低波", children: [] }
+      { id: "asset_sub_dividend", label: "红利/高股息", children: [] },
+      { id: "asset_sub_low_vol", label: "低波/红利低波", children: [] }
     ]
   },
   {
     id: "asset_cat_bond",
     label: "债券",
     children: [
-      { id: "asset_sub_short_bond", label: "短债", children: [] },
-      { id: "asset_sub_pure_bond", label: "纯债", children: [] },
-      { id: "asset_sub_treasury_bond", label: "国债", children: [] }
+      { id: "asset_sub_short_bond", label: "短债/中短债", children: [] },
+      { id: "asset_sub_pure_bond", label: "纯债/信用债", children: [] },
+      { id: "asset_sub_treasury_bond", label: "国债/政策金融债", children: [] }
     ]
   },
   {
     id: "asset_cat_gold",
     label: "黄金",
     children: [
-      { id: "asset_sub_gold_etf", label: "黄金ETF", children: [] },
-      { id: "asset_sub_physical_paper_gold", label: "实物/纸黄金", children: [] }
+      { id: "asset_sub_gold_etf", label: "黄金ETF", children: [] }
     ]
   },
   {
@@ -1244,7 +1242,7 @@ export function App() {
   const [onboardingAssets, setOnboardingAssets] = useState<OnboardingAssetDraft[]>([]);
   const [onboardingSkipAssets, setOnboardingSkipAssets] = useState(false);
   const [onboardingTargets, setOnboardingTargets] = useState<OnboardingAllocationTarget[]>([]);
-  const [onboardingSkipTargets, setOnboardingSkipTargets] = useState(true);
+  const [onboardingSkipTargets, setOnboardingSkipTargets] = useState(false);
   const [onboardingSections, setOnboardingSections] = useState<string[]>(defaultOnboardingSections);
   const [customAnalysisInput, setCustomAnalysisInput] = useState("");
   const [customAnalysisPrompts, setCustomAnalysisPrompts] = useState<string[]>([]);
@@ -1474,6 +1472,18 @@ export function App() {
     assetCategoryTree.forEach((node) => visit(node, null));
     return Object.keys(rows).length ? rows : subAllocationOptions;
   }, [assetCategoryTree]);
+  const onboardingSelectedMainAllocationOptions = useMemo(() => {
+    if (onboardingSkipAssets || onboardingAssets.length === 0) return onboardingMainAllocationOptions;
+    const seen = new Set<string>();
+    const rows: string[][] = [];
+    onboardingAssets.forEach((asset) => {
+      const classification = resolveOnboardingAssetClassification(asset, assetCategoryTree);
+      if (!classification.mainCategoryId || seen.has(classification.mainCategoryId)) return;
+      seen.add(classification.mainCategoryId);
+      rows.push([classification.mainCategoryId, optionLabel(onboardingMainAllocationOptions, classification.mainCategoryId)]);
+    });
+    return rows.length ? rows : onboardingMainAllocationOptions;
+  }, [assetCategoryTree, onboardingAssets, onboardingMainAllocationOptions, onboardingSkipAssets]);
 
   useEffect(() => {
     if (!visibleHealthSections.includes(activeHealthSection)) {
@@ -1487,6 +1497,26 @@ export function App() {
       return JSON.stringify(normalized) === JSON.stringify(current) ? current : normalized;
     });
   }, [assetCategoryTree]);
+
+  useEffect(() => {
+    if (onboardingStep !== 2 || onboardingSkipTargets) return;
+    setOnboardingTargets((current) => {
+      const existing = new Map(
+        current
+          .filter((target) => target.level === "main" && target.category_id)
+          .map((target) => [target.category_id as string, target])
+      );
+      const nextMainTargets = onboardingSelectedMainAllocationOptions.map(([categoryId, label]) => ({
+        level: "main" as const,
+        category_id: categoryId,
+        label,
+        target_percent: existing.get(categoryId)?.target_percent ?? 0
+      }));
+      const otherTargets = current.filter((target) => target.level !== "main");
+      const nextTargets = [...nextMainTargets, ...otherTargets];
+      return JSON.stringify(nextTargets) === JSON.stringify(current) ? current : nextTargets;
+    });
+  }, [onboardingSelectedMainAllocationOptions, onboardingSkipTargets, onboardingStep]);
 
   const maxAmount = useMemo(
     () => Math.max(...summary.portfolio_targets.map((item) => item.current_amount), 1),
@@ -2713,7 +2743,7 @@ export function App() {
 	  }
 
 	  function addOnboardingTarget(level: OnboardingAllocationTarget["level"]) {
-	    const parent = onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_us_equity";
+	    const parent = onboardingSelectedMainAllocationOptions[0]?.[0] ?? onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
 	    const nextTarget: OnboardingAllocationTarget =
 	      level === "asset"
 	        ? {
@@ -3812,13 +3842,8 @@ export function App() {
 	      { title: "关注看板", detail: "选择默认分析模块，也可以写下自定义分析点。" }
 	    ];
 	    const currentStep = steps[onboardingStep] ?? steps[0];
-	    const draftClassification = resolveOnboardingAssetClassification(onboardingAssetDraft, assetCategoryTree);
-	    const topLabel = optionLabel(onboardingTopOptions, onboardingAssetDraft.topCategory);
-	    const secondLabel = onboardingSecondValue ? optionLabel(onboardingSecondOptions, onboardingSecondValue) : "";
-	    const thirdLabel = onboardingAssetDraft.usEquityCategory ? optionLabel(onboardingThirdOptions, onboardingAssetDraft.usEquityCategory) : "";
-	    const assetPreview = onboardingAssetDraft.name.trim()
-	      ? [topLabel, secondLabel, thirdLabel].filter(Boolean).join(" / ")
-	      : "选择分类后显示资产路径";
+	    const mainTargets = onboardingTargets.filter((target) => target.level === "main");
+	    const subTargets = onboardingTargets.filter((target) => target.level === "sub");
 
 	    return (
 	      <section
@@ -4013,8 +4038,8 @@ export function App() {
 	                        <input checked={onboardingAssetDraft.isDca} onChange={(event) => updateOnboardingAssetDraft({ isDca: event.target.checked })} type="checkbox" />
 	                        这是定投资产
 	                      </label>
-	                      <span>{assetPreview}</span>
 	                    </div>
+	                    <div className="notice onboarding-notice">这里只创建资产框架；具体月末金额可以等到月底资产更新时再录入。</div>
 	                    {onboardingAssetDraft.isDca ? (
 	                      <div className="onboarding-dca-list">
 	                        {onboardingAssetDraft.dcaPlans.map((plan, index) => (
@@ -4062,55 +4087,66 @@ export function App() {
 
 	            {onboardingStep === 2 ? (
 	              <div className="onboarding-step">
+	                <div className="notice onboarding-notice">这里不提供理财或投资建议。目标配比只按你的个人计划手动填写，可跳过。</div>
 	                <div className="onboarding-inline-choice">
 	                  <label>
 	                    <input checked={onboardingSkipTargets} onChange={(event) => setOnboardingSkipTargets(event.target.checked)} type="checkbox" />
-	                    暂时跳过目标资产配比
+	                    跳过目标资产配比
 	                  </label>
 	                  <span>跳过后，看板只展示实际资产比例，不显示目标差值。</span>
 	                </div>
 	                {!onboardingSkipTargets ? (
 	                  <>
-	                    <div className="row-actions">
-	                      <button className="secondary-button compact" onClick={() => addOnboardingTarget("main")} type="button">一级分类目标</button>
-	                      <button className="secondary-button compact" onClick={() => addOnboardingTarget("sub")} type="button">二级分类目标</button>
-	                      <button className="secondary-button compact" onClick={() => addOnboardingTarget("asset")} type="button" disabled={onboardingAssets.length === 0}>具体资产目标</button>
+	                    <div className="target-section-header">
+	                      <div>
+	                        <strong>一级分类配比</strong>
+	                        <span>自动读取上一步资产清单里的一级类型。</span>
+	                      </div>
 	                    </div>
 	                    <div className="onboarding-target-list">
-	                      {onboardingTargets.length === 0 ? <div className="dashboard-empty-state compact">还没有目标配比。可以新增，也可以跳过。</div> : onboardingTargets.map((target, index) => {
-	                        const parent = target.parent_category_id ?? onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_us_equity";
+	                      {mainTargets.length === 0 ? <div className="dashboard-empty-state compact">还没有可用一级分类。可以返回上一步录入资产，或直接跳过。</div> : mainTargets.map((target) => {
+	                        const targetIndex = onboardingTargets.indexOf(target);
+	                        const categoryId = target.category_id ?? onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
 	                        return (
-	                          <div className="onboarding-target-row" key={`target-${index}`}>
-	                            <select value={target.level} onChange={(event) => updateOnboardingTarget(index, { level: event.target.value as OnboardingAllocationTarget["level"] })}>
-	                              <option value="main">一级分类</option>
-	                              <option value="sub">二级分类</option>
-	                              <option value="asset">具体资产</option>
-	                            </select>
-	                            {target.level === "main" ? (
-	                              <select value={target.category_id ?? onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_us_equity"} onChange={(event) => updateOnboardingTarget(index, { category_id: event.target.value })}>
-	                                {onboardingMainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-	                              </select>
-	                            ) : null}
-	                            {target.level === "sub" ? (
-	                              <>
-	                                <select value={parent} onChange={(event) => updateOnboardingTarget(index, { parent_category_id: event.target.value, category_id: onboardingSubAllocationOptions[event.target.value]?.[0]?.[0] ?? null })}>
-	                                  {onboardingMainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-	                                </select>
-	                                <select value={target.category_id ?? onboardingSubAllocationOptions[parent]?.[0]?.[0] ?? ""} onChange={(event) => updateOnboardingTarget(index, { category_id: event.target.value })}>
-	                                  {(onboardingSubAllocationOptions[parent] ?? []).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-	                                </select>
-	                              </>
-	                            ) : null}
-	                            {target.level === "asset" ? (
-	                              <select value={target.asset_id ?? "0"} onChange={(event) => updateOnboardingTarget(index, { asset_id: event.target.value })}>
-	                                {onboardingAssets.map((asset, assetIndex) => <option key={`${asset.name}-${assetIndex}`} value={String(assetIndex)}>{asset.name}</option>)}
-	                              </select>
-	                            ) : null}
-	                            <input value={Number(target.target_percent || 0)} onChange={(event) => updateOnboardingTarget(index, { target_percent: Number(event.target.value) })} type="number" placeholder="目标 %" />
-	                            <button className="link-button" onClick={() => removeOnboardingTarget(index)} type="button">删除</button>
+	                          <div className="onboarding-target-row main-target-row" key={`main-target-${categoryId}`}>
+	                            <strong>{optionLabel(onboardingSelectedMainAllocationOptions, categoryId)}</strong>
+	                            <label className="percentage-input">
+	                              <input value={Number(target.target_percent || 0)} onChange={(event) => updateOnboardingTarget(targetIndex, { target_percent: Number(event.target.value) })} type="number" placeholder="目标比例" />
+	                              <span>%</span>
+	                            </label>
 	                          </div>
 	                        );
 	                      })}
+	                    </div>
+	                    <div className="target-subsection">
+	                      <div className="target-section-header">
+	                        <div>
+	                          <strong>二级分类配比（可选）</strong>
+	                          <span>只有想细分某个一级分类时才需要填写。</span>
+	                        </div>
+	                        <button className="secondary-button compact" onClick={() => addOnboardingTarget("sub")} type="button">新增二级分类配比</button>
+	                      </div>
+	                      <div className="onboarding-target-list">
+	                        {subTargets.length === 0 ? <div className="dashboard-empty-state compact">暂未填写二级分类目标。</div> : subTargets.map((target) => {
+	                          const targetIndex = onboardingTargets.indexOf(target);
+	                          const parent = target.parent_category_id ?? onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
+	                          return (
+	                            <div className="onboarding-target-row sub-target-row" key={`sub-target-${targetIndex}`}>
+	                              <select value={parent} onChange={(event) => updateOnboardingTarget(targetIndex, { parent_category_id: event.target.value, category_id: onboardingSubAllocationOptions[event.target.value]?.[0]?.[0] ?? null })}>
+	                                {onboardingSelectedMainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                              </select>
+	                              <select value={target.category_id ?? onboardingSubAllocationOptions[parent]?.[0]?.[0] ?? ""} onChange={(event) => updateOnboardingTarget(targetIndex, { category_id: event.target.value })}>
+	                                {(onboardingSubAllocationOptions[parent] ?? []).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                              </select>
+	                              <label className="percentage-input">
+	                                <input value={Number(target.target_percent || 0)} onChange={(event) => updateOnboardingTarget(targetIndex, { target_percent: Number(event.target.value) })} type="number" placeholder="目标比例" />
+	                                <span>%</span>
+	                              </label>
+	                              <button className="link-button" onClick={() => removeOnboardingTarget(targetIndex)} type="button">删除</button>
+	                            </div>
+	                          );
+	                        })}
+	                      </div>
 	                    </div>
 	                  </>
 	                ) : null}

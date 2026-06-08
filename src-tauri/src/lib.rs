@@ -2524,17 +2524,17 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       id: "asset_cat_dividend_low_vol".to_string(),
       label: "红利低波".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_dividend".to_string(), label: "红利".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_low_vol".to_string(), label: "低波".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_dividend".to_string(), label: "红利/高股息".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_low_vol".to_string(), label: "低波/红利低波".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
       id: "asset_cat_bond".to_string(),
       label: "债券".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_short_bond".to_string(), label: "短债".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_pure_bond".to_string(), label: "纯债".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_treasury_bond".to_string(), label: "国债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_short_bond".to_string(), label: "短债/中短债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_pure_bond".to_string(), label: "纯债/信用债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_treasury_bond".to_string(), label: "国债/政策金融债".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
@@ -2542,7 +2542,6 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       label: "黄金".to_string(),
       children: vec![
         OnboardingAssetCategoryInput { id: "asset_sub_gold_etf".to_string(), label: "黄金ETF".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_physical_paper_gold".to_string(), label: "实物/纸黄金".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
