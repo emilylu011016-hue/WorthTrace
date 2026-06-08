@@ -1830,6 +1830,7 @@ fn asset_allocation_breakdown(
       left join portfolio_targets pt on pt.is_active = 1
       left join portfolio_target_items pti on pti.target_id = pt.id and pti.main_asset_category_id = {category_join}.id
       where {category_filter}
+        and {category_join}.is_active = 1
       group by {category_join}.id, {category_join}.name, pti.target_percent, {category_join}.sort_order
       order by {category_join}.sort_order
     ),
@@ -2501,41 +2502,66 @@ fn default_dashboard_sections() -> Vec<String> {
 fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
   vec![
     OnboardingAssetCategoryInput {
-      id: "fund".to_string(),
-      label: "基金".to_string(),
-      children: vec![
-        OnboardingAssetCategoryInput {
-          id: "asset_cat_bond".to_string(),
-          label: "债券基金".to_string(),
-          children: vec![OnboardingAssetCategoryInput {
-            id: "asset_sub_bond_fund".to_string(),
-            label: "债券基金".to_string(),
-            children: vec![],
-          }],
-        },
-        OnboardingAssetCategoryInput {
-          id: "asset_cat_us_equity".to_string(),
-          label: "指数基金".to_string(),
-          children: vec![
-            OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
-            OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
-            OnboardingAssetCategoryInput { id: "asset_sub_other_us".to_string(), label: "其他指数".to_string(), children: vec![] },
-          ],
-        },
-      ],
-    },
-    OnboardingAssetCategoryInput {
-      id: "cash".to_string(),
+      id: "asset_cat_cash".to_string(),
       label: "现金".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_cash".to_string(), label: "现金".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_receivable".to_string(), label: "应收押金".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_bank_payment".to_string(), label: "银行/支付账户".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_money_market_cash".to_string(), label: "货币现金".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_short_deposit".to_string(), label: "短期存款".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
-      id: "gold".to_string(),
+      id: "asset_cat_us_equity".to_string(),
+      label: "美股".to_string(),
+      children: vec![
+        OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_us_tech".to_string(), label: "科技".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_other_us".to_string(), label: "其他".to_string(), children: vec![] },
+      ],
+    },
+    OnboardingAssetCategoryInput {
+      id: "asset_cat_dividend_low_vol".to_string(),
+      label: "红利低波".to_string(),
+      children: vec![
+        OnboardingAssetCategoryInput { id: "asset_sub_dividend".to_string(), label: "红利".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_low_vol".to_string(), label: "低波".to_string(), children: vec![] },
+      ],
+    },
+    OnboardingAssetCategoryInput {
+      id: "asset_cat_bond".to_string(),
+      label: "债券".to_string(),
+      children: vec![
+        OnboardingAssetCategoryInput { id: "asset_sub_short_bond".to_string(), label: "短债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_pure_bond".to_string(), label: "纯债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_treasury_bond".to_string(), label: "国债".to_string(), children: vec![] },
+      ],
+    },
+    OnboardingAssetCategoryInput {
+      id: "asset_cat_gold".to_string(),
       label: "黄金".to_string(),
-      children: vec![OnboardingAssetCategoryInput { id: "asset_sub_gold".to_string(), label: "黄金".to_string(), children: vec![] }],
+      children: vec![
+        OnboardingAssetCategoryInput { id: "asset_sub_gold_etf".to_string(), label: "黄金ETF".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_physical_paper_gold".to_string(), label: "实物/纸黄金".to_string(), children: vec![] },
+      ],
+    },
+    OnboardingAssetCategoryInput {
+      id: "asset_cat_a_share".to_string(),
+      label: "A股权益".to_string(),
+      children: vec![
+        OnboardingAssetCategoryInput { id: "asset_sub_a_share_broad".to_string(), label: "宽基".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_a_share_sector_active".to_string(), label: "行业/主动".to_string(), children: vec![] },
+      ],
+    },
+    OnboardingAssetCategoryInput {
+      id: "asset_cat_other".to_string(),
+      label: "其他".to_string(),
+      children: vec![
+        OnboardingAssetCategoryInput { id: "asset_sub_receivable".to_string(), label: "应收".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_insurance_pension".to_string(), label: "保险/养老金".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_liability".to_string(), label: "负债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_uncategorized".to_string(), label: "未分类".to_string(), children: vec![] },
+      ],
     },
   ]
 }

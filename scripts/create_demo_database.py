@@ -81,17 +81,21 @@ def asset_demo_name(row: sqlite3.Row, index_by_group: dict[str, int]) -> str:
     main = row["main_asset_category_id"] or ""
     asset_type = row["asset_type"] or ""
     if main == "asset_cat_us_equity":
-      group = "基金"
+      group = "美股"
     elif main == "asset_cat_cash":
-      group = "现金账户" if asset_type != "receivable" else "应收押金"
+      group = "现金"
     elif main == "asset_cat_bond":
-      group = "债券基金"
+      group = "债券"
     elif main == "asset_cat_gold":
       group = "黄金"
     elif main == "asset_cat_dividend_low_vol":
-      group = "基金"
+      group = "红利低波"
+    elif main == "asset_cat_a_share":
+      group = "A股权益"
+    elif main == "asset_cat_other":
+      group = "其他"
     else:
-      group = "基金"
+      group = "资产"
     index_by_group[group] = index_by_group.get(group, 0) + 1
     return f"{group} {chr(64 + index_by_group[group]) if index_by_group[group] <= 26 else index_by_group[group]}"
 
@@ -226,20 +230,37 @@ def anonymize_asset_ids(conn: sqlite3.Connection) -> None:
 
 def anonymize_asset_category_labels(conn: sqlite3.Connection) -> None:
     labels = {
-        "asset_cat_us_equity": "指数基金",
+        "asset_cat_cash": "现金",
+        "asset_sub_bank_payment": "银行/支付账户",
+        "asset_sub_money_market_cash": "货币现金",
+        "asset_sub_short_deposit": "短期存款",
+        "asset_cat_us_equity": "美股",
         "asset_sub_sp500": "标普",
         "asset_sub_nasdaq": "纳斯达克",
-        "asset_sub_info_tech": "信息科技",
-        "asset_sub_other_us": "其他指数",
+        "asset_sub_us_tech": "科技",
+        "asset_sub_info_tech": "科技",
+        "asset_sub_other_us": "其他",
         "asset_cat_dividend_low_vol": "红利低波",
-        "asset_sub_dividend_low_vol": "红利低波",
-        "asset_cat_bond": "债券基金",
-        "asset_sub_bond_fund": "债券基金",
-        "asset_cat_cash": "现金",
-        "asset_sub_cash": "现金",
-        "asset_sub_receivable": "应收押金",
+        "asset_sub_dividend": "红利",
+        "asset_sub_low_vol": "低波",
+        "asset_sub_dividend_low_vol": "低波",
+        "asset_cat_bond": "债券",
+        "asset_sub_short_bond": "短债",
+        "asset_sub_pure_bond": "纯债",
+        "asset_sub_treasury_bond": "国债",
+        "asset_sub_bond_fund": "纯债",
         "asset_cat_gold": "黄金",
-        "asset_sub_gold": "黄金",
+        "asset_sub_gold_etf": "黄金ETF",
+        "asset_sub_physical_paper_gold": "实物/纸黄金",
+        "asset_sub_gold": "黄金ETF",
+        "asset_cat_a_share": "A股权益",
+        "asset_sub_a_share_broad": "宽基",
+        "asset_sub_a_share_sector_active": "行业/主动",
+        "asset_cat_other": "其他",
+        "asset_sub_receivable": "应收",
+        "asset_sub_insurance_pension": "保险/养老金",
+        "asset_sub_liability": "负债",
+        "asset_sub_uncategorized": "未分类",
     }
     for category_id, label in labels.items():
         conn.execute("update asset_categories set name = ? where id = ?", (label, category_id))

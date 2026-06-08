@@ -41,52 +41,97 @@ BUSINESS_TABLES = [
 ]
 
 ASSET_CATEGORIES = [
-    ("asset_cat_bond", "债券基金", None, "main", 10),
-    ("asset_cat_us_equity", "指数基金", None, "main", 20),
-    ("asset_cat_gold", "黄金", None, "main", 30),
-    ("asset_cat_cash", "现金", None, "main", 50),
-    ("asset_sub_bond_fund", "债券基金", "asset_cat_bond", "sub", 11),
+    ("asset_cat_cash", "现金", None, "main", 10),
+    ("asset_sub_bank_payment", "银行/支付账户", "asset_cat_cash", "sub", 11),
+    ("asset_sub_money_market_cash", "货币现金", "asset_cat_cash", "sub", 12),
+    ("asset_sub_short_deposit", "短期存款", "asset_cat_cash", "sub", 13),
+    ("asset_cat_us_equity", "美股", None, "main", 20),
     ("asset_sub_sp500", "标普", "asset_cat_us_equity", "sub", 21),
     ("asset_sub_nasdaq", "纳斯达克", "asset_cat_us_equity", "sub", 22),
-    ("asset_sub_other_us", "其他指数", "asset_cat_us_equity", "sub", 24),
-    ("asset_sub_gold", "黄金", "asset_cat_gold", "sub", 31),
-    ("asset_sub_cash", "现金", "asset_cat_cash", "sub", 52),
-    ("asset_sub_receivable", "应收押金", "asset_cat_cash", "sub", 53),
+    ("asset_sub_us_tech", "科技", "asset_cat_us_equity", "sub", 23),
+    ("asset_sub_other_us", "其他", "asset_cat_us_equity", "sub", 24),
+    ("asset_cat_dividend_low_vol", "红利低波", None, "main", 30),
+    ("asset_sub_dividend", "红利", "asset_cat_dividend_low_vol", "sub", 31),
+    ("asset_sub_low_vol", "低波", "asset_cat_dividend_low_vol", "sub", 32),
+    ("asset_cat_bond", "债券", None, "main", 40),
+    ("asset_sub_short_bond", "短债", "asset_cat_bond", "sub", 41),
+    ("asset_sub_pure_bond", "纯债", "asset_cat_bond", "sub", 42),
+    ("asset_sub_treasury_bond", "国债", "asset_cat_bond", "sub", 43),
+    ("asset_cat_gold", "黄金", None, "main", 50),
+    ("asset_sub_gold_etf", "黄金ETF", "asset_cat_gold", "sub", 51),
+    ("asset_sub_physical_paper_gold", "实物/纸黄金", "asset_cat_gold", "sub", 52),
+    ("asset_cat_a_share", "A股权益", None, "main", 60),
+    ("asset_sub_a_share_broad", "宽基", "asset_cat_a_share", "sub", 61),
+    ("asset_sub_a_share_sector_active", "行业/主动", "asset_cat_a_share", "sub", 62),
+    ("asset_cat_other", "其他", None, "main", 90),
+    ("asset_sub_receivable", "应收", "asset_cat_other", "sub", 91),
+    ("asset_sub_insurance_pension", "保险/养老金", "asset_cat_other", "sub", 92),
+    ("asset_sub_liability", "负债", "asset_cat_other", "sub", 93),
+    ("asset_sub_uncategorized", "未分类", "asset_cat_other", "sub", 99),
 ]
 
 ASSET_CATEGORY_TREE = [
     {
-        "id": "fund",
-        "label": "基金",
-        "children": [
-            {
-                "id": "asset_cat_bond",
-                "label": "债券基金",
-                "children": [{"id": "asset_sub_bond_fund", "label": "债券基金", "children": []}],
-            },
-            {
-                "id": "asset_cat_us_equity",
-                "label": "指数基金",
-                "children": [
-                    {"id": "asset_sub_sp500", "label": "标普", "children": []},
-                    {"id": "asset_sub_nasdaq", "label": "纳斯达克", "children": []},
-                    {"id": "asset_sub_other_us", "label": "其他指数", "children": []},
-                ],
-            },
-        ],
-    },
-    {
-        "id": "cash",
+        "id": "asset_cat_cash",
         "label": "现金",
         "children": [
-            {"id": "asset_sub_cash", "label": "现金", "children": []},
-            {"id": "asset_sub_receivable", "label": "应收押金", "children": []},
+            {"id": "asset_sub_bank_payment", "label": "银行/支付账户", "children": []},
+            {"id": "asset_sub_money_market_cash", "label": "货币现金", "children": []},
+            {"id": "asset_sub_short_deposit", "label": "短期存款", "children": []},
         ],
     },
     {
-        "id": "gold",
+        "id": "asset_cat_us_equity",
+        "label": "美股",
+        "children": [
+            {"id": "asset_sub_sp500", "label": "标普", "children": []},
+            {"id": "asset_sub_nasdaq", "label": "纳斯达克", "children": []},
+            {"id": "asset_sub_us_tech", "label": "科技", "children": []},
+            {"id": "asset_sub_other_us", "label": "其他", "children": []},
+        ],
+    },
+    {
+        "id": "asset_cat_dividend_low_vol",
+        "label": "红利低波",
+        "children": [
+            {"id": "asset_sub_dividend", "label": "红利", "children": []},
+            {"id": "asset_sub_low_vol", "label": "低波", "children": []},
+        ],
+    },
+    {
+        "id": "asset_cat_bond",
+        "label": "债券",
+        "children": [
+            {"id": "asset_sub_short_bond", "label": "短债", "children": []},
+            {"id": "asset_sub_pure_bond", "label": "纯债", "children": []},
+            {"id": "asset_sub_treasury_bond", "label": "国债", "children": []},
+        ],
+    },
+    {
+        "id": "asset_cat_gold",
         "label": "黄金",
-        "children": [{"id": "asset_sub_gold", "label": "黄金", "children": []}],
+        "children": [
+            {"id": "asset_sub_gold_etf", "label": "黄金ETF", "children": []},
+            {"id": "asset_sub_physical_paper_gold", "label": "实物/纸黄金", "children": []},
+        ],
+    },
+    {
+        "id": "asset_cat_a_share",
+        "label": "A股权益",
+        "children": [
+            {"id": "asset_sub_a_share_broad", "label": "宽基", "children": []},
+            {"id": "asset_sub_a_share_sector_active", "label": "行业/主动", "children": []},
+        ],
+    },
+    {
+        "id": "asset_cat_other",
+        "label": "其他",
+        "children": [
+            {"id": "asset_sub_receivable", "label": "应收", "children": []},
+            {"id": "asset_sub_insurance_pension", "label": "保险/养老金", "children": []},
+            {"id": "asset_sub_liability", "label": "负债", "children": []},
+            {"id": "asset_sub_uncategorized", "label": "未分类", "children": []},
+        ],
     },
 ]
 

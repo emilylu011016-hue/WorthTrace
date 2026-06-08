@@ -553,78 +553,142 @@ const assetTypeOptions = [
   ["bond_fund", "债券基金"],
   ["cash_account", "现金账户"],
   ["gold", "黄金"],
-  ["receivable", "应收押金"]
+  ["receivable", "应收"],
+  ["insurance", "保险/养老金"],
+  ["liability", "负债"],
+  ["other", "其他"]
 ];
 
 const assetTopOptions = [
-  ["fund", "基金"],
-  ["cash", "现金"],
-  ["gold", "黄金"]
+  ["asset_cat_cash", "现金"],
+  ["asset_cat_us_equity", "美股"],
+  ["asset_cat_dividend_low_vol", "红利低波"],
+  ["asset_cat_bond", "债券"],
+  ["asset_cat_gold", "黄金"],
+  ["asset_cat_a_share", "A股权益"],
+  ["asset_cat_other", "其他"]
 ];
 
 const fundCategoryOptions = [
-  ["asset_cat_bond", "债券基金"],
-  ["asset_cat_us_equity", "指数基金"]
+  ["asset_sub_sp500", "标普"],
+  ["asset_sub_nasdaq", "纳斯达克"],
+  ["asset_sub_us_tech", "科技"],
+  ["asset_sub_other_us", "其他"]
 ];
 
 const usEquityCategoryOptions = [
   ["asset_sub_sp500", "标普"],
   ["asset_sub_nasdaq", "纳斯达克"],
-  ["asset_sub_other_us", "其他指数"]
+  ["asset_sub_us_tech", "科技"],
+  ["asset_sub_other_us", "其他"]
 ];
 
 const cashCategoryOptions = [
-  ["asset_sub_cash", "现金"],
-  ["asset_sub_receivable", "应收押金"]
+  ["asset_sub_bank_payment", "银行/支付账户"],
+  ["asset_sub_money_market_cash", "货币现金"],
+  ["asset_sub_short_deposit", "短期存款"]
 ];
 
 const mainAllocationOptions = [
-  ["asset_cat_us_equity", "指数基金"],
-  ["asset_cat_bond", "债券基金"],
+  ["asset_cat_cash", "现金"],
+  ["asset_cat_us_equity", "美股"],
+  ["asset_cat_dividend_low_vol", "红利低波"],
+  ["asset_cat_bond", "债券"],
   ["asset_cat_gold", "黄金"],
-  ["asset_cat_cash", "现金"]
+  ["asset_cat_a_share", "A股权益"],
+  ["asset_cat_other", "其他"]
 ];
 
 const subAllocationOptions: Record<string, string[][]> = {
   asset_cat_us_equity: usEquityCategoryOptions,
   asset_cat_cash: cashCategoryOptions,
-  asset_cat_bond: [["asset_sub_bond_fund", "债券基金"]],
-  asset_cat_gold: [["asset_sub_gold", "黄金"]]
+  asset_cat_dividend_low_vol: [
+    ["asset_sub_dividend", "红利"],
+    ["asset_sub_low_vol", "低波"]
+  ],
+  asset_cat_bond: [
+    ["asset_sub_short_bond", "短债"],
+    ["asset_sub_pure_bond", "纯债"],
+    ["asset_sub_treasury_bond", "国债"]
+  ],
+  asset_cat_gold: [
+    ["asset_sub_gold_etf", "黄金ETF"],
+    ["asset_sub_physical_paper_gold", "实物/纸黄金"]
+  ],
+  asset_cat_a_share: [
+    ["asset_sub_a_share_broad", "宽基"],
+    ["asset_sub_a_share_sector_active", "行业/主动"]
+  ],
+  asset_cat_other: [
+    ["asset_sub_receivable", "应收"],
+    ["asset_sub_insurance_pension", "保险/养老金"],
+    ["asset_sub_liability", "负债"],
+    ["asset_sub_uncategorized", "未分类"]
+  ]
 };
 
 const defaultAssetCategoryTree: AssetCategoryNode[] = [
   {
-    id: "fund",
-    label: "基金",
-    children: [
-      {
-        id: "asset_cat_bond",
-        label: "债券基金",
-        children: [{ id: "asset_sub_bond_fund", label: "债券基金", children: [] }]
-      },
-      {
-        id: "asset_cat_us_equity",
-        label: "指数基金",
-        children: [
-          { id: "asset_sub_sp500", label: "标普", children: [] },
-          { id: "asset_sub_nasdaq", label: "纳斯达克", children: [] },
-          { id: "asset_sub_other_us", label: "其他指数", children: [] }
-        ]
-      }
-    ]
-  },
-  {
-    id: "cash",
+    id: "asset_cat_cash",
     label: "现金",
     children: [
-      { id: "asset_sub_cash", label: "现金", children: [] },
-      { id: "asset_sub_receivable", label: "应收押金", children: [] }
+      { id: "asset_sub_bank_payment", label: "银行/支付账户", children: [] },
+      { id: "asset_sub_money_market_cash", label: "货币现金", children: [] },
+      { id: "asset_sub_short_deposit", label: "短期存款", children: [] }
     ]
   },
   {
-    id: "gold",
+    id: "asset_cat_us_equity",
+    label: "美股",
+    children: [
+      { id: "asset_sub_sp500", label: "标普", children: [] },
+      { id: "asset_sub_nasdaq", label: "纳斯达克", children: [] },
+      { id: "asset_sub_us_tech", label: "科技", children: [] },
+      { id: "asset_sub_other_us", label: "其他", children: [] }
+    ]
+  },
+  {
+    id: "asset_cat_dividend_low_vol",
+    label: "红利低波",
+    children: [
+      { id: "asset_sub_dividend", label: "红利", children: [] },
+      { id: "asset_sub_low_vol", label: "低波", children: [] }
+    ]
+  },
+  {
+    id: "asset_cat_bond",
+    label: "债券",
+    children: [
+      { id: "asset_sub_short_bond", label: "短债", children: [] },
+      { id: "asset_sub_pure_bond", label: "纯债", children: [] },
+      { id: "asset_sub_treasury_bond", label: "国债", children: [] }
+    ]
+  },
+  {
+    id: "asset_cat_gold",
     label: "黄金",
-    children: [{ id: "asset_sub_gold", label: "黄金", children: [] }]
+    children: [
+      { id: "asset_sub_gold_etf", label: "黄金ETF", children: [] },
+      { id: "asset_sub_physical_paper_gold", label: "实物/纸黄金", children: [] }
+    ]
+  },
+  {
+    id: "asset_cat_a_share",
+    label: "A股权益",
+    children: [
+      { id: "asset_sub_a_share_broad", label: "宽基", children: [] },
+      { id: "asset_sub_a_share_sector_active", label: "行业/主动", children: [] }
+    ]
+  },
+  {
+    id: "asset_cat_other",
+    label: "其他",
+    children: [
+      { id: "asset_sub_receivable", label: "应收", children: [] },
+      { id: "asset_sub_insurance_pension", label: "保险/养老金", children: [] },
+      { id: "asset_sub_liability", label: "负债", children: [] },
+      { id: "asset_sub_uncategorized", label: "未分类", children: [] }
+    ]
   }
 ];
 
@@ -696,39 +760,22 @@ function resolveAssetClassification(input: {
   cashCategory: string;
   usEquityCategory: string;
 }): AssetClassification {
-  if (input.topCategory === "gold") {
-    return { assetType: "gold", mainCategoryId: "asset_cat_gold", subCategoryId: "asset_sub_gold" };
-  }
-  if (input.topCategory === "cash") {
-    const assetType = input.cashCategory === "asset_sub_receivable" ? "receivable" : "cash_account";
-    return { assetType, mainCategoryId: "asset_cat_cash", subCategoryId: input.cashCategory };
-  }
-  if (input.fundCategory === "asset_cat_us_equity") {
-    return { assetType: "fund", mainCategoryId: "asset_cat_us_equity", subCategoryId: input.usEquityCategory };
-  }
-  if (input.fundCategory === "asset_cat_bond") {
-    return { assetType: "bond_fund", mainCategoryId: "asset_cat_bond", subCategoryId: "asset_sub_bond_fund" };
-  }
-  return { assetType: "fund", mainCategoryId: "asset_cat_dividend_low_vol", subCategoryId: "asset_sub_dividend_low_vol" };
+  const mainCategoryId = input.topCategory || "asset_cat_cash";
+  const subCategoryId = mainCategoryId === "asset_cat_cash" ? input.cashCategory : input.fundCategory;
+  return {
+    assetType: assetTypeForCategory(mainCategoryId, subCategoryId),
+    mainCategoryId,
+    subCategoryId: subCategoryId || null
+  };
 }
 
 function classificationForAsset(asset: AssetEntryItem) {
-  if (asset.main_asset_category_id === "asset_cat_gold") {
-    return { topCategory: "gold", fundCategory: "asset_cat_us_equity", cashCategory: "asset_sub_cash", usEquityCategory: "asset_sub_sp500" };
-  }
-  if (asset.main_asset_category_id === "asset_cat_cash") {
-    return {
-      topCategory: "cash",
-      fundCategory: "asset_cat_us_equity",
-      cashCategory: asset.sub_asset_category_id ?? "asset_sub_cash",
-      usEquityCategory: "asset_sub_sp500"
-    };
-  }
+  const mainCategoryId = asset.main_asset_category_id || "asset_cat_cash";
   return {
-    topCategory: "fund",
-    fundCategory: asset.main_asset_category_id === "asset_cat_bond" || asset.main_asset_category_id === "asset_cat_dividend_low_vol" ? asset.main_asset_category_id : "asset_cat_us_equity",
-    cashCategory: "asset_sub_cash",
-    usEquityCategory: asset.sub_asset_category_id === "asset_sub_nasdaq" || asset.sub_asset_category_id === "asset_sub_other_us" ? asset.sub_asset_category_id : "asset_sub_sp500"
+    topCategory: mainCategoryId,
+    fundCategory: mainCategoryId === "asset_cat_cash" ? "asset_sub_sp500" : asset.sub_asset_category_id ?? subOptionsForMain(mainCategoryId)[0]?.[0] ?? "",
+    cashCategory: mainCategoryId === "asset_cat_cash" ? asset.sub_asset_category_id ?? "asset_sub_bank_payment" : "asset_sub_bank_payment",
+    usEquityCategory: asset.sub_asset_category_id ?? "asset_sub_sp500"
   };
 }
 
@@ -785,12 +832,37 @@ function makeAssetCategoryId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function subOptionsForMain(mainCategoryId: string) {
+  return subAllocationOptions[mainCategoryId] ?? [];
+}
+
+function defaultSubCategoryForMain(mainCategoryId: string) {
+  return subOptionsForMain(mainCategoryId)[0]?.[0] ?? "";
+}
+
+function isCashCategoryId(categoryId: string) {
+  return categoryId === "asset_cat_cash";
+}
+
+function assetTypeForCategory(mainCategoryId: string, subCategoryId?: string | null, mainLabel = "", subLabel = "") {
+  const combined = `${mainCategoryId} ${subCategoryId ?? ""} ${mainLabel} ${subLabel}`;
+  if (mainCategoryId === "asset_cat_cash") return "cash_account";
+  if (mainCategoryId === "asset_cat_gold") return "gold";
+  if (mainCategoryId === "asset_cat_bond") return "bond_fund";
+  if (subCategoryId === "asset_sub_receivable" || combined.includes("应收")) return "receivable";
+  if (subCategoryId === "asset_sub_insurance_pension" || combined.includes("保险") || combined.includes("养老金")) return "insurance";
+  if (subCategoryId === "asset_sub_liability" || combined.includes("负债") || combined.includes("贷款")) return "liability";
+  if (combined.includes("股票")) return "stock";
+  if (mainCategoryId === "asset_cat_other") return "other";
+  return "fund";
+}
+
 function normalizeOnboardingAssetDraft(asset: OnboardingAssetDraft, tree: AssetCategoryNode[]): OnboardingAssetDraft {
   const topOptions = categoryOptions(tree);
-  const nextTop = topOptions.some(([id]) => id === asset.topCategory) ? asset.topCategory : topOptions[0]?.[0] ?? "fund";
+  const nextTop = topOptions.some(([id]) => id === asset.topCategory) ? asset.topCategory : topOptions[0]?.[0] ?? "asset_cat_cash";
   const topNode = findAssetCategoryNode(tree, nextTop);
   const secondOptions = categoryOptions(topNode?.children ?? []);
-  const currentSecond = nextTop === "cash" ? asset.cashCategory : asset.fundCategory;
+  const currentSecond = isCashCategoryId(nextTop) ? asset.cashCategory : asset.fundCategory;
   const nextSecond = secondOptions.some(([id]) => id === currentSecond) ? currentSecond : secondOptions[0]?.[0] ?? "";
   const secondNode = findAssetCategoryNode(tree, nextSecond);
   const thirdOptions = categoryOptions(secondNode?.children ?? []);
@@ -798,8 +870,8 @@ function normalizeOnboardingAssetDraft(asset: OnboardingAssetDraft, tree: AssetC
   return {
     ...asset,
     topCategory: nextTop,
-    cashCategory: nextTop === "cash" ? nextSecond : asset.cashCategory,
-    fundCategory: nextTop === "cash" ? asset.fundCategory : nextSecond,
+    cashCategory: isCashCategoryId(nextTop) ? nextSecond : asset.cashCategory,
+    fundCategory: isCashCategoryId(nextTop) ? asset.fundCategory : nextSecond,
     usEquityCategory: nextThird || asset.usEquityCategory
   };
 }
@@ -807,9 +879,9 @@ function normalizeOnboardingAssetDraft(asset: OnboardingAssetDraft, tree: AssetC
 function blankOnboardingAsset(): OnboardingAssetDraft {
   return {
     name: "",
-    topCategory: "fund",
-    fundCategory: "asset_cat_bond",
-    cashCategory: "asset_sub_cash",
+    topCategory: "asset_cat_cash",
+    fundCategory: "asset_sub_sp500",
+    cashCategory: "asset_sub_bank_payment",
     usEquityCategory: "asset_sub_sp500",
     currency: "CNY",
     platform: "",
@@ -826,14 +898,11 @@ function resolveOnboardingAssetClassification(input: OnboardingAssetDraft, tree:
   const topNode = findAssetCategoryNode(tree, input.topCategory);
   const topId = topNode?.id ?? input.topCategory;
   const topLabel = topNode?.label ?? "";
-  if (topId === "gold" || topId === "asset_cat_gold") {
-    return { assetType: "gold", mainCategoryId: "asset_cat_gold", subCategoryId: "asset_sub_gold" };
-  }
-  if (topId === "cash" || topId === "asset_cat_cash") {
-    const subId = input.cashCategory || topNode?.children?.[0]?.id || "asset_sub_cash";
+  if (topId === "asset_cat_cash") {
+    const subId = input.cashCategory || topNode?.children?.[0]?.id || "asset_sub_bank_payment";
     const subLabel = findAssetCategoryNode(tree, subId)?.label ?? "";
     return {
-      assetType: subId === "asset_sub_receivable" || subLabel.includes("应收") ? "receivable" : "cash_account",
+      assetType: assetTypeForCategory(topId, subId, topLabel, subLabel),
       mainCategoryId: "asset_cat_cash",
       subCategoryId: subId
     };
@@ -841,19 +910,11 @@ function resolveOnboardingAssetClassification(input: OnboardingAssetDraft, tree:
   const secondId = input.fundCategory || topNode?.children?.[0]?.id || "";
   const secondNode = findAssetCategoryNode(tree, secondId);
   const thirdId = input.usEquityCategory || secondNode?.children?.[0]?.id || null;
-  if (topId === "fund") {
-    const mainCategoryId = secondId || "asset_cat_us_equity";
-    const subCategoryId = thirdId || (mainCategoryId === "asset_cat_bond" ? "asset_sub_bond_fund" : null);
-    return {
-      assetType: mainCategoryId === "asset_cat_bond" || (secondNode?.label ?? "").includes("债券") ? "bond_fund" : "fund",
-      mainCategoryId,
-      subCategoryId
-    };
-  }
   if (topId.startsWith("asset_cat_")) {
     const subId = secondId.startsWith("asset_sub_") ? secondId : thirdId;
+    const subLabel = subId ? findAssetCategoryNode(tree, subId)?.label ?? "" : "";
     return {
-      assetType: topLabel.includes("黄金") ? "gold" : topLabel.includes("现金") ? "cash_account" : "fund",
+      assetType: assetTypeForCategory(topId, subId, topLabel, subLabel),
       mainCategoryId: topId,
       subCategoryId: subId || null
     };
@@ -904,15 +965,7 @@ function parseTagsFromText(raw: string) {
 }
 
 function assetClassificationText(asset: AssetEntryItem) {
-  const classification = classificationForAsset(asset);
-  if (classification.topCategory === "gold") return "黄金";
-  if (classification.topCategory === "cash") {
-    return `现金 / ${optionLabel(cashCategoryOptions, classification.cashCategory)}`;
-  }
-  if (classification.fundCategory === "asset_cat_us_equity") {
-    return `基金 / 指数基金 / ${optionLabel(usEquityCategoryOptions, classification.usEquityCategory)}`;
-  }
-  return `基金 / ${optionLabel(fundCategoryOptions, classification.fundCategory)}`;
+  return [asset.main_category, asset.sub_category].filter(Boolean).join(" / ") || "未分类";
 }
 
 const fallbackSummary: DashboardSeedSummary = {
@@ -1247,9 +1300,9 @@ export function App() {
   const [showAssetCreator, setShowAssetCreator] = useState(false);
   const [newAsset, setNewAsset] = useState<NewAssetForm>({
     name: "",
-    topCategory: "fund",
-    fundCategory: "asset_cat_us_equity",
-    cashCategory: "asset_sub_cash",
+    topCategory: "asset_cat_cash",
+    fundCategory: "asset_sub_sp500",
+    cashCategory: "asset_sub_bank_payment",
     usEquityCategory: "asset_sub_sp500",
     currency: "CNY",
     platform: "支付宝",
@@ -1386,7 +1439,7 @@ export function App() {
     const topNode = findAssetCategoryNode(assetCategoryTree, onboardingAssetDraft.topCategory);
     return categoryOptions(topNode?.children ?? []);
   }, [assetCategoryTree, onboardingAssetDraft.topCategory]);
-  const onboardingSecondValue = onboardingAssetDraft.topCategory === "cash" ? onboardingAssetDraft.cashCategory : onboardingAssetDraft.fundCategory;
+  const onboardingSecondValue = isCashCategoryId(onboardingAssetDraft.topCategory) ? onboardingAssetDraft.cashCategory : onboardingAssetDraft.fundCategory;
   const onboardingThirdOptions = useMemo(() => {
     const secondNode = findAssetCategoryNode(assetCategoryTree, onboardingSecondValue);
     return categoryOptions(secondNode?.children ?? []);
@@ -1400,17 +1453,7 @@ export function App() {
       rows.push([id, label]);
     };
     assetCategoryTree.forEach((top) => {
-      if (top.id === "fund") {
-        top.children.forEach((child) => {
-          if (child.id.startsWith("asset_cat_")) push(child.id, child.label);
-        });
-      } else if (top.id === "cash") {
-        push("asset_cat_cash", top.label);
-      } else if (top.id === "gold") {
-        push("asset_cat_gold", top.label);
-      } else if (top.id.startsWith("asset_cat_")) {
-        push(top.id, top.label);
-      }
+      if (top.id.startsWith("asset_cat_")) push(top.id, top.label);
     });
     return rows.length ? rows : mainAllocationOptions;
   }, [assetCategoryTree]);
@@ -1422,13 +1465,7 @@ export function App() {
       if (!rows[parentId].some(([existing]) => existing === id)) rows[parentId].push([id, label]);
     };
     const visit = (node: AssetCategoryNode, nearestMainId: string | null) => {
-      const mainId = node.id.startsWith("asset_cat_")
-        ? node.id
-        : node.id === "cash"
-          ? "asset_cat_cash"
-          : node.id === "gold"
-            ? "asset_cat_gold"
-            : nearestMainId;
+      const mainId = node.id.startsWith("asset_cat_") ? node.id : nearestMainId;
       if (node.id.startsWith("asset_sub_") && nearestMainId) {
         push(nearestMainId, node.id, node.label);
       }
@@ -2517,9 +2554,9 @@ export function App() {
       setDcaCashflows(nextDcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
       setNewAsset({
         name: "",
-        topCategory: "fund",
-        fundCategory: "asset_cat_us_equity",
-        cashCategory: "asset_sub_cash",
+        topCategory: "asset_cat_cash",
+        fundCategory: "asset_sub_sp500",
+        cashCategory: "asset_sub_bank_payment",
         usEquityCategory: "asset_sub_sp500",
         currency: "CNY",
         platform: "支付宝",
@@ -2538,6 +2575,30 @@ export function App() {
 	    }
 	  }
 
+  function firstRuntimeSubCategory(mainCategoryId: string) {
+    return onboardingSubAllocationOptions[mainCategoryId]?.[0]?.[0] ?? defaultSubCategoryForMain(mainCategoryId);
+  }
+
+  function updateNewAssetTopCategory(mainCategoryId: string) {
+    const firstSub = firstRuntimeSubCategory(mainCategoryId);
+    setNewAsset((current) => ({
+      ...current,
+      topCategory: mainCategoryId,
+      cashCategory: isCashCategoryId(mainCategoryId) ? firstSub : current.cashCategory,
+      fundCategory: isCashCategoryId(mainCategoryId) ? current.fundCategory : firstSub,
+      usEquityCategory: firstSub || current.usEquityCategory
+    }));
+  }
+
+  function updateNewAssetSubCategory(subCategoryId: string) {
+    setNewAsset((current) => ({
+      ...current,
+      cashCategory: isCashCategoryId(current.topCategory) ? subCategoryId : current.cashCategory,
+      fundCategory: isCashCategoryId(current.topCategory) ? current.fundCategory : subCategoryId,
+      usEquityCategory: subCategoryId || current.usEquityCategory
+    }));
+  }
+
 	  function updateOnboardingAssetDraft(patch: Partial<OnboardingAssetDraft>) {
 	    setOnboardingAssetDraft((current) => normalizeOnboardingAssetDraft({ ...current, ...patch }, assetCategoryTree));
 	  }
@@ -2549,7 +2610,7 @@ export function App() {
 	  function updateOnboardingAssetSecondCategory(categoryId: string) {
 	    setOnboardingAssetDraft((current) =>
 	      normalizeOnboardingAssetDraft(
-	        current.topCategory === "cash"
+	        isCashCategoryId(current.topCategory)
 	          ? { ...current, cashCategory: categoryId }
 	          : { ...current, fundCategory: categoryId },
 	        assetCategoryTree
@@ -5145,22 +5206,15 @@ export function App() {
         {showAssetCreator || assetItems.length === 0 ? (
           <div className="asset-creator">
             <input placeholder="资产名称" value={newAsset.name} onChange={(event) => setNewAsset((current) => ({ ...current, name: event.target.value }))} />
-            <select value={newAsset.topCategory} onChange={(event) => setNewAsset((current) => ({ ...current, topCategory: event.target.value }))}>
-              {assetTopOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            <select value={newAsset.topCategory} onChange={(event) => updateNewAssetTopCategory(event.target.value)}>
+              {onboardingMainAllocationOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
-            {newAsset.topCategory === "cash" ? (
-              <select value={newAsset.cashCategory} onChange={(event) => setNewAsset((current) => ({ ...current, cashCategory: event.target.value }))}>
-                {cashCategoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            ) : null}
-            {newAsset.topCategory === "fund" ? (
-              <select value={newAsset.fundCategory} onChange={(event) => setNewAsset((current) => ({ ...current, fundCategory: event.target.value }))}>
-                {fundCategoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            ) : null}
-            {newAsset.topCategory === "fund" && newAsset.fundCategory === "asset_cat_us_equity" ? (
-              <select value={newAsset.usEquityCategory} onChange={(event) => setNewAsset((current) => ({ ...current, usEquityCategory: event.target.value }))}>
-                {usEquityCategoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            {(onboardingSubAllocationOptions[newAsset.topCategory] ?? []).length > 0 ? (
+              <select
+                value={isCashCategoryId(newAsset.topCategory) ? newAsset.cashCategory : newAsset.fundCategory}
+                onChange={(event) => updateNewAssetSubCategory(event.target.value)}
+              >
+                {(onboardingSubAllocationOptions[newAsset.topCategory] ?? []).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             ) : null}
             <select value={newAsset.currency} onChange={(event) => setNewAsset((current) => ({ ...current, currency: event.target.value as CurrencyCode }))}>
@@ -5337,60 +5391,36 @@ export function App() {
                     <select
                       value={assetClassification.topCategory}
                       onChange={(event) =>
+                        {
+                          const firstSub = firstRuntimeSubCategory(event.target.value);
                         updateAssetClassification(asset.id, {
                           ...assetClassification,
-                          topCategory: event.target.value
-                        })
+                          topCategory: event.target.value,
+                          cashCategory: isCashCategoryId(event.target.value) ? firstSub : assetClassification.cashCategory,
+                          fundCategory: isCashCategoryId(event.target.value) ? assetClassification.fundCategory : firstSub,
+                          usEquityCategory: firstSub || assetClassification.usEquityCategory
+                        });
+                        }
                       }
                     >
-                      {assetTopOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      {onboardingMainAllocationOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
                   </label>
-                  {assetClassification.topCategory === "cash" ? (
+                  {(onboardingSubAllocationOptions[assetClassification.topCategory] ?? []).length > 0 ? (
                     <label>
-                      现金类型
+                      子资产类别
                       <select
-                        value={assetClassification.cashCategory}
+                        value={isCashCategoryId(assetClassification.topCategory) ? assetClassification.cashCategory : assetClassification.fundCategory}
                         onChange={(event) =>
                           updateAssetClassification(asset.id, {
                             ...assetClassification,
-                            cashCategory: event.target.value
+                            cashCategory: isCashCategoryId(assetClassification.topCategory) ? event.target.value : assetClassification.cashCategory,
+                            fundCategory: isCashCategoryId(assetClassification.topCategory) ? assetClassification.fundCategory : event.target.value,
+                            usEquityCategory: event.target.value || assetClassification.usEquityCategory
                           })
                         }
                       >
-                        {cashCategoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                      </select>
-                    </label>
-                  ) : null}
-                  {assetClassification.topCategory === "fund" ? (
-                    <label>
-                      基金类型
-                      <select
-                        value={assetClassification.fundCategory}
-                        onChange={(event) =>
-                          updateAssetClassification(asset.id, {
-                            ...assetClassification,
-                            fundCategory: event.target.value
-                          })
-                        }
-                      >
-                        {fundCategoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                      </select>
-                    </label>
-                  ) : null}
-                  {assetClassification.topCategory === "fund" && assetClassification.fundCategory === "asset_cat_us_equity" ? (
-                    <label>
-                    指数子类
-                      <select
-                        value={assetClassification.usEquityCategory}
-                        onChange={(event) =>
-                          updateAssetClassification(asset.id, {
-                            ...assetClassification,
-                            usEquityCategory: event.target.value
-                          })
-                        }
-                      >
-                        {usEquityCategoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        {(onboardingSubAllocationOptions[assetClassification.topCategory] ?? []).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
                     </label>
                   ) : null}
@@ -6080,7 +6110,7 @@ export function App() {
     const ytdExpense = dashboardTrends.reduce((sum, item) => sum + item.expense, 0);
     const ytdSaving = ytdIncome - ytdExpense;
     const latestDiscretionaryAmount = [...summary.discretionary_trends].reverse().find((item) => item.period_month === summary.snapshot_month)?.amount ?? 0;
-    const returnGroupOrder = ["指数基金", "债券基金", "黄金", "美股", "债券", "红利低波"];
+    const returnGroupOrder = ["美股", "红利低波", "债券", "黄金", "A股权益", "其他"];
     const expenseRowsForRange = dashboardRange === "本月" ? summary.expense_categories : summary.expense_year_rank;
     const expenseScopeLabel = dashboardRange === "本月" ? "本月" : `${rangeLabel} 累计`;
     const expenseTotalForRange = expenseRowsForRange.reduce((sum, item) => sum + item.amount, 0);
@@ -7288,7 +7318,7 @@ export function App() {
                 {renderDiscretionaryChart()}
                 <div className="dashboard-chart-grid">
                   {renderDonutChart(summary.asset_allocations, "当前资产配置", "各资产类别金额占比。")}
-                  {renderDonutChart(summary.us_equity_allocations, "指数子类拆分", "标普、纳斯达克及其它指数子类占比。")}
+                  {renderDonutChart(summary.us_equity_allocations, "美股子类拆分", "标普、纳斯达克、科技及其他美股占比。")}
                 </div>
                 <div className="allocation-list">
                   {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
@@ -7345,7 +7375,7 @@ export function App() {
                   <div>
                     <span>非现金资产组</span>
                     <strong>{investmentGroupRows.length}</strong>
-                    <small>指数基金 / 债券基金 / 黄金 / 现金</small>
+                    <small>现金 / 美股 / 红利低波 / 债券 / 黄金 / A股权益 / 其他</small>
                   </div>
                 </div>
                 {renderInvestmentGroupChart()}
