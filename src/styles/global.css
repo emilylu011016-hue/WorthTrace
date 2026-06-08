@@ -346,12 +346,12 @@ button {
 }
 
 .onboarding-category-manager {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
+  display: block;
+  padding: 0;
   border: 1px solid rgba(111, 146, 127, 0.22);
-  border-radius: 20px;
+  border-radius: 18px;
   background: linear-gradient(135deg, rgba(237, 244, 237, 0.72), rgba(255, 253, 248, 0.92));
+  overflow: hidden;
 }
 
 .category-manager-header,
@@ -363,6 +363,14 @@ button {
 
 .category-manager-header {
   justify-content: space-between;
+  min-height: 54px;
+  padding: 0 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.category-manager-header::-webkit-details-marker {
+  display: none;
 }
 
 .category-manager-header div {
@@ -380,9 +388,39 @@ button {
   font-size: 13px;
 }
 
+.category-manager-caret {
+  min-width: 52px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #17231e !important;
+  font-size: 12px !important;
+  font-weight: 800;
+  text-align: center;
+}
+
+.onboarding-category-manager[open] .category-manager-caret::before {
+  content: "收起";
+}
+
+.onboarding-category-manager[open] .category-manager-caret {
+  font-size: 0 !important;
+}
+
+.category-manager-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px 12px;
+  color: #68746c;
+  font-size: 13px;
+}
+
 .category-tree-editor {
   display: grid;
   gap: 10px;
+  padding: 0 16px 16px;
 }
 
 .category-tree-node {

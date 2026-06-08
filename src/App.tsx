@@ -3902,12 +3902,16 @@ export function App() {
 	                </div>
 	                {!onboardingSkipAssets ? (
 	                  <div className="onboarding-asset-builder">
-	                    <div className="onboarding-category-manager">
-	                      <div className="category-manager-header">
+	                    <details className="onboarding-category-manager">
+	                      <summary className="category-manager-header">
 	                        <div>
-	                          <strong>资产分类</strong>
-	                          <span>可以改名、新增或删除默认分类。新增后下方立刻可选。</span>
+	                          <strong>资产分类设置</strong>
+	                          <span>{assetCategoryTree.length} 个主类；需要自定义时再展开。</span>
 	                        </div>
+	                        <span className="category-manager-caret">展开</span>
+	                      </summary>
+	                      <div className="category-manager-toolbar">
+	                        <span>可以改名、新增或删除默认分类。新增后下方立刻可选。</span>
 	                        <button className="secondary-button compact" onClick={() => addAssetCategory(null)} type="button">
 	                          <Plus size={14} />
 	                          新增一级类型
@@ -3957,7 +3961,7 @@ export function App() {
 	                          </div>
 	                        ))}
 	                      </div>
-	                    </div>
+	                    </details>
 	                    <div className="onboarding-form-grid">
 	                      <label>
 	                        资产名称
