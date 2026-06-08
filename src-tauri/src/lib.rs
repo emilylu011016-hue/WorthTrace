@@ -212,6 +212,7 @@ struct OnboardingStatus {
   target_saving_rate: f64,
   dashboard_enabled_sections: Vec<String>,
   custom_analysis_prompts: Vec<String>,
+  asset_category_tree: Vec<OnboardingAssetCategoryInput>,
   asset_count: i64,
   portfolio_target_count: i64,
 }
@@ -405,10 +406,18 @@ struct OnboardingAllocationTargetInput {
   target_percent: f64,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct OnboardingAssetCategoryInput {
+  id: String,
+  label: String,
+  children: Vec<OnboardingAssetCategoryInput>,
+}
+
 #[derive(Deserialize)]
 struct OnboardingInput {
   target_saving_rate: f64,
   assets: Vec<NewAssetInput>,
+  asset_category_tree: Vec<OnboardingAssetCategoryInput>,
   allocation_targets: Vec<OnboardingAllocationTargetInput>,
   dashboard_sections: Vec<String>,
   custom_analysis_prompts: Vec<String>,
@@ -2489,6 +2498,48 @@ fn default_dashboard_sections() -> Vec<String> {
   ]
 }
 
+fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
+  vec![
+    OnboardingAssetCategoryInput {
+      id: "fund".to_string(),
+      label: "基金".to_string(),
+      children: vec![
+        OnboardingAssetCategoryInput {
+          id: "asset_cat_bond".to_string(),
+          label: "债券基金".to_string(),
+          children: vec![OnboardingAssetCategoryInput {
+            id: "asset_sub_bond_fund".to_string(),
+            label: "债券基金".to_string(),
+            children: vec![],
+          }],
+        },
+        OnboardingAssetCategoryInput {
+          id: "asset_cat_us_equity".to_string(),
+          label: "指数基金".to_string(),
+          children: vec![
+            OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
+            OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
+            OnboardingAssetCategoryInput { id: "asset_sub_other_us".to_string(), label: "其他指数".to_string(), children: vec![] },
+          ],
+        },
+      ],
+    },
+    OnboardingAssetCategoryInput {
+      id: "cash".to_string(),
+      label: "现金".to_string(),
+      children: vec![
+        OnboardingAssetCategoryInput { id: "asset_sub_cash".to_string(), label: "现金".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_receivable".to_string(), label: "应收押金".to_string(), children: vec![] },
+      ],
+    },
+    OnboardingAssetCategoryInput {
+      id: "gold".to_string(),
+      label: "黄金".to_string(),
+      children: vec![OnboardingAssetCategoryInput { id: "asset_sub_gold".to_string(), label: "黄金".to_string(), children: vec![] }],
+    },
+  ]
+}
+
 fn setting_string_array(connection: &Connection, key: &str, fallback: Vec<String>) -> Result<Vec<String>, AppError> {
   let value: Result<String, rusqlite::Error> = connection.query_row(
     "select value_json from app_settings where key = ?1",
@@ -2503,6 +2554,94 @@ fn setting_string_array(connection: &Connection, key: &str, fallback: Vec<String
   }
 }
 
+fn setting_asset_category_tree(connection: &Connection) -> Result<Vec<OnboardingAssetCategoryInput>, AppError> {
+  let value: Result<String, rusqlite::Error> = connection.query_row(
+    "select value_json from app_settings where key = 'asset_category_tree'",
+    [],
+    |row| row.get(0),
+  );
+
+  match value {
+    Ok(raw) => Ok(serde_json::from_str::<Vec<OnboardingAssetCategoryInput>>(&raw).unwrap_or_else(|_| default_asset_category_tree())),
+    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(default_asset_category_tree()),
+    Err(error) => Err(error.into()),
+  }
+}
+
+fn sync_asset_category_tree(tx: &Transaction<'_>, tree: &[OnboardingAssetCategoryInput]) -> Result<(), AppError> {
+  tx.execute("update asset_categories set is_active = 0", [])?;
+  let mut sort_order = 10_i64;
+
+  fn upsert_node(
+    tx: &Transaction<'_>,
+    node: &OnboardingAssetCategoryInput,
+    nearest_main_id: Option<String>,
+    sort_order: &mut i64,
+  ) -> Result<(), AppError> {
+    let trimmed_label = node.label.trim();
+    if trimmed_label.is_empty() {
+      return Err(AppError::InvalidCsvValue("资产分类名称不能为空".to_string()));
+    }
+
+    let mut next_main_id = nearest_main_id.clone();
+    if node.id == "cash" {
+      tx.execute(
+        "
+        insert into asset_categories (id, name, parent_id, level, is_active, sort_order)
+        values ('asset_cat_cash', ?1, null, 'main', 1, ?2)
+        on conflict(id) do update set name = excluded.name, parent_id = null, level = 'main', is_active = 1, sort_order = excluded.sort_order
+        ",
+        params![trimmed_label, *sort_order],
+      )?;
+      *sort_order += 10;
+      next_main_id = Some("asset_cat_cash".to_string());
+    } else if node.id == "gold" {
+      tx.execute(
+        "
+        insert into asset_categories (id, name, parent_id, level, is_active, sort_order)
+        values ('asset_cat_gold', ?1, null, 'main', 1, ?2)
+        on conflict(id) do update set name = excluded.name, parent_id = null, level = 'main', is_active = 1, sort_order = excluded.sort_order
+        ",
+        params![trimmed_label, *sort_order],
+      )?;
+      *sort_order += 10;
+      next_main_id = Some("asset_cat_gold".to_string());
+    } else if node.id.starts_with("asset_cat_") {
+      tx.execute(
+        "
+        insert into asset_categories (id, name, parent_id, level, is_active, sort_order)
+        values (?1, ?2, null, 'main', 1, ?3)
+        on conflict(id) do update set name = excluded.name, parent_id = null, level = 'main', is_active = 1, sort_order = excluded.sort_order
+        ",
+        params![node.id, trimmed_label, *sort_order],
+      )?;
+      *sort_order += 10;
+      next_main_id = Some(node.id.clone());
+    } else if node.id.starts_with("asset_sub_") {
+      let parent_id = nearest_main_id.clone().unwrap_or_else(|| "asset_cat_us_equity".to_string());
+      tx.execute(
+        "
+        insert into asset_categories (id, name, parent_id, level, is_active, sort_order)
+        values (?1, ?2, ?3, 'sub', 1, ?4)
+        on conflict(id) do update set name = excluded.name, parent_id = excluded.parent_id, level = 'sub', is_active = 1, sort_order = excluded.sort_order
+        ",
+        params![node.id, trimmed_label, parent_id, *sort_order],
+      )?;
+      *sort_order += 10;
+    }
+
+    for child in &node.children {
+      upsert_node(tx, child, next_main_id.clone(), sort_order)?;
+    }
+    Ok(())
+  }
+
+  for node in tree {
+    upsert_node(tx, node, None, &mut sort_order)?;
+  }
+  Ok(())
+}
+
 fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, AppError> {
   let target_saving_rate = setting_number(connection, "target_saving_rate", 0.3)?;
   let dashboard_enabled_sections = setting_string_array(
@@ -2515,6 +2654,7 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
     "dashboard_custom_analysis_prompts",
     Vec::new(),
   )?;
+  let asset_category_tree = setting_asset_category_tree(connection)?;
   let asset_count: i64 = connection.query_row(
     "
     select count(*)
@@ -2556,6 +2696,7 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
     target_saving_rate,
     dashboard_enabled_sections,
     custom_analysis_prompts,
+    asset_category_tree,
     asset_count,
     portfolio_target_count,
   })
@@ -2586,6 +2727,17 @@ fn save_onboarding_to_connection(connection: &mut Connection, input: &Onboarding
     "dashboard_custom_allocation_targets",
     &serde_json::to_string(&input.allocation_targets).unwrap_or_else(|_| "[]".to_string()),
   )?;
+  let category_tree = if input.asset_category_tree.is_empty() {
+    default_asset_category_tree()
+  } else {
+    input.asset_category_tree.clone()
+  };
+  upsert_setting_tx(
+    &tx,
+    "asset_category_tree",
+    &serde_json::to_string(&category_tree).unwrap_or_else(|_| "[]".to_string()),
+  )?;
+  sync_asset_category_tree(&tx, &category_tree)?;
 
   for asset in input.assets.iter().filter(|asset| !asset.name.trim().is_empty()) {
     if asset.is_dca && asset.dca_plans.is_empty() {

@@ -12,6 +12,9 @@ if [ ! -f "$WORK_DB" ] || [ ! -f "$DASHBOARD_DB" ]; then
   python3 scripts/create_demo_database.py
 fi
 
+cd "$PROJECT_DIR"
+python3 scripts/reset_demo_to_onboarding.py
+
 OLD_PORT_PIDS="$(lsof -ti tcp:1420 2>/dev/null || true)"
 if [ -n "$OLD_PORT_PIDS" ]; then
   echo "关闭旧预览进程：$OLD_PORT_PIDS"
@@ -38,5 +41,4 @@ echo "Demo 月更工作库：$WORK_DB"
 echo "Demo 看板发布库：$DASHBOARD_DB"
 echo "Demo 密码：demo123456"
 
-cd "$PROJECT_DIR"
 npm run tauri:dev

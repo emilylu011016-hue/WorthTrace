@@ -68,19 +68,15 @@ insert or ignore into category_mappings (id, source_type, raw_category, category
   ('map_shark_other_income', 'shark_csv', '其它收入', 'cat_income_other', 1);
 
 insert or ignore into asset_categories (id, name, parent_id, level, sort_order) values
-  ('asset_cat_us_equity', '美股', null, 'main', 10),
-  ('asset_cat_dividend_low_vol', '红利低波', null, 'main', 20),
+  ('asset_cat_bond', '债券基金', null, 'main', 10),
+  ('asset_cat_us_equity', '指数基金', null, 'main', 20),
   ('asset_cat_gold', '黄金', null, 'main', 30),
-  ('asset_cat_bond', '债券', null, 'main', 40),
   ('asset_cat_cash', '现金', null, 'main', 50),
-  ('asset_sub_sp500', '标普', 'asset_cat_us_equity', 'sub', 11),
-  ('asset_sub_nasdaq', '纳斯达克', 'asset_cat_us_equity', 'sub', 12),
-  ('asset_sub_info_tech', '信息科技', 'asset_cat_us_equity', 'sub', 13),
-  ('asset_sub_other_us', '其他美股', 'asset_cat_us_equity', 'sub', 14),
-  ('asset_sub_dividend_low_vol', '红利低波', 'asset_cat_dividend_low_vol', 'sub', 21),
+  ('asset_sub_bond_fund', '债券基金', 'asset_cat_bond', 'sub', 11),
+  ('asset_sub_sp500', '标普', 'asset_cat_us_equity', 'sub', 21),
+  ('asset_sub_nasdaq', '纳斯达克', 'asset_cat_us_equity', 'sub', 22),
+  ('asset_sub_other_us', '其他指数', 'asset_cat_us_equity', 'sub', 24),
   ('asset_sub_gold', '黄金', 'asset_cat_gold', 'sub', 31),
-  ('asset_sub_bond_fund', '债券基金', 'asset_cat_bond', 'sub', 41),
-  ('asset_sub_bond_cash', '债券现金', 'asset_cat_cash', 'sub', 51),
   ('asset_sub_cash', '现金', 'asset_cat_cash', 'sub', 52),
   ('asset_sub_receivable', '应收押金', 'asset_cat_cash', 'sub', 53);
 

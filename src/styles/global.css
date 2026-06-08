@@ -345,6 +345,81 @@ button {
   background: #fffdf8;
 }
 
+.onboarding-category-manager {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(111, 146, 127, 0.22);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(237, 244, 237, 0.72), rgba(255, 253, 248, 0.92));
+}
+
+.category-manager-header,
+.category-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.category-manager-header {
+  justify-content: space-between;
+}
+
+.category-manager-header div {
+  display: grid;
+  gap: 4px;
+}
+
+.category-manager-header strong {
+  color: #17231e;
+  font-size: 16px;
+}
+
+.category-manager-header span {
+  color: #68746c;
+  font-size: 13px;
+}
+
+.category-tree-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.category-tree-node {
+  display: grid;
+  gap: 8px;
+}
+
+.category-tree-node.top {
+  padding: 12px;
+  border: 1px solid rgba(192, 176, 148, 0.28);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.category-tree-node.child,
+.category-tree-row.grandchild {
+  margin-left: 24px;
+}
+
+.category-tree-row span {
+  width: 54px;
+  color: #68746c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.category-tree-row input {
+  flex: 1;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #ded4c2;
+  border-radius: 12px;
+  color: #17231e;
+  background: #fff;
+  outline: none;
+}
+
 .onboarding-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

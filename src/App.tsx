@@ -176,8 +176,15 @@ type OnboardingStatus = {
   target_saving_rate: number;
   dashboard_enabled_sections: string[];
   custom_analysis_prompts: string[];
+  asset_category_tree?: AssetCategoryNode[];
   asset_count: number;
   portfolio_target_count: number;
+};
+
+type AssetCategoryNode = {
+  id: string;
+  label: string;
+  children: AssetCategoryNode[];
 };
 
 type OnboardingAllocationTarget = {
@@ -556,28 +563,25 @@ const assetTopOptions = [
 ];
 
 const fundCategoryOptions = [
-  ["asset_cat_us_equity", "美股"],
   ["asset_cat_bond", "债券基金"],
-  ["asset_cat_dividend_low_vol", "红利低波"]
+  ["asset_cat_us_equity", "指数基金"]
 ];
 
 const usEquityCategoryOptions = [
   ["asset_sub_sp500", "标普"],
   ["asset_sub_nasdaq", "纳斯达克"],
-  ["asset_sub_other_us", "其他美股"]
+  ["asset_sub_other_us", "其他指数"]
 ];
 
 const cashCategoryOptions = [
   ["asset_sub_cash", "现金"],
-  ["asset_sub_bond_cash", "债券现金"],
   ["asset_sub_receivable", "应收押金"]
 ];
 
 const mainAllocationOptions = [
-  ["asset_cat_us_equity", "美股"],
-  ["asset_cat_dividend_low_vol", "红利低波"],
+  ["asset_cat_us_equity", "指数基金"],
+  ["asset_cat_bond", "债券基金"],
   ["asset_cat_gold", "黄金"],
-  ["asset_cat_bond", "债券"],
   ["asset_cat_cash", "现金"]
 ];
 
@@ -585,9 +589,44 @@ const subAllocationOptions: Record<string, string[][]> = {
   asset_cat_us_equity: usEquityCategoryOptions,
   asset_cat_cash: cashCategoryOptions,
   asset_cat_bond: [["asset_sub_bond_fund", "债券基金"]],
-  asset_cat_dividend_low_vol: [["asset_sub_dividend_low_vol", "红利低波"]],
   asset_cat_gold: [["asset_sub_gold", "黄金"]]
 };
+
+const defaultAssetCategoryTree: AssetCategoryNode[] = [
+  {
+    id: "fund",
+    label: "基金",
+    children: [
+      {
+        id: "asset_cat_bond",
+        label: "债券基金",
+        children: [{ id: "asset_sub_bond_fund", label: "债券基金", children: [] }]
+      },
+      {
+        id: "asset_cat_us_equity",
+        label: "指数基金",
+        children: [
+          { id: "asset_sub_sp500", label: "标普", children: [] },
+          { id: "asset_sub_nasdaq", label: "纳斯达克", children: [] },
+          { id: "asset_sub_other_us", label: "其他指数", children: [] }
+        ]
+      }
+    ]
+  },
+  {
+    id: "cash",
+    label: "现金",
+    children: [
+      { id: "asset_sub_cash", label: "现金", children: [] },
+      { id: "asset_sub_receivable", label: "应收押金", children: [] }
+    ]
+  },
+  {
+    id: "gold",
+    label: "黄金",
+    children: [{ id: "asset_sub_gold", label: "黄金", children: [] }]
+  }
+];
 
 const assetMonthStatusOptions = [
   ["held", "持有"],
@@ -697,11 +736,79 @@ function optionLabel(options: string[][], value: string) {
   return options.find(([id]) => id === value)?.[1] ?? value;
 }
 
+function cloneAssetCategoryTree(tree: AssetCategoryNode[] = defaultAssetCategoryTree): AssetCategoryNode[] {
+  return tree.map((node) => ({
+    ...node,
+    children: cloneAssetCategoryTree(node.children ?? [])
+  }));
+}
+
+function categoryOptions(nodes: AssetCategoryNode[]): string[][] {
+  return nodes.map((node) => [node.id, node.label]);
+}
+
+function findAssetCategoryNode(nodes: AssetCategoryNode[], id: string): AssetCategoryNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = findAssetCategoryNode(node.children ?? [], id);
+    if (child) return child;
+  }
+  return null;
+}
+
+function updateAssetCategoryNode(nodes: AssetCategoryNode[], id: string, patch: Partial<AssetCategoryNode>): AssetCategoryNode[] {
+  return nodes.map((node) => {
+    if (node.id === id) {
+      return { ...node, ...patch, children: patch.children ?? node.children };
+    }
+    return { ...node, children: updateAssetCategoryNode(node.children ?? [], id, patch) };
+  });
+}
+
+function removeAssetCategoryNode(nodes: AssetCategoryNode[], id: string): AssetCategoryNode[] {
+  return nodes
+    .filter((node) => node.id !== id)
+    .map((node) => ({ ...node, children: removeAssetCategoryNode(node.children ?? [], id) }));
+}
+
+function appendAssetCategoryNode(nodes: AssetCategoryNode[], parentId: string | null, child: AssetCategoryNode): AssetCategoryNode[] {
+  if (!parentId) return [...nodes, child];
+  return nodes.map((node) => {
+    if (node.id === parentId) {
+      return { ...node, children: [...(node.children ?? []), child] };
+    }
+    return { ...node, children: appendAssetCategoryNode(node.children ?? [], parentId, child) };
+  });
+}
+
+function makeAssetCategoryId(prefix: string) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeOnboardingAssetDraft(asset: OnboardingAssetDraft, tree: AssetCategoryNode[]): OnboardingAssetDraft {
+  const topOptions = categoryOptions(tree);
+  const nextTop = topOptions.some(([id]) => id === asset.topCategory) ? asset.topCategory : topOptions[0]?.[0] ?? "fund";
+  const topNode = findAssetCategoryNode(tree, nextTop);
+  const secondOptions = categoryOptions(topNode?.children ?? []);
+  const currentSecond = nextTop === "cash" ? asset.cashCategory : asset.fundCategory;
+  const nextSecond = secondOptions.some(([id]) => id === currentSecond) ? currentSecond : secondOptions[0]?.[0] ?? "";
+  const secondNode = findAssetCategoryNode(tree, nextSecond);
+  const thirdOptions = categoryOptions(secondNode?.children ?? []);
+  const nextThird = thirdOptions.some(([id]) => id === asset.usEquityCategory) ? asset.usEquityCategory : thirdOptions[0]?.[0] ?? "";
+  return {
+    ...asset,
+    topCategory: nextTop,
+    cashCategory: nextTop === "cash" ? nextSecond : asset.cashCategory,
+    fundCategory: nextTop === "cash" ? asset.fundCategory : nextSecond,
+    usEquityCategory: nextThird || asset.usEquityCategory
+  };
+}
+
 function blankOnboardingAsset(): OnboardingAssetDraft {
   return {
     name: "",
     topCategory: "fund",
-    fundCategory: "asset_cat_us_equity",
+    fundCategory: "asset_cat_bond",
     cashCategory: "asset_sub_cash",
     usEquityCategory: "asset_sub_sp500",
     currency: "CNY",
@@ -715,8 +822,47 @@ function blankOnboardingAsset(): OnboardingAssetDraft {
   };
 }
 
-function assetPayloadFromDraft(asset: OnboardingAssetDraft, selectedMonth: string) {
-  const classification = resolveAssetClassification(asset);
+function resolveOnboardingAssetClassification(input: OnboardingAssetDraft, tree: AssetCategoryNode[]): AssetClassification {
+  const topNode = findAssetCategoryNode(tree, input.topCategory);
+  const topId = topNode?.id ?? input.topCategory;
+  const topLabel = topNode?.label ?? "";
+  if (topId === "gold" || topId === "asset_cat_gold") {
+    return { assetType: "gold", mainCategoryId: "asset_cat_gold", subCategoryId: "asset_sub_gold" };
+  }
+  if (topId === "cash" || topId === "asset_cat_cash") {
+    const subId = input.cashCategory || topNode?.children?.[0]?.id || "asset_sub_cash";
+    const subLabel = findAssetCategoryNode(tree, subId)?.label ?? "";
+    return {
+      assetType: subId === "asset_sub_receivable" || subLabel.includes("应收") ? "receivable" : "cash_account",
+      mainCategoryId: "asset_cat_cash",
+      subCategoryId: subId
+    };
+  }
+  const secondId = input.fundCategory || topNode?.children?.[0]?.id || "";
+  const secondNode = findAssetCategoryNode(tree, secondId);
+  const thirdId = input.usEquityCategory || secondNode?.children?.[0]?.id || null;
+  if (topId === "fund") {
+    const mainCategoryId = secondId || "asset_cat_us_equity";
+    const subCategoryId = thirdId || (mainCategoryId === "asset_cat_bond" ? "asset_sub_bond_fund" : null);
+    return {
+      assetType: mainCategoryId === "asset_cat_bond" || (secondNode?.label ?? "").includes("债券") ? "bond_fund" : "fund",
+      mainCategoryId,
+      subCategoryId
+    };
+  }
+  if (topId.startsWith("asset_cat_")) {
+    const subId = secondId.startsWith("asset_sub_") ? secondId : thirdId;
+    return {
+      assetType: topLabel.includes("黄金") ? "gold" : topLabel.includes("现金") ? "cash_account" : "fund",
+      mainCategoryId: topId,
+      subCategoryId: subId || null
+    };
+  }
+  return resolveAssetClassification(input);
+}
+
+function assetPayloadFromDraft(asset: OnboardingAssetDraft, selectedMonth: string, tree: AssetCategoryNode[]) {
+  const classification = resolveOnboardingAssetClassification(asset, tree);
   return {
     name: asset.name.trim(),
     asset_type: classification.assetType,
@@ -764,7 +910,7 @@ function assetClassificationText(asset: AssetEntryItem) {
     return `现金 / ${optionLabel(cashCategoryOptions, classification.cashCategory)}`;
   }
   if (classification.fundCategory === "asset_cat_us_equity") {
-    return `基金 / 美股 / ${optionLabel(usEquityCategoryOptions, classification.usEquityCategory)}`;
+    return `基金 / 指数基金 / ${optionLabel(usEquityCategoryOptions, classification.usEquityCategory)}`;
   }
   return `基金 / ${optionLabel(fundCategoryOptions, classification.fundCategory)}`;
 }
@@ -1041,6 +1187,7 @@ export function App() {
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [onboardingSavingRate, setOnboardingSavingRate] = useState("30");
   const [onboardingAssetDraft, setOnboardingAssetDraft] = useState<OnboardingAssetDraft>(() => blankOnboardingAsset());
+  const [assetCategoryTree, setAssetCategoryTree] = useState<AssetCategoryNode[]>(() => cloneAssetCategoryTree());
   const [onboardingAssets, setOnboardingAssets] = useState<OnboardingAssetDraft[]>([]);
   const [onboardingSkipAssets, setOnboardingSkipAssets] = useState(false);
   const [onboardingTargets, setOnboardingTargets] = useState<OnboardingAllocationTarget[]>([]);
@@ -1165,6 +1312,7 @@ export function App() {
 	        target_saving_rate: browserPreviewSummary.target_saving_rate,
 	        dashboard_enabled_sections: defaultOnboardingSections,
 	        custom_analysis_prompts: [],
+	        asset_category_tree: cloneAssetCategoryTree(),
 	        asset_count: browserPreviewSummary.asset_count,
 	        portfolio_target_count: browserPreviewSummary.portfolio_targets.length
 	      });
@@ -1197,6 +1345,7 @@ export function App() {
 	          setOnboardingSavingRate(String(Math.round((result[2].target_saving_rate || 0.3) * 100)));
 	          setOnboardingSections(result[2].dashboard_enabled_sections?.length ? result[2].dashboard_enabled_sections : defaultOnboardingSections);
 	          setCustomAnalysisPrompts(result[2].custom_analysis_prompts ?? []);
+	          setAssetCategoryTree(result[2].asset_category_tree?.length ? cloneAssetCategoryTree(result[2].asset_category_tree) : cloneAssetCategoryTree());
 	          if (!result[2].completed) {
 	            setView("onboarding");
 	          }
@@ -1232,11 +1381,75 @@ export function App() {
     return visible.length > 0 ? visible : healthSections;
   }, [onboardingStatus?.dashboard_enabled_sections]);
 
+  const onboardingTopOptions = useMemo(() => categoryOptions(assetCategoryTree), [assetCategoryTree]);
+  const onboardingSecondOptions = useMemo(() => {
+    const topNode = findAssetCategoryNode(assetCategoryTree, onboardingAssetDraft.topCategory);
+    return categoryOptions(topNode?.children ?? []);
+  }, [assetCategoryTree, onboardingAssetDraft.topCategory]);
+  const onboardingSecondValue = onboardingAssetDraft.topCategory === "cash" ? onboardingAssetDraft.cashCategory : onboardingAssetDraft.fundCategory;
+  const onboardingThirdOptions = useMemo(() => {
+    const secondNode = findAssetCategoryNode(assetCategoryTree, onboardingSecondValue);
+    return categoryOptions(secondNode?.children ?? []);
+  }, [assetCategoryTree, onboardingSecondValue]);
+  const onboardingMainAllocationOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: string[][] = [];
+    const push = (id: string, label: string) => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      rows.push([id, label]);
+    };
+    assetCategoryTree.forEach((top) => {
+      if (top.id === "fund") {
+        top.children.forEach((child) => {
+          if (child.id.startsWith("asset_cat_")) push(child.id, child.label);
+        });
+      } else if (top.id === "cash") {
+        push("asset_cat_cash", top.label);
+      } else if (top.id === "gold") {
+        push("asset_cat_gold", top.label);
+      } else if (top.id.startsWith("asset_cat_")) {
+        push(top.id, top.label);
+      }
+    });
+    return rows.length ? rows : mainAllocationOptions;
+  }, [assetCategoryTree]);
+  const onboardingSubAllocationOptions = useMemo(() => {
+    const rows: Record<string, string[][]> = {};
+    const push = (parentId: string, id: string, label: string) => {
+      if (!parentId || !id) return;
+      rows[parentId] = rows[parentId] ?? [];
+      if (!rows[parentId].some(([existing]) => existing === id)) rows[parentId].push([id, label]);
+    };
+    const visit = (node: AssetCategoryNode, nearestMainId: string | null) => {
+      const mainId = node.id.startsWith("asset_cat_")
+        ? node.id
+        : node.id === "cash"
+          ? "asset_cat_cash"
+          : node.id === "gold"
+            ? "asset_cat_gold"
+            : nearestMainId;
+      if (node.id.startsWith("asset_sub_") && nearestMainId) {
+        push(nearestMainId, node.id, node.label);
+      }
+      node.children.forEach((child) => visit(child, mainId));
+    };
+    assetCategoryTree.forEach((node) => visit(node, null));
+    return Object.keys(rows).length ? rows : subAllocationOptions;
+  }, [assetCategoryTree]);
+
   useEffect(() => {
     if (!visibleHealthSections.includes(activeHealthSection)) {
       setActiveHealthSection(visibleHealthSections[0] ?? "总览");
     }
   }, [activeHealthSection, visibleHealthSections]);
+
+  useEffect(() => {
+    setOnboardingAssetDraft((current) => {
+      const normalized = normalizeOnboardingAssetDraft(current, assetCategoryTree);
+      return JSON.stringify(normalized) === JSON.stringify(current) ? current : normalized;
+    });
+  }, [assetCategoryTree]);
 
   const maxAmount = useMemo(
     () => Math.max(...summary.portfolio_targets.map((item) => item.current_amount), 1),
@@ -1575,11 +1788,12 @@ export function App() {
 	    setLoadState("ready");
 	  }
 
-	  function applyOnboardingStatus(status: OnboardingStatus) {
+  function applyOnboardingStatus(status: OnboardingStatus) {
 	    setOnboardingStatus(status);
 	    setOnboardingSavingRate(String(Math.round((status.target_saving_rate || 0.3) * 100)));
 	    setOnboardingSections(status.dashboard_enabled_sections?.length ? status.dashboard_enabled_sections : defaultOnboardingSections);
 	    setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
+	    setAssetCategoryTree(status.asset_category_tree?.length ? cloneAssetCategoryTree(status.asset_category_tree) : cloneAssetCategoryTree());
 	    if (!status.completed) {
 	      setView("onboarding");
 	    }
@@ -2325,7 +2539,55 @@ export function App() {
 	  }
 
 	  function updateOnboardingAssetDraft(patch: Partial<OnboardingAssetDraft>) {
-	    setOnboardingAssetDraft((current) => ({ ...current, ...patch }));
+	    setOnboardingAssetDraft((current) => normalizeOnboardingAssetDraft({ ...current, ...patch }, assetCategoryTree));
+	  }
+
+	  function updateOnboardingAssetTopCategory(topCategory: string) {
+	    setOnboardingAssetDraft((current) => normalizeOnboardingAssetDraft({ ...current, topCategory }, assetCategoryTree));
+	  }
+
+	  function updateOnboardingAssetSecondCategory(categoryId: string) {
+	    setOnboardingAssetDraft((current) =>
+	      normalizeOnboardingAssetDraft(
+	        current.topCategory === "cash"
+	          ? { ...current, cashCategory: categoryId }
+	          : { ...current, fundCategory: categoryId },
+	        assetCategoryTree
+	      )
+	    );
+	  }
+
+	  function updateOnboardingAssetThirdCategory(categoryId: string) {
+	    setOnboardingAssetDraft((current) => normalizeOnboardingAssetDraft({ ...current, usEquityCategory: categoryId }, assetCategoryTree));
+	  }
+
+	  function addAssetCategory(parentId: string | null) {
+	    const parent = parentId ? findAssetCategoryNode(assetCategoryTree, parentId) : null;
+	    const prefix = !parent
+	      ? "asset_cat_custom"
+	      : parent.id === "fund" || parent.id.startsWith("group_")
+	        ? "asset_cat_custom"
+	        : "asset_sub_custom";
+	    const nextNode: AssetCategoryNode = {
+	      id: makeAssetCategoryId(prefix),
+	      label: parent ? "新增分类" : "新增类型",
+	      children: []
+	    };
+	    setAssetCategoryTree((current) => appendAssetCategoryNode(current, parentId, nextNode));
+	    setOnboardingMessage("分类已新增，可以直接改名字。");
+	  }
+
+	  function renameAssetCategory(id: string, label: string) {
+	    setAssetCategoryTree((current) => updateAssetCategoryNode(current, id, { label }));
+	  }
+
+	  function deleteAssetCategory(id: string) {
+	    setAssetCategoryTree((current) => {
+	      const nextTree = removeAssetCategoryNode(current, id);
+	      return nextTree.length ? nextTree : cloneAssetCategoryTree();
+	    });
+	    setOnboardingTargets((current) => current.filter((target) => target.category_id !== id && target.parent_category_id !== id));
+	    setOnboardingMessage("分类已删除；如果资产正在使用这个分类，请重新选择。");
 	  }
 
 	  function updateOnboardingAssetDcaPlan(index: number, patch: Partial<DcaPlanDraft>) {
@@ -2354,12 +2616,17 @@ export function App() {
 	      setOnboardingMessage("请先填写资产名称。");
 	      return;
 	    }
+	    const classification = resolveOnboardingAssetClassification(onboardingAssetDraft, assetCategoryTree);
+	    if (!classification.mainCategoryId) {
+	      setOnboardingMessage("请先选择有效分类；如果是新增类型，请至少补一个可用子类。");
+	      return;
+	    }
 	    if (onboardingAssetDraft.isDca && onboardingAssetDraft.dcaPlans.every((plan) => Number(plan.amount) <= 0)) {
 	      setOnboardingMessage("已选择定投，需要至少填写一个定投金额。");
 	      return;
 	    }
 	    setOnboardingAssets((current) => [{ ...onboardingAssetDraft }, ...current]);
-	    setOnboardingAssetDraft(blankOnboardingAsset());
+	    setOnboardingAssetDraft(normalizeOnboardingAssetDraft(blankOnboardingAsset(), assetCategoryTree));
 	    setOnboardingSkipAssets(false);
 	    setOnboardingMessage("资产已加入初始化清单。");
 	  }
@@ -2377,15 +2644,15 @@ export function App() {
 	      return onboardingAssets[Number(target.asset_id)]?.name || target.label || "具体资产";
 	    }
 	    if (target.level === "sub") {
-	      const parent = target.parent_category_id ?? "asset_cat_us_equity";
+	      const parent = target.parent_category_id ?? onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_us_equity";
 	      const category = target.category_id ?? "";
-	      return `${optionLabel(mainAllocationOptions, parent)} / ${optionLabel(subAllocationOptions[parent] ?? [], category)}`;
+	      return `${optionLabel(onboardingMainAllocationOptions, parent)} / ${optionLabel(onboardingSubAllocationOptions[parent] ?? [], category)}`;
 	    }
-	    return optionLabel(mainAllocationOptions, target.category_id ?? "");
+	    return optionLabel(onboardingMainAllocationOptions, target.category_id ?? "");
 	  }
 
 	  function addOnboardingTarget(level: OnboardingAllocationTarget["level"]) {
-	    const parent = "asset_cat_us_equity";
+	    const parent = onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_us_equity";
 	    const nextTarget: OnboardingAllocationTarget =
 	      level === "asset"
 	        ? {
@@ -2398,13 +2665,13 @@ export function App() {
 	          ? {
 	              level,
 	              parent_category_id: parent,
-	              category_id: subAllocationOptions[parent][0][0],
+	              category_id: onboardingSubAllocationOptions[parent]?.[0]?.[0] ?? null,
 	              label: "",
 	              target_percent: 0
 	            }
 	          : {
 	              level,
-	              category_id: "asset_cat_us_equity",
+	              category_id: parent,
 	              label: "",
 	              target_percent: 0
 	            };
@@ -2462,7 +2729,8 @@ export function App() {
 	      const status = await invoke<OnboardingStatus>("save_onboarding", {
 	        input: {
 	          target_saving_rate: rate,
-	          assets: onboardingSkipAssets ? [] : onboardingAssets.map((asset) => assetPayloadFromDraft(asset, selectedMonth)),
+	          assets: onboardingSkipAssets ? [] : onboardingAssets.map((asset) => assetPayloadFromDraft(asset, selectedMonth, assetCategoryTree)),
+	          asset_category_tree: assetCategoryTree,
 	          allocation_targets: payloadTargets,
 	          dashboard_sections: onboardingSections,
 	          custom_analysis_prompts: customAnalysisPrompts,
@@ -3483,19 +3751,21 @@ export function App() {
 	      { title: "关注看板", detail: "选择默认分析模块，也可以写下自定义分析点。" }
 	    ];
 	    const currentStep = steps[onboardingStep] ?? steps[0];
-	    const draftClassification = resolveAssetClassification(onboardingAssetDraft);
+	    const draftClassification = resolveOnboardingAssetClassification(onboardingAssetDraft, assetCategoryTree);
+	    const topLabel = optionLabel(onboardingTopOptions, onboardingAssetDraft.topCategory);
+	    const secondLabel = onboardingSecondValue ? optionLabel(onboardingSecondOptions, onboardingSecondValue) : "";
+	    const thirdLabel = onboardingAssetDraft.usEquityCategory ? optionLabel(onboardingThirdOptions, onboardingAssetDraft.usEquityCategory) : "";
 	    const assetPreview = onboardingAssetDraft.name.trim()
-	      ? draftClassification.mainCategoryId === "asset_cat_gold"
-	        ? "黄金"
-	        : draftClassification.mainCategoryId === "asset_cat_cash"
-	          ? `现金 / ${optionLabel(cashCategoryOptions, draftClassification.subCategoryId ?? "")}`
-	          : draftClassification.mainCategoryId === "asset_cat_us_equity"
-	            ? `基金 / 美股 / ${optionLabel(usEquityCategoryOptions, draftClassification.subCategoryId ?? "")}`
-	            : `基金 / ${optionLabel(fundCategoryOptions, draftClassification.mainCategoryId)}`
+	      ? [topLabel, secondLabel, thirdLabel].filter(Boolean).join(" / ")
 	      : "选择分类后显示资产路径";
 
 	    return (
-	      <section className="onboarding-shell">
+	      <section
+	        className="onboarding-shell"
+	        onKeyDownCapture={(event) => {
+	          if (event.key === "Shift") event.stopPropagation();
+	        }}
+	      >
 	        <div className="onboarding-hero">
 	          <p className="eyebrow">Welcome</p>
 	          <h1>先把财务系统调成你的样子</h1>
@@ -3571,38 +3841,86 @@ export function App() {
 	                </div>
 	                {!onboardingSkipAssets ? (
 	                  <div className="onboarding-asset-builder">
+	                    <div className="onboarding-category-manager">
+	                      <div className="category-manager-header">
+	                        <div>
+	                          <strong>资产分类</strong>
+	                          <span>可以改名、新增或删除默认分类。新增后下方立刻可选。</span>
+	                        </div>
+	                        <button className="secondary-button compact" onClick={() => addAssetCategory(null)} type="button">
+	                          <Plus size={14} />
+	                          新增一级类型
+	                        </button>
+	                      </div>
+	                      <div className="category-tree-editor">
+	                        {assetCategoryTree.map((top) => (
+	                          <div className="category-tree-node top" key={top.id}>
+	                            <div className="category-tree-row">
+	                              <span>一级</span>
+	                              <input
+	                                lang="zh-CN"
+	                                spellCheck={false}
+	                                value={top.label}
+	                                onChange={(event) => renameAssetCategory(top.id, event.target.value)}
+	                              />
+	                              <button className="link-button" onClick={() => addAssetCategory(top.id)} type="button">新增子类</button>
+	                              <button className="link-button danger-link" onClick={() => deleteAssetCategory(top.id)} type="button">删除</button>
+	                            </div>
+	                            {top.children.map((child) => (
+	                              <div className="category-tree-node child" key={child.id}>
+	                                <div className="category-tree-row">
+	                                  <span>子类</span>
+	                                  <input
+	                                    lang="zh-CN"
+	                                    spellCheck={false}
+	                                    value={child.label}
+	                                    onChange={(event) => renameAssetCategory(child.id, event.target.value)}
+	                                  />
+	                                  <button className="link-button" onClick={() => addAssetCategory(child.id)} type="button">新增子子类</button>
+	                                  <button className="link-button danger-link" onClick={() => deleteAssetCategory(child.id)} type="button">删除</button>
+	                                </div>
+	                                {child.children.map((grandchild) => (
+	                                  <div className="category-tree-row grandchild" key={grandchild.id}>
+	                                    <span>子子类</span>
+	                                    <input
+	                                      lang="zh-CN"
+	                                      spellCheck={false}
+	                                      value={grandchild.label}
+	                                      onChange={(event) => renameAssetCategory(grandchild.id, event.target.value)}
+	                                    />
+	                                    <button className="link-button danger-link" onClick={() => deleteAssetCategory(grandchild.id)} type="button">删除</button>
+	                                  </div>
+	                                ))}
+	                              </div>
+	                            ))}
+	                          </div>
+	                        ))}
+	                      </div>
+	                    </div>
 	                    <div className="onboarding-form-grid">
 	                      <label>
 	                        资产名称
-	                        <input value={onboardingAssetDraft.name} onChange={(event) => updateOnboardingAssetDraft({ name: event.target.value })} placeholder="例如：标普 500 A" />
+	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.name} onChange={(event) => updateOnboardingAssetDraft({ name: event.target.value })} placeholder="例如：标普 500 A" />
 	                      </label>
 	                      <label>
 	                        一级类型
-	                        <select value={onboardingAssetDraft.topCategory} onChange={(event) => updateOnboardingAssetDraft({ topCategory: event.target.value })}>
-	                          {assetTopOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                        <select value={onboardingAssetDraft.topCategory} onChange={(event) => updateOnboardingAssetTopCategory(event.target.value)}>
+	                          {onboardingTopOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
 	                        </select>
 	                      </label>
-	                      {onboardingAssetDraft.topCategory === "fund" ? (
+	                      {onboardingSecondOptions.length > 0 ? (
 	                        <label>
-	                          基金分类
-	                          <select value={onboardingAssetDraft.fundCategory} onChange={(event) => updateOnboardingAssetDraft({ fundCategory: event.target.value })}>
-	                            {fundCategoryOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                          子类
+	                          <select value={onboardingSecondValue} onChange={(event) => updateOnboardingAssetSecondCategory(event.target.value)}>
+	                            {onboardingSecondOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
 	                          </select>
 	                        </label>
 	                      ) : null}
-	                      {onboardingAssetDraft.topCategory === "fund" && onboardingAssetDraft.fundCategory === "asset_cat_us_equity" ? (
+	                      {onboardingThirdOptions.length > 0 ? (
 	                        <label>
-	                          美股子类
-	                          <select value={onboardingAssetDraft.usEquityCategory} onChange={(event) => updateOnboardingAssetDraft({ usEquityCategory: event.target.value })}>
-	                            {usEquityCategoryOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-	                          </select>
-	                        </label>
-	                      ) : null}
-	                      {onboardingAssetDraft.topCategory === "cash" ? (
-	                        <label>
-	                          现金子类
-	                          <select value={onboardingAssetDraft.cashCategory} onChange={(event) => updateOnboardingAssetDraft({ cashCategory: event.target.value })}>
-	                            {cashCategoryOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                          子子类
+	                          <select value={onboardingAssetDraft.usEquityCategory} onChange={(event) => updateOnboardingAssetThirdCategory(event.target.value)}>
+	                            {onboardingThirdOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
 	                          </select>
 	                        </label>
 	                      ) : null}
@@ -3614,15 +3932,15 @@ export function App() {
 	                      </label>
 	                      <label>
 	                        平台
-	                        <input value={onboardingAssetDraft.platform} onChange={(event) => updateOnboardingAssetDraft({ platform: event.target.value })} placeholder="支付宝 / 证券账户 / 银行" />
+	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.platform} onChange={(event) => updateOnboardingAssetDraft({ platform: event.target.value })} placeholder="支付宝 / 证券账户 / 银行" />
 	                      </label>
 	                      <label>
 	                        标签
-	                        <input value={onboardingAssetDraft.tags} onChange={(event) => updateOnboardingAssetDraft({ tags: event.target.value })} placeholder="中文或英文逗号分隔" />
+	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.tags} onChange={(event) => updateOnboardingAssetDraft({ tags: event.target.value })} placeholder="中文或英文逗号分隔" />
 	                      </label>
 	                      <label>
 	                        备注
-	                        <input value={onboardingAssetDraft.note} onChange={(event) => updateOnboardingAssetDraft({ note: event.target.value })} placeholder="可空" />
+	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.note} onChange={(event) => updateOnboardingAssetDraft({ note: event.target.value })} placeholder="可空" />
 	                      </label>
 	                    </div>
 	                    <div className="onboarding-inline-choice">
@@ -3695,7 +4013,7 @@ export function App() {
 	                    </div>
 	                    <div className="onboarding-target-list">
 	                      {onboardingTargets.length === 0 ? <div className="dashboard-empty-state compact">还没有目标配比。可以新增，也可以跳过。</div> : onboardingTargets.map((target, index) => {
-	                        const parent = target.parent_category_id ?? "asset_cat_us_equity";
+	                        const parent = target.parent_category_id ?? onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_us_equity";
 	                        return (
 	                          <div className="onboarding-target-row" key={`target-${index}`}>
 	                            <select value={target.level} onChange={(event) => updateOnboardingTarget(index, { level: event.target.value as OnboardingAllocationTarget["level"] })}>
@@ -3704,17 +4022,17 @@ export function App() {
 	                              <option value="asset">具体资产</option>
 	                            </select>
 	                            {target.level === "main" ? (
-	                              <select value={target.category_id ?? "asset_cat_us_equity"} onChange={(event) => updateOnboardingTarget(index, { category_id: event.target.value })}>
-	                                {mainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                              <select value={target.category_id ?? onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_us_equity"} onChange={(event) => updateOnboardingTarget(index, { category_id: event.target.value })}>
+	                                {onboardingMainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
 	                              </select>
 	                            ) : null}
 	                            {target.level === "sub" ? (
 	                              <>
-	                                <select value={parent} onChange={(event) => updateOnboardingTarget(index, { parent_category_id: event.target.value, category_id: subAllocationOptions[event.target.value]?.[0]?.[0] ?? null })}>
-	                                  {mainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                                <select value={parent} onChange={(event) => updateOnboardingTarget(index, { parent_category_id: event.target.value, category_id: onboardingSubAllocationOptions[event.target.value]?.[0]?.[0] ?? null })}>
+	                                  {onboardingMainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
 	                                </select>
-	                                <select value={target.category_id ?? subAllocationOptions[parent]?.[0]?.[0]} onChange={(event) => updateOnboardingTarget(index, { category_id: event.target.value })}>
-	                                  {(subAllocationOptions[parent] ?? []).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+	                                <select value={target.category_id ?? onboardingSubAllocationOptions[parent]?.[0]?.[0] ?? ""} onChange={(event) => updateOnboardingTarget(index, { category_id: event.target.value })}>
+	                                  {(onboardingSubAllocationOptions[parent] ?? []).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
 	                                </select>
 	                              </>
 	                            ) : null}
@@ -5062,7 +5380,7 @@ export function App() {
                   ) : null}
                   {assetClassification.topCategory === "fund" && assetClassification.fundCategory === "asset_cat_us_equity" ? (
                     <label>
-                      美股子类
+                    指数子类
                       <select
                         value={assetClassification.usEquityCategory}
                         onChange={(event) =>
@@ -5762,7 +6080,7 @@ export function App() {
     const ytdExpense = dashboardTrends.reduce((sum, item) => sum + item.expense, 0);
     const ytdSaving = ytdIncome - ytdExpense;
     const latestDiscretionaryAmount = [...summary.discretionary_trends].reverse().find((item) => item.period_month === summary.snapshot_month)?.amount ?? 0;
-    const returnGroupOrder = ["美股", "黄金", "债券", "红利低波"];
+    const returnGroupOrder = ["指数基金", "债券基金", "黄金", "美股", "债券", "红利低波"];
     const expenseRowsForRange = dashboardRange === "本月" ? summary.expense_categories : summary.expense_year_rank;
     const expenseScopeLabel = dashboardRange === "本月" ? "本月" : `${rangeLabel} 累计`;
     const expenseTotalForRange = expenseRowsForRange.reduce((sum, item) => sum + item.amount, 0);
@@ -6970,7 +7288,7 @@ export function App() {
                 {renderDiscretionaryChart()}
                 <div className="dashboard-chart-grid">
                   {renderDonutChart(summary.asset_allocations, "当前资产配置", "各资产类别金额占比。")}
-                  {renderDonutChart(summary.us_equity_allocations, "美股子类拆分", "标普、纳斯达克及其它非零子类占比。")}
+                  {renderDonutChart(summary.us_equity_allocations, "指数子类拆分", "标普、纳斯达克及其它指数子类占比。")}
                 </div>
                 <div className="allocation-list">
                   {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
@@ -7027,7 +7345,7 @@ export function App() {
                   <div>
                     <span>非现金资产组</span>
                     <strong>{investmentGroupRows.length}</strong>
-                    <small>美股 / 红利低波 / 黄金 / 债券</small>
+                    <small>指数基金 / 债券基金 / 黄金 / 现金</small>
                   </div>
                 </div>
                 {renderInvestmentGroupChart()}
