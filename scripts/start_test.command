@@ -28,6 +28,13 @@ if [ -n "$OLD_APP_PIDS" ]; then
   sleep 1
 fi
 
+OLD_INSTALLED_APP_PIDS="$(pgrep -f '/Applications/Financial Planning.app/Contents/MacOS/financial-planning' 2>/dev/null || true)"
+if [ -n "$OLD_INSTALLED_APP_PIDS" ]; then
+  echo "关闭已安装正式 App 进程：$OLD_INSTALLED_APP_PIDS"
+  kill $OLD_INSTALLED_APP_PIDS 2>/dev/null || true
+  sleep 1
+fi
+
 find "$TEST_DIR" -maxdepth 1 -name 'monthly_update_test_*.sqlite3' -delete
 find "$TEST_DIR" -maxdepth 1 -name 'dashboard_test_*.sqlite3' -delete
 
@@ -41,6 +48,7 @@ sqlite3 "$DASHBOARD_DB" ".backup '$WORK_DB'"
 export FINANCIAL_PLANNING_WORK_DB_PATH="$WORK_DB"
 export FINANCIAL_PLANNING_DASHBOARD_DB_PATH="$DASHBOARD_DB"
 export FINANCIAL_PLANNING_DB_PATH="$WORK_DB"
+export FINANCIAL_PLANNING_ENV_LABEL="Test"
 
 echo "测试模式已开启。"
 echo "真实数据库不会被写入。"

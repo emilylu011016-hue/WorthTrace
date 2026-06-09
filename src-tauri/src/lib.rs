@@ -84,6 +84,7 @@ struct DashboardSeedSummary {
   spending_anomalies: Vec<SpendingAnomaly>,
   asset_allocations: Vec<AssetAllocationBreakdown>,
   us_equity_allocations: Vec<AssetAllocationBreakdown>,
+  allocation_target_groups: Vec<AllocationTargetGroup>,
   asset_allocation_trends: Vec<AssetAllocationTrend>,
   investment_assets: Vec<InvestmentAssetPerformance>,
   investment_cashflow_calendar: Vec<InvestmentCashflowCalendarItem>,
@@ -128,6 +129,13 @@ struct AssetAllocationBreakdown {
   percent: f64,
   target_percent: Option<f64>,
   deviation_percent: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct AllocationTargetGroup {
+  parent_category_id: String,
+  parent_category: String,
+  rows: Vec<AssetAllocationBreakdown>,
 }
 
 #[derive(Serialize)]
@@ -879,6 +887,22 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
     [],
   )?;
   seed_default_content_templates(connection)?;
+  normalize_builtin_asset_category_labels(connection)?;
+  Ok(())
+}
+
+fn normalize_builtin_asset_category_labels(connection: &Connection) -> Result<(), AppError> {
+  let labels = [
+    ("asset_sub_sp500", "标普"),
+    ("asset_sub_nasdaq", "纳斯达克"),
+    ("asset_sub_us_tech", "科技"),
+  ];
+  for (id, label) in labels {
+    connection.execute(
+      "update asset_categories set name = ?1 where id = ?2",
+      params![label, id],
+    )?;
+  }
   Ok(())
 }
 
@@ -1844,6 +1868,7 @@ fn asset_allocation_breakdown(
     "
     with rows as (
       select
+        {category_join}.id as category_id,
         {category_join}.name as category,
         coalesce(sum(mas.amount_cny), 0) as amount,
         pti.target_percent as target_percent
@@ -1860,19 +1885,29 @@ fn asset_allocation_breakdown(
       group by {category_join}.id, {category_join}.name, pti.target_percent, {category_join}.sort_order
       order by {category_join}.sort_order
     ),
-    total as (
-      select coalesce(sum(amount), 0) as total_amount from rows
+	    total as (
+	      select coalesce(sum(amount), 0) as total_amount from rows
     )
-    select
-      rows.category,
-      rows.amount,
-      case when total.total_amount > 0 then rows.amount / total.total_amount else 0 end,
-      rows.target_percent
-    from rows cross join total
-    ",
-    if parent_id.is_some() { "a.sub_asset_category_id" } else { "a.main_asset_category_id" }
+	    select
+	      rows.category_id,
+	      rows.category,
+	      rows.amount,
+	      case when total.total_amount > 0 then rows.amount / total.total_amount else 0 end,
+	      rows.target_percent
+	    from rows cross join total
+	    ",
+    if parent_id.is_some() {
+      "a.sub_asset_category_id"
+    } else {
+      "a.main_asset_category_id"
+    }
   );
   let mut statement = connection.prepare(&query)?;
+  let custom_targets = custom_allocation_target_map(
+    connection,
+    if parent_id.is_some() { "sub" } else { "main" },
+    parent_id,
+  )?;
   let mut rows = if let Some(parent) = parent_id {
     statement.query(params![period_month, parent])?
   } else {
@@ -1880,49 +1915,92 @@ fn asset_allocation_breakdown(
   };
   let mut out = Vec::new();
   while let Some(row) = rows.next()? {
-    let target_percent: Option<f64> = row.get(3)?;
-    let percent: f64 = row.get(2)?;
+    let category_id: String = row.get(0)?;
+    let target_percent: Option<f64> = custom_targets.get(&category_id).copied().or(row.get(4)?);
+    let percent: f64 = row.get(3)?;
+    let amount: f64 = row.get(2)?;
+    if amount.abs() <= 0.000_001 && target_percent.is_none() {
+      continue;
+    }
     out.push(AssetAllocationBreakdown {
-      category: row.get(0)?,
-      amount: row.get(1)?,
+      category: row.get(1)?,
+      amount,
       percent,
       target_percent,
       deviation_percent: target_percent.map(|target| percent - target),
     });
   }
-  if parent_id == Some("asset_cat_us_equity") {
-    let mut merged: Vec<AssetAllocationBreakdown> = Vec::new();
-    for item in out {
-      let category = match item.category.as_str() {
-        "标普" | "纳斯达克" | "信息科技" | "科技" | "其他" | "其他美股" => "美股".to_string(),
-        _ => item.category,
-      };
-      if let Some(existing) = merged.iter_mut().find(|row| row.category == category) {
-        existing.amount += item.amount;
-        existing.target_percent = match (existing.target_percent, item.target_percent) {
-          (Some(left), Some(right)) => Some(left + right),
-          (Some(left), None) => Some(left),
-          (None, Some(right)) => Some(right),
-          (None, None) => None,
-        };
-      } else {
-        merged.push(AssetAllocationBreakdown {
-          category,
-          amount: item.amount,
-          percent: 0.0,
-          target_percent: item.target_percent,
-          deviation_percent: None,
-        });
+  Ok(out)
+}
+
+fn custom_allocation_target_map(
+  connection: &Connection,
+  level: &str,
+  parent_id: Option<&str>,
+) -> Result<HashMap<String, f64>, AppError> {
+  let raw = setting_raw_json(connection, "dashboard_custom_allocation_targets", "[]")?;
+  let targets: Vec<OnboardingAllocationTargetInput> = serde_json::from_str(&raw).unwrap_or_default();
+  let mut out = HashMap::new();
+  for target in targets {
+    if target.level != level {
+      continue;
+    }
+    if let Some(parent) = parent_id {
+      if target.parent_category_id.as_deref() != Some(parent) {
+        continue;
       }
     }
-    let total: f64 = merged.iter().map(|item| item.amount).sum();
-    for item in merged.iter_mut() {
-      item.percent = if total > 0.0 { item.amount / total } else { 0.0 };
-      item.deviation_percent = item.target_percent.map(|target| item.percent - target);
+    let Some(category_id) = target.category_id else {
+      continue;
+    };
+    let normalized = if target.target_percent.abs() > 1.0 {
+      target.target_percent / 100.0
+    } else {
+      target.target_percent
+    };
+    if normalized.is_finite() && normalized >= 0.0 {
+      out.insert(category_id, normalized);
     }
-    return Ok(merged);
   }
   Ok(out)
+}
+
+fn allocation_target_groups(
+  connection: &Connection,
+  period_month: &str,
+) -> Result<Vec<AllocationTargetGroup>, AppError> {
+  let raw = setting_raw_json(connection, "dashboard_custom_allocation_targets", "[]")?;
+  let targets: Vec<OnboardingAllocationTargetInput> = serde_json::from_str(&raw).unwrap_or_default();
+  let mut parent_ids: Vec<String> = Vec::new();
+  for target in targets.iter().filter(|target| target.level == "sub") {
+    let Some(parent_id) = target.parent_category_id.as_ref().filter(|value| !value.trim().is_empty()) else {
+      continue;
+    };
+    if !parent_ids.iter().any(|id| id == parent_id) {
+      parent_ids.push(parent_id.clone());
+    }
+  }
+
+  let mut groups = Vec::new();
+  for parent_id in parent_ids {
+    let parent_category = connection
+      .query_row(
+        "select name from asset_categories where id = ?1",
+        params![parent_id],
+        |row| row.get::<_, String>(0),
+      )
+      .optional()?
+      .unwrap_or_else(|| parent_id.clone());
+    let rows = asset_allocation_breakdown(connection, period_month, Some(&parent_id))?;
+    if rows.iter().any(|row| row.target_percent.is_some()) {
+      groups.push(AllocationTargetGroup {
+        parent_category_id: parent_id,
+        parent_category,
+        rows,
+      });
+    }
+  }
+  Ok(groups)
 }
 
 fn investment_cashflow_calendar(
@@ -2553,9 +2631,9 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       id: "asset_cat_us_equity".to_string(),
       label: "全球资产".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "美股".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "港股".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_us_tech".to_string(), label: "新兴市场".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_us_tech".to_string(), label: "科技".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
@@ -2601,6 +2679,25 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
   ]
 }
 
+fn normalize_asset_category_tree_labels(mut tree: Vec<OnboardingAssetCategoryInput>) -> Vec<OnboardingAssetCategoryInput> {
+  fn normalize_node(node: &mut OnboardingAssetCategoryInput) {
+    node.label = match node.id.as_str() {
+      "asset_sub_sp500" => "标普".to_string(),
+      "asset_sub_nasdaq" => "纳斯达克".to_string(),
+      "asset_sub_us_tech" => "科技".to_string(),
+      _ => node.label.clone(),
+    };
+    for child in node.children.iter_mut() {
+      normalize_node(child);
+    }
+  }
+
+  for node in tree.iter_mut() {
+    normalize_node(node);
+  }
+  tree
+}
+
 fn setting_string_array(connection: &Connection, key: &str, fallback: Vec<String>) -> Result<Vec<String>, AppError> {
   let value: Result<String, rusqlite::Error> = connection.query_row(
     "select value_json from app_settings where key = ?1",
@@ -2623,7 +2720,9 @@ fn setting_asset_category_tree(connection: &Connection) -> Result<Vec<Onboarding
   );
 
   match value {
-    Ok(raw) => Ok(serde_json::from_str::<Vec<OnboardingAssetCategoryInput>>(&raw).unwrap_or_else(|_| default_asset_category_tree())),
+    Ok(raw) => Ok(normalize_asset_category_tree_labels(
+      serde_json::from_str::<Vec<OnboardingAssetCategoryInput>>(&raw).unwrap_or_else(|_| default_asset_category_tree()),
+    )),
     Err(rusqlite::Error::QueryReturnedNoRows) => Ok(default_asset_category_tree()),
     Err(error) => Err(error.into()),
   }
@@ -2716,8 +2815,37 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
     Vec::new(),
   )?;
   let allocation_targets = setting_raw_json(connection, "dashboard_custom_allocation_targets", "[]")?;
-  let allocation_targets: Vec<OnboardingAllocationTargetInput> =
+  let mut allocation_targets: Vec<OnboardingAllocationTargetInput> =
     serde_json::from_str(&allocation_targets).unwrap_or_default();
+  if allocation_targets.is_empty() {
+    let mut statement = connection.prepare(
+      "
+      select
+        pti.main_asset_category_id,
+        coalesce(ac.name, pti.main_asset_category_id) as category_name,
+        pti.target_percent
+      from portfolio_target_items pti
+      join portfolio_targets pt on pt.id = pti.target_id
+      left join asset_categories ac on ac.id = pti.main_asset_category_id
+      where pt.is_active = 1
+      order by coalesce(ac.sort_order, 999999), ac.name, pti.main_asset_category_id
+      ",
+    )?;
+    let rows = statement.query_map([], |row| {
+      let category_id: String = row.get(0)?;
+      let label: String = row.get(1)?;
+      let target_percent: f64 = row.get(2)?;
+      Ok(OnboardingAllocationTargetInput {
+        level: "main".to_string(),
+        parent_category_id: None,
+        category_id: Some(category_id),
+        asset_id: None,
+        label,
+        target_percent,
+      })
+    })?;
+    allocation_targets = rows.collect::<Result<Vec<_>, _>>()?;
+  }
   let allocation_targets: Vec<OnboardingAllocationTargetInput> = allocation_targets
     .into_iter()
     .map(|target| OnboardingAllocationTargetInput {
@@ -2761,7 +2889,8 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
     |row| row.get(0),
   )?;
 	  let completed = setting_bool(connection, "onboarding_completed", false)? || business_count > 0;
-  let skip_allocation_targets = setting_bool(connection, "onboarding_allocation_targets_skipped", allocation_targets.is_empty())?;
+  let skip_allocation_targets =
+    setting_bool(connection, "onboarding_allocation_targets_skipped", allocation_targets.is_empty())? && allocation_targets.is_empty();
 
 	  Ok(OnboardingStatus {
 	    completed,
@@ -6248,6 +6377,7 @@ fn get_dashboard_seed_summary(
   let spending_anomalies = spending_anomalies(&connection, &snapshot_month)?;
   let asset_allocations = asset_allocation_breakdown(&connection, &snapshot_month, None)?;
   let us_equity_allocations = asset_allocation_breakdown(&connection, &snapshot_month, Some("asset_cat_us_equity"))?;
+  let allocation_target_groups = allocation_target_groups(&connection, &snapshot_month)?;
   let asset_allocation_trends = asset_allocation_trends(&connection)?;
   let investment_assets = investment_asset_performance(&connection, &snapshot_month)?;
   let investment_cashflow_calendar = investment_cashflow_calendar(&connection, &snapshot_month)?;
@@ -6275,14 +6405,16 @@ fn get_dashboard_seed_summary(
     join portfolio_targets pt on pt.id = pti.target_id and pt.is_active = 1
     join asset_categories ac on ac.id = pti.main_asset_category_id
     left join assets a on a.main_asset_category_id = ac.id
-    left join monthly_asset_snapshots mas on mas.asset_id = a.id
-      and mas.period_month = ?1
-      and mas.version_no = 1
-      and mas.status = 'held'
-    group by ac.id, ac.name, pti.target_percent
-    order by ac.sort_order
-    ",
-  )?;
+	    left join monthly_asset_snapshots mas on mas.asset_id = a.id
+	      and mas.period_month = ?1
+	      and mas.version_no = 1
+	      and mas.status = 'held'
+	    group by ac.id, ac.name, pti.target_percent
+	    having abs(coalesce(sum(mas.amount_cny), 0)) > 0.000001
+	      or pti.target_percent is not null
+	    order by ac.sort_order
+	    ",
+	  )?;
 
   let mut rows = statement.query(params![snapshot_month])?;
   let mut portfolio_targets = Vec::new();
@@ -6330,6 +6462,7 @@ fn get_dashboard_seed_summary(
     spending_anomalies,
     asset_allocations,
     us_equity_allocations,
+    allocation_target_groups,
     asset_allocation_trends,
     investment_assets,
     investment_cashflow_calendar,

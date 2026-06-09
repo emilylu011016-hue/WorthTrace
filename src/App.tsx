@@ -68,6 +68,12 @@ type AssetAllocationBreakdown = {
   deviation_percent?: number | null;
 };
 
+type AllocationTargetGroup = {
+  parent_category_id: string;
+  parent_category: string;
+  rows: AssetAllocationBreakdown[];
+};
+
 type AssetAllocationTrend = {
   period_month: string;
   category: string;
@@ -162,6 +168,7 @@ type DashboardSeedSummary = {
   spending_anomalies: SpendingAnomaly[];
   asset_allocations: AssetAllocationBreakdown[];
   us_equity_allocations: AssetAllocationBreakdown[];
+  allocation_target_groups: AllocationTargetGroup[];
   asset_allocation_trends: AssetAllocationTrend[];
   investment_assets: InvestmentAssetPerformance[];
   investment_cashflow_calendar: InvestmentCashflowCalendarItem[];
@@ -662,15 +669,15 @@ const assetTopOptions = [
 ];
 
 const fundCategoryOptions = [
-  ["asset_sub_sp500", "美股"],
-  ["asset_sub_nasdaq", "港股"],
-  ["asset_sub_us_tech", "新兴市场"]
+  ["asset_sub_sp500", "标普"],
+  ["asset_sub_nasdaq", "纳斯达克"],
+  ["asset_sub_us_tech", "科技"]
 ];
 
 const usEquityCategoryOptions = [
-  ["asset_sub_sp500", "美股"],
-  ["asset_sub_nasdaq", "港股"],
-  ["asset_sub_us_tech", "新兴市场"]
+  ["asset_sub_sp500", "标普"],
+  ["asset_sub_nasdaq", "纳斯达克"],
+  ["asset_sub_us_tech", "科技"]
 ];
 
 const cashCategoryOptions = [
@@ -728,9 +735,9 @@ const defaultAssetCategoryTree: AssetCategoryNode[] = [
     id: "asset_cat_us_equity",
     label: "全球资产",
     children: [
-      { id: "asset_sub_sp500", label: "美股", children: [] },
-      { id: "asset_sub_nasdaq", label: "港股", children: [] },
-      { id: "asset_sub_us_tech", label: "新兴市场", children: [] }
+      { id: "asset_sub_sp500", label: "标普", children: [] },
+      { id: "asset_sub_nasdaq", label: "纳斯达克", children: [] },
+      { id: "asset_sub_us_tech", label: "科技", children: [] }
     ]
   },
   {
@@ -880,6 +887,13 @@ function parsePercentInput(value: string) {
   if (value.trim() === "") return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizePercentDraftInput(value: string) {
+  const digitsAndDots = value.replace(/[^\d.]/g, "");
+  const firstDotIndex = digitsAndDots.indexOf(".");
+  if (firstDotIndex === -1) return digitsAndDots;
+  return `${digitsAndDots.slice(0, firstDotIndex + 1)}${digitsAndDots.slice(firstDotIndex + 1).replace(/\./g, "")}`;
 }
 
 function allocationTargetsForEditor(targets: OnboardingAllocationTarget[]) {
@@ -1170,6 +1184,7 @@ const fallbackSummary: DashboardSeedSummary = {
   spending_anomalies: [],
   asset_allocations: [],
   us_equity_allocations: [],
+  allocation_target_groups: [],
   asset_allocation_trends: [],
   investment_assets: [],
   investment_cashflow_calendar: [],
@@ -1422,6 +1437,7 @@ export function App() {
   const [onboardingSkipAssets, setOnboardingSkipAssets] = useState(false);
   const [onboardingTargets, setOnboardingTargets] = useState<OnboardingAllocationTarget[]>([]);
   const [editedMainTargetIds, setEditedMainTargetIds] = useState<Set<string>>(() => new Set());
+  const [onboardingMainTargetDraftPercents, setOnboardingMainTargetDraftPercents] = useState<Record<string, string>>({});
   const [onboardingSkipTargets, setOnboardingSkipTargets] = useState(false);
   const [onboardingSubTargetDraftParent, setOnboardingSubTargetDraftParent] = useState("asset_cat_cash");
   const [onboardingSubTargetDraftPercents, setOnboardingSubTargetDraftPercents] = useState<Record<string, string>>({});
@@ -2237,10 +2253,11 @@ export function App() {
 		    setOnboardingStatus(status);
 		    setOnboardingSavingRate(String(Math.round((status.target_saving_rate || 0.3) * 100)));
 		    setOnboardingSections(status.dashboard_enabled_sections?.length ? status.dashboard_enabled_sections : defaultOnboardingSections);
-		    setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
-		    setOnboardingTargets(allocationTargetsForEditor(status.allocation_targets ?? []));
-		    setEditedMainTargetIds(new Set());
-		    setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? (status.allocation_targets ?? []).length === 0));
+			    setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
+			    setOnboardingTargets(allocationTargetsForEditor(status.allocation_targets ?? []));
+			    setEditedMainTargetIds(new Set());
+			    setOnboardingMainTargetDraftPercents({});
+			    setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? (status.allocation_targets ?? []).length === 0));
 		    setAssetCategoryTree(status.asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(status.asset_category_tree) : cloneAssetCategoryTree());
 	    if (!status.completed) {
 	      setView("onboarding");
@@ -2273,14 +2290,16 @@ export function App() {
 		    setOnboardingAssets([]);
 		    try {
 		      const status = await refreshOnboardingStatus();
-		      const editorTargets = allocationTargetsForEditor(status.allocation_targets ?? []);
-		      setOnboardingTargets(editorTargets);
-		      setEditedMainTargetIds(new Set());
-		      setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? editorTargets.length === 0));
+			      const editorTargets = allocationTargetsForEditor(status.allocation_targets ?? []);
+			      setOnboardingTargets(editorTargets);
+			      setEditedMainTargetIds(new Set());
+			      setOnboardingMainTargetDraftPercents({});
+			      setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? editorTargets.length === 0));
 		      const preferenceAssets = await invoke<AssetEntryItem[]>("get_asset_entry_items", { periodMonth: selectedMonth || nextMonthlyUpdateMonth() });
-		      setAssetItems(normalizeAssetEntryItems(preferenceAssets));
-		      setOnboardingTargets(editorTargets);
-		      setEditedMainTargetIds(new Set());
+			      setAssetItems(normalizeAssetEntryItems(preferenceAssets));
+			      setOnboardingTargets(editorTargets);
+			      setEditedMainTargetIds(new Set());
+			      setOnboardingMainTargetDraftPercents({});
 		    } catch (err) {
 		      setOnboardingMessage(String(err));
 		    }
@@ -3295,8 +3314,11 @@ export function App() {
 		    );
 		  }
 
-		  function updateMainOnboardingTarget(categoryId: string, label: string, targetPercent: number) {
-		    setEditedMainTargetIds((current) => {
+			  function updateMainOnboardingTarget(categoryId: string, label: string, rawTargetPercent: string) {
+			    const draftValue = normalizePercentDraftInput(rawTargetPercent);
+			    const targetPercent = parsePercentInput(draftValue);
+			    setOnboardingMainTargetDraftPercents((current) => ({ ...current, [categoryId]: draftValue }));
+			    setEditedMainTargetIds((current) => {
 		      const next = new Set(current);
 		      next.add(categoryId);
 		      return next;
@@ -3408,9 +3430,10 @@ export function App() {
 	      setOnboardingAssetDraft(normalizeOnboardingAssetDraft(blankOnboardingAsset(), cleanTree));
 	      setOnboardingAssets([]);
 	      setOnboardingSkipAssets(false);
-		      setOnboardingTargets([]);
-		      setEditedMainTargetIds(new Set());
-		      setOnboardingSkipTargets(false);
+			      setOnboardingTargets([]);
+			      setEditedMainTargetIds(new Set());
+			      setOnboardingMainTargetDraftPercents({});
+			      setOnboardingSkipTargets(false);
 	      setOnboardingSubTargetDraftParent("asset_cat_cash");
 	      setOnboardingSubTargetDraftPercents({});
 	      setEditingSubTargetParentId(null);
@@ -3490,7 +3513,7 @@ export function App() {
 	      ...target,
 	      label: targetLabel(target),
 	      target_percent:
-	        (target.level === "main" && target.category_id && (Number(target.target_percent) || 0) === 0 && (Number(savedMainTargetByCategory.get(target.category_id)?.target_percent) || 0) > 0
+		        (target.level === "main" && target.category_id && !editedMainTargetIds.has(target.category_id) && (Number(target.target_percent) || 0) === 0 && (Number(savedMainTargetByCategory.get(target.category_id)?.target_percent) || 0) > 0
 	          ? Number(savedMainTargetByCategory.get(target.category_id)?.target_percent) || 0
 	          : Number(target.target_percent) || 0) / 100
 	    }));
@@ -4936,21 +4959,23 @@ export function App() {
 			                      <span className={mainTargetTotalClass}>合计 {mainTargetTotal.toFixed(1)}%</span>
 			                    </div>
 			                    <div className="onboarding-target-list">
-				                      {mainTargets.length === 0 ? <div className="dashboard-empty-state compact">还没有可用一级分类。可以返回上一步录入资产，或直接跳过。</div> : mainTargets.map((target) => {
-				                        const categoryId = target.category_id ?? onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
-				                        const categoryLabel = optionLabel(onboardingSelectedMainAllocationOptions, categoryId);
-				                        return (
-				                          <div className="onboarding-target-row main-target-row" key={`main-target-${categoryId}`}>
-			                            <strong>{categoryLabel}</strong>
-			                            <label className="percentage-input">
-			                              <input
-			                                max="100"
-			                                min="0"
-				                                onChange={(event) => updateMainOnboardingTarget(categoryId, categoryLabel, parsePercentInput(event.target.value))}
-			                                placeholder="目标比例"
-			                                type="number"
-			                                value={percentInputValue(target.target_percent)}
-			                              />
+					                      {mainTargets.length === 0 ? <div className="dashboard-empty-state compact">还没有可用一级分类。可以返回上一步录入资产，或直接跳过。</div> : mainTargets.map((target) => {
+					                        const categoryId = target.category_id ?? onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
+					                        const categoryLabel = optionLabel(onboardingSelectedMainAllocationOptions, categoryId);
+					                        const draftValue = onboardingMainTargetDraftPercents[categoryId];
+					                        return (
+					                          <div className="onboarding-target-row main-target-row" key={`main-target-${categoryId}`}>
+				                            <strong>{categoryLabel}</strong>
+				                            <label className="percentage-input">
+				                              <input
+				                                inputMode="decimal"
+				                                max="100"
+				                                min="0"
+					                                onChange={(event) => updateMainOnboardingTarget(categoryId, categoryLabel, event.target.value)}
+				                                placeholder="目标比例"
+				                                type="text"
+				                                value={draftValue ?? percentInputValue(target.target_percent)}
+				                              />
 		                              <span>%</span>
 		                            </label>
 		                          </div>
@@ -4982,13 +5007,14 @@ export function App() {
 		                              <div className="sub-target-draft-row" key={`sub-target-draft-${categoryId}`}>
 		                                <strong>{label}</strong>
 		                                <label className="percentage-input">
-		                                  <input
-		                                    max="100"
-		                                    min="0"
-		                                    onChange={(event) => setOnboardingSubTargetDraftPercents((current) => ({ ...current, [categoryId]: event.target.value }))}
-		                                    placeholder="目标比例"
-		                                    type="number"
-		                                    value={onboardingSubTargetDraftPercents[categoryId] ?? ""}
+			                                  <input
+			                                    inputMode="decimal"
+			                                    max="100"
+			                                    min="0"
+			                                    onChange={(event) => setOnboardingSubTargetDraftPercents((current) => ({ ...current, [categoryId]: normalizePercentDraftInput(event.target.value) }))}
+			                                    placeholder="目标比例"
+			                                    type="text"
+			                                    value={onboardingSubTargetDraftPercents[categoryId] ?? ""}
 		                                  />
 		                                  <span>%</span>
 		                                </label>
@@ -7070,7 +7096,17 @@ export function App() {
       ...dashboardTrends.flatMap((item) => [item.income, item.expense, Math.abs(item.saving_amount), item.net_worth]),
       1
     );
-    const investmentGroupRows = summary.investment_group_performances.filter((item) => item.group_name !== "现金");
+    const hasInvestmentGroupData = (item: InvestmentGroupPerformance) =>
+      item.group_name !== "现金" &&
+      (
+        Math.abs(item.ending_value) > 0.000_001 ||
+        Math.abs(item.gain) > 0.000_001 ||
+        Math.abs(item.buy) > 0.000_001 ||
+        Math.abs(item.sell) > 0.000_001 ||
+        Math.abs(item.dividend) > 0.000_001 ||
+        (item.return_rate !== null && item.return_rate !== undefined)
+      );
+    const investmentGroupRows = summary.investment_group_performances.filter(hasInvestmentGroupData);
     const investmentGain = investmentGroupRows.reduce((sum, item) => sum + item.gain, 0);
     const monthlyXirr = dashboardTrends.find((item) => item.period_month === summary.snapshot_month)?.monthly_xirr ?? null;
     const xirrToPeriodReturn = (rate: number | null | undefined, periodMonth: string) => {
@@ -7086,13 +7122,27 @@ export function App() {
     const ytdSaving = ytdIncome - ytdExpense;
     const latestDiscretionaryAmount = [...summary.discretionary_trends].reverse().find((item) => item.period_month === summary.snapshot_month)?.amount ?? 0;
     const returnGroupOrder = ["全球资产", "红利低波", "债券", "黄金", "A股权益", "其他"];
+    const investmentTrendGroupNames = new Set(
+      summary.investment_group_trends
+        .filter((item) => hasInvestmentGroupData(item))
+        .map((item) => item.group_name)
+    );
+    const availableReturnGroups = returnGroupOrder.filter((group) =>
+      investmentTrendGroupNames.has(group) || investmentGroupRows.some((item) => item.group_name === group)
+    );
     const expenseRowsForRange = dashboardRange === "本月" ? summary.expense_categories : summary.expense_year_rank;
     const expenseScopeLabel = dashboardRange === "本月" ? "本月" : `${rangeLabel} 累计`;
     const expenseTotalForRange = expenseRowsForRange.reduce((sum, item) => sum + item.amount, 0);
     const topExpenseCategory = expenseRowsForRange[0];
     const topExpensePercent = expenseTotalForRange > 0 && topExpenseCategory ? topExpenseCategory.amount / expenseTotalForRange : 0;
     const categoryCount = expenseRowsForRange.filter((item) => item.amount > 0).length;
-    const majorAllocationDeviationCount = summary.portfolio_targets.filter((item) => Math.abs(item.deviation_percent) >= 0.05).length;
+    const allocationTargetGroups = summary.allocation_target_groups ?? [];
+    const majorAllocationDeviationCount =
+      summary.portfolio_targets.filter((item) => Math.abs(item.deviation_percent) >= 0.05).length +
+      allocationTargetGroups.reduce(
+        (sum, group) => sum + group.rows.filter((item) => item.target_percent !== null && item.target_percent !== undefined && Math.abs(item.deviation_percent ?? 0) >= 0.05).length,
+        0
+      );
     const negativeGroupRows = investmentGroupRows.filter((item) => item.gain < 0);
     const alerts = [
       summary.confirmed_income === 0 ? "收入为 0：请检查收入确认表。" : "",
@@ -7609,7 +7659,7 @@ export function App() {
       const fallbackRows = investmentGroupRows.map((item) => ({ ...item, period_month: summary.snapshot_month }));
       const rows = sourceRows.length > 0 ? sourceRows : fallbackRows;
       const months = Array.from(new Set(rows.map((item) => item.period_month))).sort();
-      const groups = returnGroupOrder.filter((group) => rows.some((item) => item.group_name === group));
+      const groups = availableReturnGroups.filter((group) => rows.some((item) => item.group_name === group));
       if (rows.length === 0 || groups.length === 0) return <div className="dashboard-empty-state compact">暂无数据：缺少分组收益。</div>;
       const width = 720;
       const height = 270;
@@ -7696,7 +7746,10 @@ export function App() {
       );
     };
     const renderReturnWheelChart = () => {
-      const group = returnGroupOrder.includes(selectedReturnGroup) ? selectedReturnGroup : returnGroupOrder[0];
+      if (availableReturnGroups.length === 0) {
+        return renderChartCard("资产组回报透视", "只展示有持仓或现金流的资产组。", <div className="dashboard-empty-state compact">暂无数据：缺少资产组收益。</div>, "wide");
+      }
+      const group = availableReturnGroups.includes(selectedReturnGroup) ? selectedReturnGroup : availableReturnGroups[0];
       const rows = dashboardTrends.map((trend) => {
         const item = summary.investment_group_trends.find((row) => row.period_month === trend.period_month && row.group_name === group);
         return {
@@ -7715,9 +7768,9 @@ export function App() {
       const rateTicks = [-1, -0.5, 0, 0.5, 1].map((ratio) => maxRate * ratio);
       const yRateTick = (rate: number) => zeroY - (rate / maxRate) * 72;
       const nextGroup = (direction: 1 | -1) => {
-        const index = returnGroupOrder.indexOf(group);
-        const nextIndex = (index + direction + returnGroupOrder.length) % returnGroupOrder.length;
-        setSelectedReturnGroup(returnGroupOrder[nextIndex]);
+        const index = availableReturnGroups.indexOf(group);
+        const nextIndex = (index + direction + availableReturnGroups.length) % availableReturnGroups.length;
+        setSelectedReturnGroup(availableReturnGroups[nextIndex]);
       };
       return renderChartCard(
         "资产组回报透视",
@@ -7777,7 +7830,7 @@ export function App() {
             })}
           </svg>
           <div className="return-switcher">
-            {returnGroupOrder.map((item) => (
+            {availableReturnGroups.map((item) => (
               <button
                 className={item === group ? "active" : ""}
                 key={item}
@@ -8293,7 +8346,13 @@ export function App() {
                 {renderDiscretionaryChart()}
                 <div className="dashboard-chart-grid">
                   {renderDonutChart(summary.asset_allocations, "当前资产配置", "各资产类别金额占比。")}
-                  {renderDonutChart(summary.us_equity_allocations, "全球资产拆分", "美股、港股和新兴市场占比。")}
+                  {renderDonutChart(
+                    summary.us_equity_allocations,
+                    "全球资产实际拆分",
+                    allocationTargetGroups.some((group) => group.parent_category_id === "asset_cat_us_equity")
+                      ? "这里显示实际持仓占比；目标差距在下方单独展示。"
+                      : "这里只显示实际持仓占比；未设置二级目标时不显示目标差距。"
+                  )}
                 </div>
                 <div className="allocation-list">
                   {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
@@ -8322,6 +8381,35 @@ export function App() {
                     );
                   })}
                 </div>
+                {allocationTargetGroups.length > 0 ? allocationTargetGroups.map((group) => (
+                  <div className="dashboard-stack" key={`target-group-${group.parent_category_id}`}>
+                    <h3 className="dashboard-subtitle">{group.parent_category}目标差距</h3>
+                    <div className="allocation-list">
+                      {group.rows.map((item) => {
+                        const hasTarget = item.target_percent !== null && item.target_percent !== undefined;
+                        const deviation = item.deviation_percent ?? 0;
+                        return (
+                          <div className="allocation-row" key={`${group.parent_category_id}-${item.category}`}>
+                            <div className="allocation-label">
+                              <strong>{item.category}</strong>
+                              <span>{formatCurrency(item.amount, privacyMode)}</span>
+                            </div>
+                            <div className="allocation-bar" aria-label={`${group.parent_category} ${item.category} 当前占比`}>
+                              <div className="allocation-fill" style={{ width: `${Math.max(item.percent * 100, item.amount > 0 ? 2 : 0)}%` }} />
+                            </div>
+                            <div className="allocation-metrics">
+                              <span>当前 {formatPercent(item.percent)}</span>
+                              <span>目标 {hasTarget ? formatPercent(item.target_percent ?? 0) : "暂无"}</span>
+                              <b className={!hasTarget ? "" : deviation >= 0 ? "positive" : "negative"}>
+                                {!hasTarget ? "未设目标" : `${deviation >= 0 ? "+" : ""}${formatPercent(deviation)}`}
+                              </b>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )) : null}
               </div>
             ) : null}
 
@@ -8347,11 +8435,11 @@ export function App() {
                     <strong>{formatCurrency(investmentGain, privacyMode)}</strong>
                     <small>月末市值 - 月初市值 - 买入 + 卖出；现金分红另列</small>
                   </div>
-                  <div>
-                    <span>非现金资产组</span>
-                    <strong>{investmentGroupRows.length}</strong>
-                    <small>现金 / 全球资产 / 红利低波 / 债券 / 黄金 / A股权益 / 其他</small>
-                  </div>
+	                  <div>
+	                    <span>非现金资产组</span>
+	                    <strong>{availableReturnGroups.length}</strong>
+	                    <small>只展示有持仓、现金流或收益数据的资产组</small>
+	                  </div>
                 </div>
                 {renderInvestmentGroupChart()}
                 {renderReturnWheelChart()}
