@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   AlertCircle,
   ArrowRight,
@@ -176,6 +177,8 @@ type OnboardingStatus = {
   target_saving_rate: number;
   dashboard_enabled_sections: string[];
   custom_analysis_prompts: string[];
+  allocation_targets: OnboardingAllocationTarget[];
+  skip_allocation_targets?: boolean;
   asset_category_tree?: AssetCategoryNode[];
   asset_count: number;
   portfolio_target_count: number;
@@ -194,6 +197,25 @@ type OnboardingAllocationTarget = {
   asset_id?: string | null;
   label: string;
   target_percent: number;
+};
+
+type OnboardingDraftStorage = {
+  step: number;
+  savingRate: string;
+  assetDraft: OnboardingAssetDraft;
+  assetCategoryTree: AssetCategoryNode[];
+  assets: OnboardingAssetDraft[];
+  skipAssets: boolean;
+  targets: OnboardingAllocationTarget[];
+  skipTargets: boolean;
+  subTargetDraftParent: string;
+  subTargetDraftPercents: Record<string, string>;
+  editingSubTargetParentId: string | null;
+  sections: string[];
+  customAnalysisSection: HealthSection;
+  customAnalysisAspect: string;
+  customAnalysisInput: string;
+  customAnalysisPrompts: string[];
 };
 
 type ContentTemplate = {
@@ -391,6 +413,7 @@ type DcaPlanDraft = {
   amount: string;
   weeklyDay: string;
   monthlyDay: string;
+  confirmed?: boolean;
 };
 
 type DcaPlanItem = {
@@ -460,7 +483,7 @@ type MonthlyStepStatus = {
   final_done: boolean;
 };
 
-type AppView = "home" | "onboarding" | "monthlyUpdate" | "healthDashboard" | "contentTemplates";
+type AppView = "home" | "onboarding" | "preferences" | "monthlyUpdate" | "healthDashboard" | "contentTemplates";
 type TemplateType =
   | "monthly_report"
   | "cashflow_analysis"
@@ -475,17 +498,85 @@ type HealthSection = (typeof healthSections)[number];
 const dashboardRanges = ["本月", "3个月", "年初至今", "全部", "整年趋势"] as const;
 type DashboardRange = (typeof dashboardRanges)[number];
 type DashboardTheme = "champagne" | "sage" | "graphite";
+type CustomAnalysisAspect = {
+  id: string;
+  label: string;
+  detail: string;
+  preview: string;
+};
 
 const defaultOnboardingSections = [...healthSections];
 
-const onboardingChartOptions: { section: HealthSection; title: string; detail: string }[] = [
-  { section: "总览", title: "净资产与月度状态", detail: "最新完成月份、净资产、信用卡调整和本月提醒。" },
-  { section: "收支储蓄", title: "收入 / 支出 / 储蓄率", detail: "储蓄率、目标储蓄、储蓄缺口和年度趋势。" },
-  { section: "支出结构", title: "支出分类结构", detail: "Top 分类、累计排行、异常大额支出。" },
-  { section: "资产配置", title: "资产配置和目标差值", detail: "当前比例、目标比例、偏离程度；未设置目标时只看实际比例。" },
-  { section: "投资表现", title: "投资现金流和 XIRR", detail: "买入、卖出、分红、投资收益和资金加权收益率。" },
-  { section: "月报", title: "月报 HTML 预览", detail: "按内容模板生成月报和说明文案。" }
-];
+const dashboardModuleDetails: Record<HealthSection, { title: string; detail: string; charts: string[] }> = {
+  总览: {
+    title: "总览",
+    detail: "关键状态、净资产、月度提醒和最近更新。",
+    charts: ["关键指标", "净资产趋势", "本月提醒"]
+  },
+  收支储蓄: {
+    title: "收支储蓄",
+    detail: "收入、支出、储蓄金额、储蓄率和目标差距。",
+    charts: ["收支储蓄趋势", "储蓄目标达成", "年度储蓄质量"]
+  },
+  支出结构: {
+    title: "支出结构",
+    detail: "支出分类、累计排行、Top 支出和异常消费。",
+    charts: ["支出结构饼图", "分类累计排行", "Top 支出明细"]
+  },
+  资产配置: {
+    title: "资产配置",
+    detail: "实际资产比例、目标差值和资产结构变化。",
+    charts: ["资产配置饼图", "目标偏离", "结构演变"]
+  },
+  投资表现: {
+    title: "投资表现",
+    detail: "投资现金流、收益、XIRR 和资产组表现。",
+    charts: ["买入卖出分红", "月度 XIRR", "资产组收益"]
+  },
+  月报: {
+    title: "月报",
+    detail: "按模板生成 HTML 月报和下月提醒。",
+    charts: ["月报预览", "模板内容", "下月提醒"]
+  }
+};
+
+const onboardingChartOptions = healthSections.map((section) => ({
+  section,
+  ...dashboardModuleDetails[section]
+}));
+
+const customAnalysisAspectOptions: Record<HealthSection, CustomAnalysisAspect[]> = {
+  总览: [
+    { id: "key_metric", label: "关键指标", detail: "净资产、更新月份、关键状态。", preview: "指标卡片" },
+    { id: "trend", label: "长期趋势", detail: "净资产或资产规模的时间变化。", preview: "折线图" },
+    { id: "reminder", label: "本月提醒", detail: "下一次更新、未完成事项。", preview: "提醒清单" }
+  ],
+  收支储蓄: [
+    { id: "cashflow_trend", label: "收支趋势", detail: "收入、支出、储蓄金额同图比较。", preview: "柱线组合图" },
+    { id: "saving_rate", label: "储蓄率", detail: "实际储蓄率和目标储蓄率对比。", preview: "目标线图" },
+    { id: "saving_gap", label: "储蓄缺口", detail: "每月离目标还差多少。", preview: "差额柱图" }
+  ],
+  支出结构: [
+    { id: "expense_pie", label: "支出比例", detail: "各支出分类占比。", preview: "饼图" },
+    { id: "expense_rank", label: "支出排行", detail: "年度累计和 Top 分类。", preview: "横向排行" },
+    { id: "expense_exception", label: "异常支出", detail: "大额、重复、未映射分类。", preview: "异常列表" }
+  ],
+  资产配置: [
+    { id: "allocation_actual", label: "实际比例", detail: "当前各资产类型占比。", preview: "环形图" },
+    { id: "allocation_target", label: "目标差值", detail: "实际比例和目标比例的偏离。", preview: "偏离条形图" },
+    { id: "allocation_trend", label: "结构演变", detail: "不同月份资产结构变化。", preview: "堆叠面积图" }
+  ],
+  投资表现: [
+    { id: "xirr", label: "XIRR", detail: "按现金流日期计算资金加权收益率。", preview: "收益率卡片" },
+    { id: "cashflow", label: "投资现金流", detail: "买入、卖出、分红。", preview: "现金流柱图" },
+    { id: "asset_return", label: "资产组表现", detail: "不同资产组收益对比。", preview: "收益排行" }
+  ],
+  月报: [
+    { id: "report_template", label: "月报模板", detail: "按模板生成月报文案。", preview: "文档预览" },
+    { id: "report_html", label: "HTML 导出", detail: "导出可查看的 HTML 月报。", preview: "网页预览" },
+    { id: "next_month", label: "下月提醒", detail: "自动生成下月关注事项。", preview: "提醒列表" }
+  ]
+};
 
 const dashboardThemes: { id: DashboardTheme; label: string; detail: string; swatches: string[] }[] = [
   { id: "champagne", label: "香槟", detail: "Apple Wallet 式暖白金融感", swatches: ["#f7efe1", "#c4a46a", "#232723"] },
@@ -530,6 +621,7 @@ const templateVariables = [
 ];
 
 const defaultSharkCsvPath = "";
+const onboardingDraftStorageKey = "financial-planning-onboarding-draft-v1";
 
 const currencyOptions: { code: CurrencyCode; label: string }[] = [
   { code: "CNY", label: "CNY 人民币" },
@@ -561,7 +653,7 @@ const assetTypeOptions = [
 
 const assetTopOptions = [
   ["asset_cat_cash", "现金"],
-  ["asset_cat_us_equity", "美股"],
+  ["asset_cat_us_equity", "全球资产"],
   ["asset_cat_dividend_low_vol", "红利低波"],
   ["asset_cat_bond", "债券"],
   ["asset_cat_gold", "黄金"],
@@ -570,28 +662,26 @@ const assetTopOptions = [
 ];
 
 const fundCategoryOptions = [
-  ["asset_sub_sp500", "标普"],
-  ["asset_sub_nasdaq", "纳斯达克"],
-  ["asset_sub_us_tech", "科技"],
-  ["asset_sub_other_us", "其他"]
+  ["asset_sub_sp500", "美股"],
+  ["asset_sub_nasdaq", "港股"],
+  ["asset_sub_us_tech", "新兴市场"]
 ];
 
 const usEquityCategoryOptions = [
-  ["asset_sub_sp500", "标普"],
-  ["asset_sub_nasdaq", "纳斯达克"],
-  ["asset_sub_us_tech", "科技"],
-  ["asset_sub_other_us", "其他"]
+  ["asset_sub_sp500", "美股"],
+  ["asset_sub_nasdaq", "港股"],
+  ["asset_sub_us_tech", "新兴市场"]
 ];
 
 const cashCategoryOptions = [
   ["asset_sub_bank_payment", "银行/支付账户"],
   ["asset_sub_money_market_cash", "货币现金"],
-  ["asset_sub_short_deposit", "短期存款"]
+  ["asset_sub_receivable", "应收押金"]
 ];
 
 const mainAllocationOptions = [
   ["asset_cat_cash", "现金"],
-  ["asset_cat_us_equity", "美股"],
+  ["asset_cat_us_equity", "全球资产"],
   ["asset_cat_dividend_low_vol", "红利低波"],
   ["asset_cat_bond", "债券"],
   ["asset_cat_gold", "黄金"],
@@ -603,13 +693,13 @@ const subAllocationOptions: Record<string, string[][]> = {
   asset_cat_us_equity: usEquityCategoryOptions,
   asset_cat_cash: cashCategoryOptions,
   asset_cat_dividend_low_vol: [
-    ["asset_sub_dividend", "红利/高股息"],
-    ["asset_sub_low_vol", "低波/红利低波"]
+    ["asset_sub_dividend", "红利"],
+    ["asset_sub_low_vol", "低波"]
   ],
   asset_cat_bond: [
-    ["asset_sub_short_bond", "短债/中短债"],
-    ["asset_sub_pure_bond", "纯债/信用债"],
-    ["asset_sub_treasury_bond", "国债/政策金融债"]
+    ["asset_sub_short_bond", "短债"],
+    ["asset_sub_pure_bond", "纯债"],
+    ["asset_sub_treasury_bond", "国债"]
   ],
   asset_cat_gold: [
     ["asset_sub_gold_etf", "黄金ETF"]
@@ -619,9 +709,7 @@ const subAllocationOptions: Record<string, string[][]> = {
     ["asset_sub_a_share_sector_active", "行业/主动"]
   ],
   asset_cat_other: [
-    ["asset_sub_receivable", "应收"],
     ["asset_sub_insurance_pension", "保险/养老金"],
-    ["asset_sub_liability", "负债"],
     ["asset_sub_uncategorized", "未分类"]
   ]
 };
@@ -633,34 +721,33 @@ const defaultAssetCategoryTree: AssetCategoryNode[] = [
     children: [
       { id: "asset_sub_bank_payment", label: "银行/支付账户", children: [] },
       { id: "asset_sub_money_market_cash", label: "货币现金", children: [] },
-      { id: "asset_sub_short_deposit", label: "短期存款", children: [] }
+      { id: "asset_sub_receivable", label: "应收押金", children: [] }
     ]
   },
   {
     id: "asset_cat_us_equity",
-    label: "美股",
+    label: "全球资产",
     children: [
-      { id: "asset_sub_sp500", label: "标普", children: [] },
-      { id: "asset_sub_nasdaq", label: "纳斯达克", children: [] },
-      { id: "asset_sub_us_tech", label: "科技", children: [] },
-      { id: "asset_sub_other_us", label: "其他", children: [] }
+      { id: "asset_sub_sp500", label: "美股", children: [] },
+      { id: "asset_sub_nasdaq", label: "港股", children: [] },
+      { id: "asset_sub_us_tech", label: "新兴市场", children: [] }
     ]
   },
   {
     id: "asset_cat_dividend_low_vol",
     label: "红利低波",
     children: [
-      { id: "asset_sub_dividend", label: "红利/高股息", children: [] },
-      { id: "asset_sub_low_vol", label: "低波/红利低波", children: [] }
+      { id: "asset_sub_dividend", label: "红利", children: [] },
+      { id: "asset_sub_low_vol", label: "低波", children: [] }
     ]
   },
   {
     id: "asset_cat_bond",
     label: "债券",
     children: [
-      { id: "asset_sub_short_bond", label: "短债/中短债", children: [] },
-      { id: "asset_sub_pure_bond", label: "纯债/信用债", children: [] },
-      { id: "asset_sub_treasury_bond", label: "国债/政策金融债", children: [] }
+      { id: "asset_sub_short_bond", label: "短债", children: [] },
+      { id: "asset_sub_pure_bond", label: "纯债", children: [] },
+      { id: "asset_sub_treasury_bond", label: "国债", children: [] }
     ]
   },
   {
@@ -682,9 +769,7 @@ const defaultAssetCategoryTree: AssetCategoryNode[] = [
     id: "asset_cat_other",
     label: "其他",
     children: [
-      { id: "asset_sub_receivable", label: "应收", children: [] },
       { id: "asset_sub_insurance_pension", label: "保险/养老金", children: [] },
-      { id: "asset_sub_liability", label: "负债", children: [] },
       { id: "asset_sub_uncategorized", label: "未分类", children: [] }
     ]
   }
@@ -781,11 +866,94 @@ function optionLabel(options: string[][], value: string) {
   return options.find(([id]) => id === value)?.[1] ?? value;
 }
 
+function targetPercentNumber(value: number | string | null | undefined) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function percentInputValue(value: number | string | null | undefined) {
+  const parsed = targetPercentNumber(value);
+  return parsed > 0 ? String(parsed) : "";
+}
+
+function parsePercentInput(value: string) {
+  if (value.trim() === "") return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function allocationTargetsForEditor(targets: OnboardingAllocationTarget[]) {
+  return targets.map((target) => ({
+    ...target,
+    target_percent:
+      Number.isFinite(Number(target.target_percent)) && Math.abs(Number(target.target_percent)) <= 1
+        ? Number(target.target_percent) * 100
+        : Number(target.target_percent) || 0
+  }));
+}
+
+function buildMainTargetsWithSavedValues(
+  options: string[][],
+  currentTargets: OnboardingAllocationTarget[],
+  savedMainTargetByCategory: Map<string, OnboardingAllocationTarget>,
+  editedCategoryIds: Set<string> = new Set()
+) {
+  const currentByCategory = new Map<string, OnboardingAllocationTarget>();
+  currentTargets
+    .filter((target) => target.level === "main" && target.category_id)
+    .forEach((target) => currentByCategory.set(target.category_id as string, target));
+
+  return options.map(([categoryId, label]) => {
+    const currentTarget = currentByCategory.get(categoryId);
+    const savedTarget = savedMainTargetByCategory.get(categoryId);
+    const currentValue = targetPercentNumber(currentTarget?.target_percent);
+    const savedValue = targetPercentNumber(savedTarget?.target_percent);
+    const isBeingEdited = editedCategoryIds.has(categoryId);
+    const baseTarget = currentTarget ?? savedTarget ?? {
+      level: "main" as const,
+      category_id: categoryId,
+      label,
+      target_percent: 0
+    };
+
+    return {
+      ...baseTarget,
+      level: "main" as const,
+      category_id: categoryId,
+      label: baseTarget.label || label,
+      target_percent: isBeingEdited || currentValue > 0 || savedValue === 0 ? currentValue : savedValue
+    };
+  });
+}
+
+function percentTotalValidationMessage(label: string, total: number) {
+  if (total > 100.0001) return `${label}合计 ${total.toFixed(1)}%，不能超过 100%。`;
+  if (total < 99.9999) return `${label}合计 ${total.toFixed(1)}%，需要等于 100%。`;
+  return null;
+}
+
 function cloneAssetCategoryTree(tree: AssetCategoryNode[] = defaultAssetCategoryTree): AssetCategoryNode[] {
   return tree.map((node) => ({
     ...node,
     children: cloneAssetCategoryTree(node.children ?? [])
   }));
+}
+
+function hasCustomAssetCategoryNode(nodes: AssetCategoryNode[]): boolean {
+  return nodes.some((node) => node.id.includes("_custom_") || hasCustomAssetCategoryNode(node.children ?? []));
+}
+
+function normalizeAssetCategoryTreeDefaults(tree: AssetCategoryNode[] = defaultAssetCategoryTree): AssetCategoryNode[] {
+  if (!tree.length) return cloneAssetCategoryTree();
+  const cash = findAssetCategoryNode(tree, "asset_cat_cash");
+  const global = findAssetCategoryNode(tree, "asset_cat_us_equity");
+  const isLegacyDefault =
+    !hasCustomAssetCategoryNode(tree) &&
+    global?.label === "美股" &&
+    global.children.some((child) => child.label === "标普") &&
+    global.children.some((child) => child.label === "纳斯达克") &&
+    cash?.children.some((child) => child.label === "短期存款");
+  return isLegacyDefault ? cloneAssetCategoryTree() : cloneAssetCategoryTree(tree);
 }
 
 function categoryOptions(nodes: AssetCategoryNode[]): string[][] {
@@ -844,10 +1012,10 @@ function isCashCategoryId(categoryId: string) {
 
 function assetTypeForCategory(mainCategoryId: string, subCategoryId?: string | null, mainLabel = "", subLabel = "") {
   const combined = `${mainCategoryId} ${subCategoryId ?? ""} ${mainLabel} ${subLabel}`;
+  if (subCategoryId === "asset_sub_receivable" || combined.includes("应收")) return "receivable";
   if (mainCategoryId === "asset_cat_cash") return "cash_account";
   if (mainCategoryId === "asset_cat_gold") return "gold";
   if (mainCategoryId === "asset_cat_bond") return "bond_fund";
-  if (subCategoryId === "asset_sub_receivable" || combined.includes("应收")) return "receivable";
   if (subCategoryId === "asset_sub_insurance_pension" || combined.includes("保险") || combined.includes("养老金")) return "insurance";
   if (subCategoryId === "asset_sub_liability" || combined.includes("负债") || combined.includes("贷款")) return "liability";
   if (combined.includes("股票")) return "stock";
@@ -888,7 +1056,7 @@ function blankOnboardingAsset(): OnboardingAssetDraft {
     isDca: false,
     status: "active",
     note: "",
-    dcaPlans: [{ frequency: "monthly", amount: "", weeklyDay: "1", monthlyDay: "1" }]
+    dcaPlans: [{ frequency: "monthly", amount: "", weeklyDay: "1", monthlyDay: "1", confirmed: false }]
   };
 }
 
@@ -930,6 +1098,7 @@ function assetPayloadFromDraft(asset: OnboardingAssetDraft, selectedMonth: strin
     currency: asset.currency,
     platform: asset.platform || null,
     tags: parseTagsFromText(asset.tags),
+    month_end_amount: Number(asset.monthEndAmount) || 0,
     is_dca: asset.isDca,
     status: "active",
     note: asset.note || null,
@@ -964,6 +1133,16 @@ function parseTagsFromText(raw: string) {
 
 function assetClassificationText(asset: AssetEntryItem) {
   return [asset.main_category, asset.sub_category].filter(Boolean).join(" / ") || "未分类";
+}
+
+function normalizeAssetEntryItems(assets: AssetEntryItem[]) {
+  return assets.map((asset) => ({
+    ...asset,
+    currency: (asset.currency || "CNY") as CurrencyCode,
+    month_status: asset.month_status ?? "held",
+    cashflows: asset.cashflows ?? [],
+    confirmed: asset.confirmed ?? true
+  }));
 }
 
 const fallbackSummary: DashboardSeedSummary = {
@@ -1242,11 +1421,19 @@ export function App() {
   const [onboardingAssets, setOnboardingAssets] = useState<OnboardingAssetDraft[]>([]);
   const [onboardingSkipAssets, setOnboardingSkipAssets] = useState(false);
   const [onboardingTargets, setOnboardingTargets] = useState<OnboardingAllocationTarget[]>([]);
+  const [editedMainTargetIds, setEditedMainTargetIds] = useState<Set<string>>(() => new Set());
   const [onboardingSkipTargets, setOnboardingSkipTargets] = useState(false);
+  const [onboardingSubTargetDraftParent, setOnboardingSubTargetDraftParent] = useState("asset_cat_cash");
+  const [onboardingSubTargetDraftPercents, setOnboardingSubTargetDraftPercents] = useState<Record<string, string>>({});
+  const [editingSubTargetParentId, setEditingSubTargetParentId] = useState<string | null>(null);
   const [onboardingSections, setOnboardingSections] = useState<string[]>(defaultOnboardingSections);
+  const [customAnalysisSection, setCustomAnalysisSection] = useState<HealthSection>("总览");
+  const [customAnalysisAspect, setCustomAnalysisAspect] = useState("key_metric");
   const [customAnalysisInput, setCustomAnalysisInput] = useState("");
   const [customAnalysisPrompts, setCustomAnalysisPrompts] = useState<string[]>([]);
   const [onboardingMessage, setOnboardingMessage] = useState<string | null>(null);
+  const [preferenceSaveFeedback, setPreferenceSaveFeedback] = useState<string | null>(null);
+  const [onboardingDraftHydrated, setOnboardingDraftHydrated] = useState(false);
   const [savingOnboarding, setSavingOnboarding] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState("2026-04");
   const [activeHealthSection, setActiveHealthSection] = useState<HealthSection>("总览");
@@ -1256,7 +1443,8 @@ export function App() {
   const [dashboardDetail, setDashboardDetail] = useState<string | null>(null);
   const [dashboardTooltip, setDashboardTooltip] = useState<DashboardTooltipState>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null);
-  const [selectedReturnGroup, setSelectedReturnGroup] = useState("美股");
+  const [selectedReturnGroup, setSelectedReturnGroup] = useState("全球资产");
+  const effectiveOnboardingStep = view === "preferences" ? ([0, 2, 3][onboardingStep] ?? 0) : onboardingStep;
   const [dashboardTheme, setDashboardTheme] = useState<DashboardTheme>(() => {
     const savedTheme = window.localStorage.getItem("financial-planning-dashboard-theme");
     return savedTheme === "sage" || savedTheme === "graphite" || savedTheme === "champagne" ? savedTheme : "champagne";
@@ -1360,10 +1548,12 @@ export function App() {
 	      setSecurity({ password_set: true, unlocked: true, privacy_mode: false });
 	      setOnboardingStatus({
 	        completed: true,
-	        target_saving_rate: browserPreviewSummary.target_saving_rate,
-	        dashboard_enabled_sections: defaultOnboardingSections,
-	        custom_analysis_prompts: [],
-	        asset_category_tree: cloneAssetCategoryTree(),
+		        target_saving_rate: browserPreviewSummary.target_saving_rate,
+			        dashboard_enabled_sections: defaultOnboardingSections,
+			        custom_analysis_prompts: [],
+			        allocation_targets: [],
+			        skip_allocation_targets: true,
+			        asset_category_tree: cloneAssetCategoryTree(),
 	        asset_count: browserPreviewSummary.asset_count,
 	        portfolio_target_count: browserPreviewSummary.portfolio_targets.length
 	      });
@@ -1396,7 +1586,7 @@ export function App() {
 	          setOnboardingSavingRate(String(Math.round((result[2].target_saving_rate || 0.3) * 100)));
 	          setOnboardingSections(result[2].dashboard_enabled_sections?.length ? result[2].dashboard_enabled_sections : defaultOnboardingSections);
 	          setCustomAnalysisPrompts(result[2].custom_analysis_prompts ?? []);
-	          setAssetCategoryTree(result[2].asset_category_tree?.length ? cloneAssetCategoryTree(result[2].asset_category_tree) : cloneAssetCategoryTree());
+	          setAssetCategoryTree(result[2].asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(result[2].asset_category_tree) : cloneAssetCategoryTree());
 	          if (!result[2].completed) {
 	            setView("onboarding");
 	          }
@@ -1417,6 +1607,98 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem("financial-planning-dashboard-theme", dashboardTheme);
   }, [dashboardTheme]);
+
+  useEffect(() => {
+    const options = customAnalysisAspectOptions[customAnalysisSection] ?? [];
+    if (!options.some((option) => option.id === customAnalysisAspect)) {
+      setCustomAnalysisAspect(options[0]?.id ?? "");
+    }
+  }, [customAnalysisAspect, customAnalysisSection]);
+
+  useEffect(() => {
+    if (browserPreviewSummary || !onboardingStatus || onboardingDraftHydrated) return;
+    if (onboardingStatus.completed) {
+      setOnboardingDraftHydrated(true);
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(onboardingDraftStorageKey);
+      if (!raw) {
+        setOnboardingDraftHydrated(true);
+        return;
+      }
+      const draft = JSON.parse(raw) as Partial<OnboardingDraftStorage>;
+      const draftTree = draft.assetCategoryTree?.length
+        ? normalizeAssetCategoryTreeDefaults(draft.assetCategoryTree)
+        : onboardingStatus.asset_category_tree?.length
+          ? normalizeAssetCategoryTreeDefaults(onboardingStatus.asset_category_tree)
+          : cloneAssetCategoryTree();
+      setOnboardingStep(Math.max(0, Math.min(Number(draft.step) || 0, 3)));
+      setOnboardingSavingRate(typeof draft.savingRate === "string" ? draft.savingRate : "30");
+      setAssetCategoryTree(draftTree);
+      setOnboardingAssetDraft(normalizeOnboardingAssetDraft(draft.assetDraft ?? blankOnboardingAsset(), draftTree));
+      setOnboardingAssets((draft.assets ?? []).map((asset) => normalizeOnboardingAssetDraft(asset, draftTree)));
+      setOnboardingSkipAssets(Boolean(draft.skipAssets));
+      setOnboardingTargets(draft.targets ?? []);
+      setOnboardingSkipTargets(Boolean(draft.skipTargets));
+      setOnboardingSubTargetDraftParent(draft.subTargetDraftParent ?? "asset_cat_cash");
+      setOnboardingSubTargetDraftPercents(draft.subTargetDraftPercents ?? {});
+	      setEditingSubTargetParentId(draft.editingSubTargetParentId ?? null);
+	      setOnboardingSections(draft.sections?.length ? draft.sections : defaultOnboardingSections);
+	      setCustomAnalysisSection(healthSections.includes(draft.customAnalysisSection as HealthSection) ? (draft.customAnalysisSection as HealthSection) : "总览");
+	      setCustomAnalysisAspect(draft.customAnalysisAspect ?? "key_metric");
+	      setCustomAnalysisInput(draft.customAnalysisInput ?? "");
+	      setCustomAnalysisPrompts(draft.customAnalysisPrompts ?? []);
+    } catch {
+      window.localStorage.removeItem(onboardingDraftStorageKey);
+    } finally {
+      setOnboardingDraftHydrated(true);
+    }
+  }, [browserPreviewSummary, onboardingDraftHydrated, onboardingStatus]);
+
+  useEffect(() => {
+    if (browserPreviewSummary || !onboardingDraftHydrated || onboardingStatus?.completed) return;
+    const draft: OnboardingDraftStorage = {
+      step: onboardingStep,
+      savingRate: onboardingSavingRate,
+      assetDraft: onboardingAssetDraft,
+      assetCategoryTree,
+      assets: onboardingAssets,
+      skipAssets: onboardingSkipAssets,
+      targets: onboardingTargets,
+      skipTargets: onboardingSkipTargets,
+      subTargetDraftParent: onboardingSubTargetDraftParent,
+      subTargetDraftPercents: onboardingSubTargetDraftPercents,
+	      editingSubTargetParentId,
+	      sections: onboardingSections,
+	      customAnalysisSection,
+	      customAnalysisAspect,
+	      customAnalysisInput,
+	      customAnalysisPrompts
+	    };
+    window.localStorage.setItem(onboardingDraftStorageKey, JSON.stringify(draft));
+  }, [
+	    assetCategoryTree,
+	    browserPreviewSummary,
+	    customAnalysisAspect,
+	    customAnalysisInput,
+	    customAnalysisPrompts,
+	    customAnalysisSection,
+    onboardingAssetDraft,
+    onboardingAssets,
+    onboardingDraftHydrated,
+    onboardingSavingRate,
+    onboardingSections,
+    onboardingSkipAssets,
+    onboardingSkipTargets,
+    onboardingSubTargetDraftParent,
+    onboardingSubTargetDraftPercents,
+    onboardingStatus?.completed,
+    onboardingStep,
+    onboardingTargets,
+    editingSubTargetParentId
+  ]);
 
   useEffect(() => {
     void syncNeededRates(false);
@@ -1455,6 +1737,43 @@ export function App() {
     });
     return rows.length ? rows : mainAllocationOptions;
   }, [assetCategoryTree]);
+  const currentAssetMainAllocationOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: string[][] = [];
+    assetItems
+      .filter((asset) => isAssetCountedInMonth(asset))
+      .forEach((asset) => {
+        const categoryId = asset.main_asset_category_id || "asset_cat_cash";
+        if (seen.has(categoryId)) return;
+        seen.add(categoryId);
+        rows.push([categoryId, optionLabel(onboardingMainAllocationOptions, categoryId) || asset.main_category || categoryId]);
+      });
+    return rows;
+  }, [assetItems, onboardingMainAllocationOptions]);
+  const savedStatusAllocationTargets = useMemo(
+    () => allocationTargetsForEditor(onboardingStatus?.allocation_targets ?? []),
+    [onboardingStatus?.allocation_targets]
+  );
+  const savedMainTargetByCategory = useMemo(() => {
+    const rows = new Map<string, OnboardingAllocationTarget>();
+    savedStatusAllocationTargets
+      .filter((target) => target.level === "main" && target.category_id)
+      .forEach((target) => rows.set(target.category_id as string, target));
+    return rows;
+  }, [savedStatusAllocationTargets]);
+  const savedMainAllocationOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: string[][] = [];
+    savedStatusAllocationTargets
+      .filter((target) => target.level === "main" && target.category_id)
+      .forEach((target) => {
+        const categoryId = target.category_id as string;
+        if (seen.has(categoryId)) return;
+        seen.add(categoryId);
+        rows.push([categoryId, target.label || optionLabel(onboardingMainAllocationOptions, categoryId)]);
+      });
+    return rows;
+  }, [onboardingMainAllocationOptions, savedStatusAllocationTargets]);
   const onboardingSubAllocationOptions = useMemo(() => {
     const rows: Record<string, string[][]> = {};
     const push = (parentId: string, id: string, label: string) => {
@@ -1473,6 +1792,16 @@ export function App() {
     return Object.keys(rows).length ? rows : subAllocationOptions;
   }, [assetCategoryTree]);
   const onboardingSelectedMainAllocationOptions = useMemo(() => {
+    if (view === "preferences") {
+      const seen = new Set<string>();
+      const rows: string[][] = [];
+      [...currentAssetMainAllocationOptions, ...savedMainAllocationOptions].forEach(([id, label]) => {
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        rows.push([id, label]);
+      });
+      if (rows.length > 0) return rows;
+    }
     if (onboardingSkipAssets || onboardingAssets.length === 0) return onboardingMainAllocationOptions;
     const seen = new Set<string>();
     const rows: string[][] = [];
@@ -1483,7 +1812,44 @@ export function App() {
       rows.push([classification.mainCategoryId, optionLabel(onboardingMainAllocationOptions, classification.mainCategoryId)]);
     });
     return rows.length ? rows : onboardingMainAllocationOptions;
-  }, [assetCategoryTree, onboardingAssets, onboardingMainAllocationOptions, onboardingSkipAssets]);
+  }, [assetCategoryTree, currentAssetMainAllocationOptions, onboardingAssets, onboardingMainAllocationOptions, onboardingSkipAssets, savedMainAllocationOptions, view]);
+  const assetAllocationPreferenceIssue = useMemo(() => {
+    const targetRows = onboardingTargets.filter((target) => target.level === "main" && target.category_id);
+    const targetSubRows = onboardingTargets.filter((target) => target.level === "sub" && target.parent_category_id && target.category_id);
+    if (targetRows.length === 0 || currentAssetMainAllocationOptions.length === 0) return null;
+    const currentIds = new Set(currentAssetMainAllocationOptions.map(([id]) => id));
+    const targetIds = new Set(targetRows.map((target) => target.category_id as string));
+    const missingRows = currentAssetMainAllocationOptions.filter(([id]) => !targetIds.has(id));
+    const staleRows = targetRows.filter((target) => !currentIds.has(target.category_id as string));
+    const currentSubRows = assetItems
+      .filter((asset) => isAssetCountedInMonth(asset))
+      .map((asset) => {
+        const parentId = asset.main_asset_category_id || "asset_cat_cash";
+        const categoryId = asset.sub_asset_category_id || "";
+        const parentLabel = optionLabel(onboardingMainAllocationOptions, parentId) || asset.main_category || parentId;
+        const subLabel = (onboardingSubAllocationOptions[parentId] ?? []).find(([id]) => id === categoryId)?.[1] ?? asset.sub_category ?? categoryId;
+        return { parentId, categoryId, label: `${parentLabel} / ${subLabel}` };
+      })
+      .filter((row) => row.categoryId);
+    const currentSubKeys = new Set(currentSubRows.map((row) => `${row.parentId}|${row.categoryId}`));
+    const targetSubKeys = new Set(targetSubRows.map((target) => `${target.parent_category_id}|${target.category_id}`));
+    const targetSubParents = new Set(targetSubRows.map((target) => target.parent_category_id as string));
+    const missingSubRows = currentSubRows.filter((row) => targetSubParents.has(row.parentId) && !targetSubKeys.has(`${row.parentId}|${row.categoryId}`));
+    const staleSubRows = targetSubRows.filter((target) => !currentSubKeys.has(`${target.parent_category_id}|${target.category_id}`));
+    if (missingRows.length === 0 && staleRows.length === 0 && missingSubRows.length === 0 && staleSubRows.length === 0) return null;
+    const missingText = missingRows.map(([, label]) => label).join("、");
+    const staleText = staleRows.map((target) => target.label || optionLabel(onboardingMainAllocationOptions, target.category_id ?? "")).join("、");
+    const missingSubText = missingSubRows.map((row) => row.label).join("、");
+    const staleSubText = staleSubRows.map((target) => target.label || `${target.parent_category_id} / ${target.category_id}`).join("、");
+    return [
+      "资产类别和目标配比不一致。",
+      missingText ? `未纳入目标配比：${missingText}。` : "",
+      staleText ? `目标配比里暂无当月资产：${staleText}。` : "",
+      missingSubText ? `未纳入二级配比：${missingSubText}。` : "",
+      staleSubText ? `二级配比里暂无当月资产：${staleSubText}。` : "",
+      "建议重新设置配比偏好，否则看板里的资产配置差值图可能不完整。"
+    ].filter(Boolean).join("");
+  }, [assetItems, currentAssetMainAllocationOptions, onboardingMainAllocationOptions, onboardingSubAllocationOptions, onboardingTargets]);
 
   useEffect(() => {
     if (!visibleHealthSections.includes(activeHealthSection)) {
@@ -1498,25 +1864,29 @@ export function App() {
     });
   }, [assetCategoryTree]);
 
+			  useEffect(() => {
+			    if (effectiveOnboardingStep !== 2 || onboardingSkipTargets) return;
+			    setOnboardingTargets((current) => {
+	      const nextMainTargets = buildMainTargetsWithSavedValues(
+	        onboardingSelectedMainAllocationOptions,
+	        current,
+	        savedMainTargetByCategory,
+	        editedMainTargetIds
+	      );
+	      const otherTargets = current.filter((target) => target.level !== "main");
+		      const nextTargets = [...nextMainTargets, ...otherTargets];
+		      return JSON.stringify(nextTargets) === JSON.stringify(current) ? current : nextTargets;
+		    });
+			  }, [editedMainTargetIds, effectiveOnboardingStep, onboardingSelectedMainAllocationOptions, onboardingSkipTargets, savedMainTargetByCategory]);
+
   useEffect(() => {
-    if (onboardingStep !== 2 || onboardingSkipTargets) return;
-    setOnboardingTargets((current) => {
-      const existing = new Map(
-        current
-          .filter((target) => target.level === "main" && target.category_id)
-          .map((target) => [target.category_id as string, target])
-      );
-      const nextMainTargets = onboardingSelectedMainAllocationOptions.map(([categoryId, label]) => ({
-        level: "main" as const,
-        category_id: categoryId,
-        label,
-        target_percent: existing.get(categoryId)?.target_percent ?? 0
-      }));
-      const otherTargets = current.filter((target) => target.level !== "main");
-      const nextTargets = [...nextMainTargets, ...otherTargets];
-      return JSON.stringify(nextTargets) === JSON.stringify(current) ? current : nextTargets;
-    });
-  }, [onboardingSelectedMainAllocationOptions, onboardingSkipTargets, onboardingStep]);
+    const firstParent = onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
+    if (!onboardingSelectedMainAllocationOptions.some(([id]) => id === onboardingSubTargetDraftParent)) {
+      setOnboardingSubTargetDraftParent(firstParent);
+      setOnboardingSubTargetDraftPercents({});
+      setEditingSubTargetParentId(null);
+    }
+  }, [onboardingSelectedMainAllocationOptions, onboardingSubTargetDraftParent]);
 
   const maxAmount = useMemo(
     () => Math.max(...summary.portfolio_targets.map((item) => item.current_amount), 1),
@@ -1552,8 +1922,16 @@ export function App() {
     return `${periodMonth}-${String(lastDay).padStart(2, "0")}`;
   }
 
-  function nextMonthlyUpdateMonth(snapshotMonth = summary.snapshot_month) {
-    return snapshotMonth ? nextPeriodMonth(snapshotMonth) : selectedMonth;
+  function nextMonthlyUpdateMonth(snapshotMonth = summary.snapshot_month, seed: DashboardSeedSummary = summary) {
+    if (!snapshotMonth) return currentMonth;
+    const snapshotTrend = seed.monthly_trends.find((item) => item.period_month === snapshotMonth);
+    const isOnlyInitialSnapshot =
+      snapshotMonth === currentMonth &&
+      Boolean(snapshotTrend) &&
+      Math.abs(snapshotTrend?.income ?? 0) < 0.000_001 &&
+      Math.abs(snapshotTrend?.expense ?? 0) < 0.000_001 &&
+      Math.abs(snapshotTrend?.credit_card_net_adjustment ?? 0) < 0.000_001;
+    return isOnlyInitialSnapshot ? snapshotMonth : nextPeriodMonth(snapshotMonth);
   }
 
   function applySelectedUpdateMonth(month: string) {
@@ -1849,18 +2227,21 @@ export function App() {
 	    const result = await invoke<DashboardSeedSummary>("get_dashboard_seed_summary");
 	    setSummary(result);
     if (result.snapshot_month) {
-      applySelectedUpdateMonth(nextPeriodMonth(result.snapshot_month));
+      applySelectedUpdateMonth(nextMonthlyUpdateMonth(result.snapshot_month, result));
       setTemplatePreviewMonth(result.snapshot_month);
     }
 	    setLoadState("ready");
 	  }
 
   function applyOnboardingStatus(status: OnboardingStatus) {
-	    setOnboardingStatus(status);
-	    setOnboardingSavingRate(String(Math.round((status.target_saving_rate || 0.3) * 100)));
-	    setOnboardingSections(status.dashboard_enabled_sections?.length ? status.dashboard_enabled_sections : defaultOnboardingSections);
-	    setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
-	    setAssetCategoryTree(status.asset_category_tree?.length ? cloneAssetCategoryTree(status.asset_category_tree) : cloneAssetCategoryTree());
+		    setOnboardingStatus(status);
+		    setOnboardingSavingRate(String(Math.round((status.target_saving_rate || 0.3) * 100)));
+		    setOnboardingSections(status.dashboard_enabled_sections?.length ? status.dashboard_enabled_sections : defaultOnboardingSections);
+		    setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
+		    setOnboardingTargets(allocationTargetsForEditor(status.allocation_targets ?? []));
+		    setEditedMainTargetIds(new Set());
+		    setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? (status.allocation_targets ?? []).length === 0));
+		    setAssetCategoryTree(status.asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(status.asset_category_tree) : cloneAssetCategoryTree());
 	    if (!status.completed) {
 	      setView("onboarding");
 	    }
@@ -1873,16 +2254,43 @@ export function App() {
 	  }
 
 	  async function openMonthlyUpdate() {
-    const updateMonth = nextMonthlyUpdateMonth();
-    applySelectedUpdateMonth(updateMonth);
-    setSuccessBanner(null);
-    setView("monthlyUpdate");
-    try {
-      await loadReview(updateMonth);
-    } catch (err) {
-      setMonthlyMessage(String(err));
-    }
-  }
+	    const updateMonth = nextMonthlyUpdateMonth();
+	    applySelectedUpdateMonth(updateMonth);
+	    setSuccessBanner(null);
+	    setView("monthlyUpdate");
+	    try {
+	      await loadReview(updateMonth);
+	    } catch (err) {
+	      setMonthlyMessage(String(err));
+	    }
+	  }
+
+		  async function openPreferences() {
+		    setSuccessBanner(null);
+		    setOnboardingMessage(null);
+		    setOnboardingStep(0);
+		    setOnboardingSkipAssets(true);
+		    setOnboardingAssets([]);
+		    try {
+		      const status = await refreshOnboardingStatus();
+		      const editorTargets = allocationTargetsForEditor(status.allocation_targets ?? []);
+		      setOnboardingTargets(editorTargets);
+		      setEditedMainTargetIds(new Set());
+		      setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? editorTargets.length === 0));
+		      const preferenceAssets = await invoke<AssetEntryItem[]>("get_asset_entry_items", { periodMonth: selectedMonth || nextMonthlyUpdateMonth() });
+		      setAssetItems(normalizeAssetEntryItems(preferenceAssets));
+		      setOnboardingTargets(editorTargets);
+		      setEditedMainTargetIds(new Set());
+		    } catch (err) {
+		      setOnboardingMessage(String(err));
+		    }
+		    setView("preferences");
+		  }
+
+	  async function openAllocationPreferences() {
+	    await openPreferences();
+	    setOnboardingStep(1);
+	  }
 
   function applyTemplateToDraft(template: ContentTemplate) {
     setSelectedTemplateId(template.id);
@@ -2027,6 +2435,28 @@ export function App() {
     }
   }
 
+  async function chooseBillFilePath() {
+    if (!isTauriRuntime) {
+      setMonthlyMessage("本地文件选择只在桌面 App 中可用。");
+      return null;
+    }
+    try {
+      const selected = await openDialog({
+        multiple: false,
+        filters: [
+          { name: "账单文件", extensions: ["csv", "xlsx", "xls"] }
+        ]
+      });
+      if (!selected || Array.isArray(selected)) return null;
+      setCsvPath(selected);
+      await rememberCsvPath(selected);
+      return selected;
+    } catch (err) {
+      setMonthlyMessage(`打开文件选择失败：${String(err)}`);
+      return null;
+    }
+  }
+
   async function handleSetPassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSecurityMessage(null);
@@ -2106,15 +2536,7 @@ export function App() {
       expense: hasReviewAnomaly(expenseRows),
       income: hasReviewAnomaly(incomeRows)
     });
-    setAssetItems(
-      assets.map((asset) => ({
-        ...asset,
-        currency: (asset.currency || "CNY") as CurrencyCode,
-        month_status: asset.month_status ?? "held",
-        cashflows: asset.cashflows ?? [],
-        confirmed: true
-      }))
-    );
+    setAssetItems(normalizeAssetEntryItems(assets));
     setDcaCashflows(dcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
     setCreditCards(cards);
     if (applyStatus) {
@@ -2187,7 +2609,10 @@ export function App() {
   }
 
   async function handleImportSharkCsv() {
-    await runSharkImport(false);
+    const selectedPath = await chooseBillFilePath();
+    if (selectedPath) {
+      await runSharkImport(false, selectedPath);
+    }
   }
 
   async function overwritePreviousImport() {
@@ -2684,15 +3109,36 @@ export function App() {
 	  function updateOnboardingAssetDcaPlan(index: number, patch: Partial<DcaPlanDraft>) {
 	    setOnboardingAssetDraft((current) => ({
 	      ...current,
-	      dcaPlans: current.dcaPlans.map((plan, planIndex) => (planIndex === index ? { ...plan, ...patch } : plan))
+	      dcaPlans: current.dcaPlans.map((plan, planIndex) =>
+	        planIndex === index ? { ...plan, ...patch, confirmed: patch.confirmed ?? false } : plan
+	      )
 	    }));
 	  }
 
 	  function addOnboardingAssetDcaPlan() {
 	    setOnboardingAssetDraft((current) => ({
 	      ...current,
-	      dcaPlans: [...current.dcaPlans, { frequency: "monthly", amount: "", weeklyDay: "1", monthlyDay: "1" }]
+	      dcaPlans: [...current.dcaPlans, { frequency: "monthly", amount: "", weeklyDay: "1", monthlyDay: "1", confirmed: false }]
 	    }));
+	  }
+
+	  function confirmOnboardingAssetDcaPlan(index: number) {
+	    const plan = onboardingAssetDraft.dcaPlans[index];
+	    if (!plan) return;
+	    const amount = Number(plan.amount);
+	    if (!Number.isFinite(amount) || amount <= 0) {
+	      setOnboardingMessage(`第 ${index + 1} 个定投计划需要填写每次金额。`);
+	      return;
+	    }
+	    if (plan.frequency === "monthly") {
+	      const day = Number(plan.monthlyDay);
+	      if (!Number.isFinite(day) || day < 1 || day > 31) {
+	        setOnboardingMessage(`第 ${index + 1} 个定投计划的每月日期需要在 1 到 31 之间。`);
+	        return;
+	      }
+	    }
+	    updateOnboardingAssetDcaPlan(index, { confirmed: true });
+	    setOnboardingMessage(`第 ${index + 1} 个定投计划已确认。`);
 	  }
 
 	  function removeOnboardingAssetDcaPlan(index: number) {
@@ -2770,14 +3216,155 @@ export function App() {
 	    setOnboardingSkipTargets(false);
 	  }
 
-	  function updateOnboardingTarget(index: number, patch: Partial<OnboardingAllocationTarget>) {
-	    setOnboardingTargets((current) =>
-	      current.map((target, targetIndex) => (targetIndex === index ? { ...target, ...patch } : target))
+	  function subTargetDraftFromExisting(parentId: string) {
+	    const existing = new Map(
+	      onboardingTargets
+	        .filter((target) => target.level === "sub" && target.parent_category_id === parentId && target.category_id)
+	        .map((target) => [target.category_id as string, percentInputValue(target.target_percent)])
 	    );
+	    return Object.fromEntries((onboardingSubAllocationOptions[parentId] ?? []).map(([id]) => [id, existing.get(id) ?? ""]));
 	  }
 
-	  function removeOnboardingTarget(index: number) {
-	    setOnboardingTargets((current) => current.filter((_, targetIndex) => targetIndex !== index));
+	  function startSubTargetEditor(parentId?: string) {
+	    const fallbackParent = onboardingSelectedMainAllocationOptions[0]?.[0] ?? onboardingMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
+	    const nextParent = parentId ?? onboardingSelectedMainAllocationOptions.find(([id]) => !onboardingTargets.some((target) => target.level === "sub" && target.parent_category_id === id))?.[0] ?? fallbackParent;
+	    setOnboardingSubTargetDraftParent(nextParent);
+	    setOnboardingSubTargetDraftPercents(subTargetDraftFromExisting(nextParent));
+	    setEditingSubTargetParentId(nextParent);
+	    setOnboardingSkipTargets(false);
+	  }
+
+	  function changeSubTargetDraftParent(parentId: string) {
+	    setOnboardingSubTargetDraftParent(parentId);
+	    setOnboardingSubTargetDraftPercents(subTargetDraftFromExisting(parentId));
+	    setEditingSubTargetParentId(parentId);
+	  }
+
+	  function confirmSubTargetGroup() {
+	    const parentId = onboardingSubTargetDraftParent;
+	    const subOptions = onboardingSubAllocationOptions[parentId] ?? [];
+	    if (subOptions.length === 0) {
+	      setOnboardingMessage("这个一级分类下面没有可填写的子类。");
+	      return;
+	    }
+	    const rows = subOptions.map(([categoryId, label]) => ({
+	      categoryId,
+	      label,
+	      value: parsePercentInput(onboardingSubTargetDraftPercents[categoryId] ?? "")
+	    }));
+	    const invalid = rows.find((row) => row.value < 0 || row.value > 100);
+	    if (invalid) {
+	      setOnboardingMessage(`${invalid.label} 的目标比例需要在 0% 到 100% 之间。`);
+	      return;
+	    }
+	    const total = rows.reduce((sum, row) => sum + row.value, 0);
+	    const totalMessage = percentTotalValidationMessage(`${optionLabel(onboardingSelectedMainAllocationOptions, parentId)} 的二级配比`, total);
+	    if (totalMessage) {
+	      setOnboardingMessage(totalMessage);
+	      return;
+	    }
+	    setOnboardingTargets((current) => [
+	      ...current.filter((target) => !(target.level === "sub" && target.parent_category_id === parentId)),
+	      ...rows
+	        .filter((row) => row.value > 0)
+	        .map((row) => ({
+	          level: "sub" as const,
+	          parent_category_id: parentId,
+	          category_id: row.categoryId,
+	          label: `${optionLabel(onboardingSelectedMainAllocationOptions, parentId)} / ${row.label}`,
+	          target_percent: row.value
+	        }))
+	    ]);
+	    setEditingSubTargetParentId(null);
+	    setOnboardingSubTargetDraftPercents({});
+	    setOnboardingMessage("二级分类配比已确认。");
+	  }
+
+	  function deleteSubTargetGroup(parentId: string) {
+	    setOnboardingTargets((current) => current.filter((target) => !(target.level === "sub" && target.parent_category_id === parentId)));
+	    if (editingSubTargetParentId === parentId) {
+	      setEditingSubTargetParentId(null);
+	      setOnboardingSubTargetDraftPercents({});
+	    }
+	    setOnboardingMessage("二级分类配比已删除。");
+	  }
+
+		  function updateOnboardingTarget(index: number, patch: Partial<OnboardingAllocationTarget>) {
+		    setOnboardingTargets((current) =>
+		      current.map((target, targetIndex) => (targetIndex === index ? { ...target, ...patch } : target))
+		    );
+		  }
+
+		  function updateMainOnboardingTarget(categoryId: string, label: string, targetPercent: number) {
+		    setEditedMainTargetIds((current) => {
+		      const next = new Set(current);
+		      next.add(categoryId);
+		      return next;
+		    });
+		    setOnboardingTargets((current) => {
+		      const hasTarget = current.some((target) => target.level === "main" && target.category_id === categoryId);
+		      if (hasTarget) {
+		        return current.map((target) =>
+		          target.level === "main" && target.category_id === categoryId
+		            ? { ...target, label: target.label || label, target_percent: targetPercent }
+		            : target
+		        );
+		      }
+		      return [
+		        ...current,
+		        {
+		          level: "main",
+		          category_id: categoryId,
+		          label,
+		          target_percent: targetPercent
+		        }
+		      ];
+		    });
+		  }
+
+		  function removeOnboardingTarget(index: number) {
+		    setOnboardingTargets((current) => current.filter((_, targetIndex) => targetIndex !== index));
+		  }
+
+		  function effectiveOnboardingTargetsForEditor() {
+		    const mainTargets = buildMainTargetsWithSavedValues(
+		      onboardingSelectedMainAllocationOptions,
+		      onboardingTargets,
+		      savedMainTargetByCategory,
+		      editedMainTargetIds
+		    );
+		    return [...mainTargets, ...onboardingTargets.filter((target) => target.level !== "main")];
+		  }
+
+		  function onboardingTargetValidationMessage() {
+		    if (onboardingSkipTargets) return null;
+		    const effectiveTargets = effectiveOnboardingTargetsForEditor();
+		    const mainTotal = effectiveTargets
+		      .filter((target) => target.level === "main")
+		      .reduce((sum, target) => sum + targetPercentNumber(target.target_percent), 0);
+		    const mainTotalMessage = percentTotalValidationMessage("一级分类配比", mainTotal);
+		    if (mainTotalMessage) return mainTotalMessage;
+		    const parents = new Set(effectiveTargets.filter((target) => target.level === "sub").map((target) => target.parent_category_id).filter(Boolean));
+		    for (const parentId of parents) {
+		      const subTotal = effectiveTargets
+		        .filter((target) => target.level === "sub" && target.parent_category_id === parentId)
+		        .reduce((sum, target) => sum + targetPercentNumber(target.target_percent), 0);
+		      const subTotalMessage = percentTotalValidationMessage(`${optionLabel(onboardingSelectedMainAllocationOptions, parentId as string)} 的二级配比`, subTotal);
+		      if (subTotalMessage) return subTotalMessage;
+		    }
+		    return null;
+		  }
+
+	  function goToNextOnboardingStep() {
+	    if (effectiveOnboardingStep === 2) {
+	      const validationMessage = onboardingTargetValidationMessage();
+	      if (validationMessage) {
+	        setOnboardingMessage(validationMessage);
+	        return;
+	      }
+	    }
+	    setOnboardingMessage(null);
+	    setOnboardingStep((step) => Math.min(step + 1, view === "preferences" ? 2 : 3));
 	  }
 
 	  function toggleOnboardingSection(section: HealthSection) {
@@ -2789,10 +3376,60 @@ export function App() {
 	  }
 
 	  function addCustomAnalysisPrompt() {
-	    const value = customAnalysisInput.trim();
-	    if (!value) return;
+	    const aspect = (customAnalysisAspectOptions[customAnalysisSection] ?? []).find((item) => item.id === customAnalysisAspect);
+	    if (!aspect) {
+	      setOnboardingMessage("请先选择一个分析方面。");
+	      return;
+	    }
+	    const note = customAnalysisInput.trim();
+	    const value = `${customAnalysisSection}｜${aspect.label}${note ? `｜${note}` : ""}`;
 	    setCustomAnalysisPrompts((current) => [...current, value]);
 	    setCustomAnalysisInput("");
+	    setOnboardingMessage("自定义关注点已加入。");
+	  }
+
+	  async function resetDemoOnboarding() {
+	    if (!isDemoEnvironment) {
+	      setOnboardingMessage("重置初始化只在 Demo 环境开放，避免误清空正式数据。");
+	      return;
+	    }
+	    const confirmed = window.confirm("确认重置初始化？当前 Demo 初始化录入会清空，下一次打开会回到新的欢迎页面。");
+	    if (!confirmed) return;
+	    setSavingOnboarding(true);
+	    setOnboardingMessage(null);
+	    try {
+	      window.localStorage.removeItem(onboardingDraftStorageKey);
+	      const status = await invoke<OnboardingStatus>("reset_demo_onboarding");
+	      const cleanTree = status.asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(status.asset_category_tree) : cloneAssetCategoryTree();
+	      setOnboardingDraftHydrated(true);
+	      setOnboardingStep(0);
+	      setOnboardingSavingRate(String(Math.round((status.target_saving_rate || 0.3) * 100)));
+	      setAssetCategoryTree(cleanTree);
+	      setOnboardingAssetDraft(normalizeOnboardingAssetDraft(blankOnboardingAsset(), cleanTree));
+	      setOnboardingAssets([]);
+	      setOnboardingSkipAssets(false);
+		      setOnboardingTargets([]);
+		      setEditedMainTargetIds(new Set());
+		      setOnboardingSkipTargets(false);
+	      setOnboardingSubTargetDraftParent("asset_cat_cash");
+	      setOnboardingSubTargetDraftPercents({});
+	      setEditingSubTargetParentId(null);
+	      setOnboardingSections(status.dashboard_enabled_sections?.length ? status.dashboard_enabled_sections : defaultOnboardingSections);
+	      setCustomAnalysisSection("总览");
+	      setCustomAnalysisAspect("key_metric");
+	      setCustomAnalysisInput("");
+	      setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
+	      setOnboardingStatus(status);
+	      setView("onboarding");
+	      setSuccessBanner(null);
+	      setOnboardingMessage("初始化已重置。你可以重新开始填写。");
+	      const latestSummary = await invoke<DashboardSeedSummary>("get_dashboard_seed_summary");
+	      setSummary(latestSummary);
+	    } catch (err) {
+	      setOnboardingMessage(String(err));
+	    } finally {
+	      setSavingOnboarding(false);
+	    }
 	  }
 
 	  async function saveOnboardingSetup() {
@@ -2806,6 +3443,12 @@ export function App() {
 	    if (onboardingSections.length === 0) {
 	      setOnboardingMessage("至少保留一个看板模块。");
 	      setOnboardingStep(3);
+	      return;
+	    }
+	    const targetValidationMessage = onboardingTargetValidationMessage();
+	    if (targetValidationMessage) {
+	      setOnboardingMessage(targetValidationMessage);
+	      setOnboardingStep(2);
 	      return;
 	    }
 	    setSavingOnboarding(true);
@@ -2829,10 +3472,12 @@ export function App() {
 	          skip_allocation_targets: onboardingSkipTargets
 	        }
 	      });
+	      window.localStorage.removeItem(onboardingDraftStorageKey);
 	      applyOnboardingStatus(status);
 	      await loadDashboard();
-	      setView("home");
-	      setSuccessBanner("初始化已完成。之后可以在月底更新里补录资产和账单。");
+	      setActiveHealthSection("总览");
+	      setView("healthDashboard");
+	      setSuccessBanner("初始化已完成。看板已读取你刚刚填写的资产和偏好。");
 	    } catch (err) {
 	      setOnboardingMessage(String(err));
 	    } finally {
@@ -2840,7 +3485,127 @@ export function App() {
 	    }
 	  }
 
-	  async function saveAssetEntries() {
+	  function allocationTargetsPayloadFromEditor(targets: OnboardingAllocationTarget[]) {
+	    return targets.map((target) => ({
+	      ...target,
+	      label: targetLabel(target),
+	      target_percent:
+	        (target.level === "main" && target.category_id && (Number(target.target_percent) || 0) === 0 && (Number(savedMainTargetByCategory.get(target.category_id)?.target_percent) || 0) > 0
+	          ? Number(savedMainTargetByCategory.get(target.category_id)?.target_percent) || 0
+	          : Number(target.target_percent) || 0) / 100
+	    }));
+	  }
+
+		  function editorAllocationTargetsPayload() {
+		    return onboardingSkipTargets ? [] : allocationTargetsPayloadFromEditor(effectiveOnboardingTargetsForEditor());
+		  }
+
+	  function savedAllocationTargetsPayload() {
+	    return allocationTargetsPayloadFromEditor(onboardingStatus?.allocation_targets ?? []);
+	  }
+
+	  async function savePreferencePayload(options: {
+	    allocationTargets: OnboardingAllocationTarget[];
+	    skipAllocationTargets: boolean;
+	    returnHome?: boolean;
+	    successMessage: string;
+	    targetErrorStep?: number;
+	    editorTargetsAfterSave?: OnboardingAllocationTarget[];
+	  }) {
+	    setOnboardingMessage(null);
+	    setPreferenceSaveFeedback(null);
+	    const rate = Number(onboardingSavingRate) / 100;
+	    if (!Number.isFinite(rate) || rate < 0 || rate > 1) {
+	      setOnboardingMessage("期望储蓄率需要在 0% 到 100% 之间。");
+	      setOnboardingStep(0);
+	      return;
+	    }
+	    if (onboardingSections.length === 0) {
+	      setOnboardingMessage("至少保留一个看板模块。");
+	      setOnboardingStep(2);
+	      return;
+	    }
+	    setSavingOnboarding(true);
+	    try {
+	      const status = await invoke<OnboardingStatus>("save_onboarding", {
+	        input: {
+	          target_saving_rate: rate,
+	          assets: [],
+	          asset_category_tree: assetCategoryTree,
+	          allocation_targets: options.allocationTargets,
+	          dashboard_sections: onboardingSections,
+	          custom_analysis_prompts: customAnalysisPrompts,
+	          skip_asset_entry: true,
+	          skip_allocation_targets: options.skipAllocationTargets
+	        }
+	      });
+	      applyOnboardingStatus(status);
+	      if (options.editorTargetsAfterSave) {
+	        setOnboardingTargets(options.editorTargetsAfterSave);
+	      }
+	      setOnboardingSkipTargets(options.skipAllocationTargets);
+	      await loadDashboard();
+	      if (options.returnHome) setView("home");
+	      setOnboardingMessage(options.successMessage);
+	      setPreferenceSaveFeedback(options.successMessage);
+	      setSuccessBanner(options.successMessage);
+	      window.setTimeout(() => {
+	        setPreferenceSaveFeedback((current) => (current === options.successMessage ? null : current));
+	      }, 2500);
+	    } catch (err) {
+	      setOnboardingMessage(String(err));
+	    } finally {
+	      setSavingOnboarding(false);
+	    }
+	  }
+
+	  async function saveSavingPreference(returnHome = false) {
+	    await savePreferencePayload({
+	      allocationTargets: savedAllocationTargetsPayload(),
+	      skipAllocationTargets: savedAllocationTargetsPayload().length === 0,
+	      returnHome,
+	      successMessage: "储蓄偏好已保存。看板目标储蓄率已同步。"
+	    });
+	  }
+
+	  async function saveAllocationPreference(returnHome = false) {
+	    const targetValidationMessage = onboardingTargetValidationMessage();
+	    if (targetValidationMessage) {
+	      setOnboardingMessage(targetValidationMessage);
+	      setOnboardingStep(1);
+	      return;
+	    }
+		    await savePreferencePayload({
+		      allocationTargets: editorAllocationTargetsPayload(),
+		      skipAllocationTargets: onboardingSkipTargets,
+		      returnHome,
+		      successMessage: "目标配比已保存。看板资产配置差值已同步。",
+		      editorTargetsAfterSave: effectiveOnboardingTargetsForEditor()
+		    });
+		  }
+
+	  async function saveDashboardPreference(returnHome = false) {
+	    await savePreferencePayload({
+	      allocationTargets: savedAllocationTargetsPayload(),
+	      skipAllocationTargets: savedAllocationTargetsPayload().length === 0,
+	      returnHome,
+	      successMessage: "看板偏好已保存。看板模块已同步。"
+	    });
+	  }
+
+	  async function saveCurrentPreferenceStep(returnHome = false) {
+	    if (effectiveOnboardingStep === 0) {
+	      await saveSavingPreference(returnHome);
+	      return;
+	    }
+	    if (effectiveOnboardingStep === 2) {
+	      await saveAllocationPreference(returnHome);
+	      return;
+	    }
+	    await saveDashboardPreference(returnHome);
+	  }
+
+	  async function saveAssetEntries(allowAllocationPreferenceMismatch = false) {
     setSuccessBanner(null);
     if (assetItems.length === 0) {
       setMonthlyMessage("还没有资产清单，请先创建资产。");
@@ -2899,6 +3664,15 @@ export function App() {
       const message = `还有 ${missingAssetRates.length} 条资产汇率缺失：${missingAssetRates.slice(0, 6).join("、")}。`;
       setAssetValidationIssue({ message });
       setMonthlyMessage(message);
+      return;
+    }
+    if (!allowAllocationPreferenceMismatch && assetAllocationPreferenceIssue) {
+      setConfirmDialog({
+        title: "目标配比可能需要更新",
+        message: assetAllocationPreferenceIssue,
+        confirmLabel: "先保存资产",
+        onConfirm: () => saveAssetEntries(true)
+      });
       return;
     }
     setSavingAssets(true);
@@ -3721,6 +4495,10 @@ export function App() {
         </div>
         <div className="security-actions">
           {renderThemeSwitcher("全局主题")}
+          <button className="icon-button" onClick={() => void openPreferences()} type="button">
+            <Target size={17} />
+            <span>偏好设置</span>
+          </button>
           <button
             className={`icon-button ${privacyMode ? "active" : ""}`}
             onClick={() => handlePrivacyMode(!privacyMode)}
@@ -3799,17 +4577,17 @@ export function App() {
           <p>导入账单，确认收支，补齐资产和信用卡口径。</p>
           <ArrowRight size={18} />
         </button>
-        <button className="entry-card" onClick={() => setView("healthDashboard")} type="button">
-          <div className="entry-icon">
-            <BarChart3 size={22} />
-          </div>
-          <span>财务健康看板</span>
-          <p>查看收支储蓄、资产配置、投资表现和月报。</p>
-          <ArrowRight size={18} />
-        </button>
-        <button className="entry-card" onClick={() => setView("contentTemplates")} type="button">
-          <div className="entry-icon">
-            <Edit3 size={22} />
+	        <button className="entry-card" onClick={() => setView("healthDashboard")} type="button">
+	          <div className="entry-icon">
+	            <BarChart3 size={22} />
+	          </div>
+	          <span>财务健康看板</span>
+	          <p>查看收支储蓄、资产配置、投资表现和月报。</p>
+	          <ArrowRight size={18} />
+	        </button>
+	        <button className="entry-card" onClick={() => setView("contentTemplates")} type="button">
+	          <div className="entry-icon">
+	            <Edit3 size={22} />
           </div>
           <span>内容模板设置</span>
           <p>管理分析说明和导出 HTML 的文案模板。</p>
@@ -3834,16 +4612,41 @@ export function App() {
 	    })()
 	  );
 
-	  const renderOnboarding = () => {
-	    const steps = [
-	      { title: "储蓄偏好", detail: "先确定每月想留下多少钱。" },
-	      { title: "资产清单", detail: "可以现在录入，也可以之后在月底更新里补齐。" },
-	      { title: "目标配比", detail: "可跳过；跳过后看板不显示目标差值。" },
-	      { title: "关注看板", detail: "选择默认分析模块，也可以写下自定义分析点。" }
-	    ];
-	    const currentStep = steps[onboardingStep] ?? steps[0];
-	    const mainTargets = onboardingTargets.filter((target) => target.level === "main");
-	    const subTargets = onboardingTargets.filter((target) => target.level === "sub");
+		  const renderOnboarding = (mode: "setup" | "preferences" = "setup") => {
+		    const isPreferenceMode = mode === "preferences";
+		    const setupSteps = [
+		      { title: "储蓄偏好", detail: "先确定每月想留下多少钱。" },
+		      { title: "资产清单", detail: "可以现在录入，也可以之后在月底更新里补齐。" },
+		      { title: "目标配比", detail: "可跳过；跳过后看板不显示目标差值。" },
+		      { title: "关注看板", detail: "默认模块可单击取消，自定义分析点按模块和方面选择。" }
+		    ];
+		    const preferenceSteps = [
+		      setupSteps[0],
+		      setupSteps[2],
+		      setupSteps[3]
+		    ];
+		    const steps = isPreferenceMode ? preferenceSteps : setupSteps;
+		    const activeStep = isPreferenceMode ? ([0, 2, 3][onboardingStep] ?? 0) : onboardingStep;
+		    const currentStep = steps[onboardingStep] ?? steps[0];
+		    const mainTargets = buildMainTargetsWithSavedValues(
+		      onboardingSelectedMainAllocationOptions,
+		      onboardingTargets,
+		      savedMainTargetByCategory,
+		      editedMainTargetIds
+		    );
+		    const subTargets = onboardingTargets.filter((target) => target.level === "sub");
+		    const mainTargetTotal = mainTargets.reduce((sum, target) => sum + targetPercentNumber(target.target_percent), 0);
+	    const subTargetGroups = onboardingSelectedMainAllocationOptions
+	      .map(([parentId, parentLabel]) => ({
+	        parentId,
+	        parentLabel,
+	        rows: subTargets.filter((target) => target.parent_category_id === parentId)
+	      }))
+	      .filter((group) => group.rows.length > 0);
+	    const subTargetDraftOptions = onboardingSubAllocationOptions[onboardingSubTargetDraftParent] ?? [];
+	    const mainTargetTotalClass = mainTargetTotal > 100.0001 ? "target-total over" : mainTargetTotal < 99.9999 ? "target-total incomplete" : "target-total";
+	    const customAspectOptions = customAnalysisAspectOptions[customAnalysisSection] ?? [];
+	    const selectedCustomAspect = customAspectOptions.find((option) => option.id === customAnalysisAspect) ?? customAspectOptions[0];
 
 	    return (
 	      <section
@@ -3852,11 +4655,23 @@ export function App() {
 	          if (event.key === "Shift") event.stopPropagation();
 	        }}
 	      >
-	        <div className="onboarding-hero">
-	          <p className="eyebrow">Welcome</p>
-	          <h1>先把财务系统调成你的样子</h1>
-	          <p>初始化只设置长期偏好和资产框架。真实月度数据，仍然在每月月底更新时录入。</p>
-	        </div>
+			        <div className="onboarding-hero">
+			          <p className="eyebrow">{isPreferenceMode ? "Preferences" : "Welcome"}</p>
+			          <h1>{isPreferenceMode ? "调整你的财务偏好" : "先把财务系统调成你的样子"}</h1>
+			          <p>{isPreferenceMode ? "这里只调整长期偏好、目标配比和看板模块；资产明细仍在月底更新里维护。" : "初始化只设置长期偏好和资产框架。真实月度数据，仍然在每月月底更新时录入。"}</p>
+				          {isPreferenceMode ? (
+				            <button className="secondary-button compact onboarding-reset-button" onClick={() => setView("home")} type="button">
+				              <ChevronLeft size={15} />
+				              返回首页
+				            </button>
+				          ) : null}
+			          {isDemoEnvironment && !isPreferenceMode ? (
+			            <button className="secondary-button compact onboarding-reset-button" disabled={savingOnboarding} onClick={() => void resetDemoOnboarding()} type="button">
+			              <RefreshCcw size={15} />
+			              重置初始化
+		            </button>
+		          ) : null}
+		        </div>
 
 	        <div className="onboarding-layout">
 	          <aside className="onboarding-rail">
@@ -3884,7 +4699,7 @@ export function App() {
 
 	            {onboardingMessage ? <div className="notice onboarding-notice">{onboardingMessage}</div> : null}
 
-	            {onboardingStep === 0 ? (
+		            {activeStep === 0 ? (
 	              <div className="onboarding-step">
 	                <div className="saving-rate-editor">
 	                  <label>
@@ -3905,14 +4720,22 @@ export function App() {
 	                    <span>适合作为第一版默认线。后面可以随时改。</span>
 	                  </aside>
 	                </div>
-	                <div className="onboarding-preview-card">
-	                  <span>看板会使用这个比例计算目标储蓄金额和储蓄缺口。</span>
-	                  <strong>{Number(onboardingSavingRate || 0).toFixed(0)}%</strong>
-	                </div>
-	              </div>
-	            ) : null}
+		                <div className="onboarding-preview-card">
+		                  <span>看板会使用这个比例计算目标储蓄金额和储蓄缺口。</span>
+		                  <strong>{Number(onboardingSavingRate || 0).toFixed(0)}%</strong>
+		                </div>
+		                {isPreferenceMode ? (
+		                  <div className="onboarding-row-actions">
+		                    <button className="primary-button compact" disabled={savingOnboarding} onClick={() => void saveSavingPreference()} type="button">
+		                      {savingOnboarding ? "保存中..." : "保存储蓄偏好"}
+		                    </button>
+		                    {preferenceSaveFeedback?.includes("储蓄") ? <span className="preference-save-feedback"><CheckCircle2 size={15} />已保存</span> : null}
+		                  </div>
+		                ) : null}
+		              </div>
+		            ) : null}
 
-	            {onboardingStep === 1 ? (
+		            {!isPreferenceMode && activeStep === 1 ? (
 	              <div className="onboarding-step">
 	                <div className="onboarding-inline-choice">
 	                  <label>
@@ -3939,7 +4762,7 @@ export function App() {
 	                        <span>可以改名、新增或删除默认分类。新增后下方立刻可选。</span>
 	                        <button className="secondary-button compact" onClick={() => addAssetCategory(null)} type="button">
 	                          <Plus size={14} />
-	                          新增一级类型
+	                          新增一级
 	                        </button>
 	                      </div>
 	                      <div className="category-tree-editor">
@@ -3953,7 +4776,7 @@ export function App() {
 	                                value={top.label}
 	                                onChange={(event) => renameAssetCategory(top.id, event.target.value)}
 	                              />
-	                              <button className="link-button" onClick={() => addAssetCategory(top.id)} type="button">新增子类</button>
+	                              <button className="link-button" onClick={() => addAssetCategory(top.id)} type="button">新增一级</button>
 	                              <button className="link-button danger-link" onClick={() => deleteAssetCategory(top.id)} type="button">删除</button>
 	                            </div>
 	                            {top.children.map((child) => (
@@ -3966,7 +4789,7 @@ export function App() {
 	                                    value={child.label}
 	                                    onChange={(event) => renameAssetCategory(child.id, event.target.value)}
 	                                  />
-	                                  <button className="link-button" onClick={() => addAssetCategory(child.id)} type="button">新增子子类</button>
+	                                  <button className="link-button" onClick={() => addAssetCategory(child.id)} type="button">新增子类</button>
 	                                  <button className="link-button danger-link" onClick={() => deleteAssetCategory(child.id)} type="button">删除</button>
 	                                </div>
 	                                {child.children.map((grandchild) => (
@@ -3990,7 +4813,7 @@ export function App() {
 	                    <div className="onboarding-form-grid">
 	                      <label>
 	                        资产名称
-	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.name} onChange={(event) => updateOnboardingAssetDraft({ name: event.target.value })} placeholder="例如：标普 500 A" />
+	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.name} onChange={(event) => updateOnboardingAssetDraft({ name: event.target.value })} placeholder="例如：全球资产基金 A" />
 	                      </label>
 	                      <label>
 	                        一级类型
@@ -4025,6 +4848,10 @@ export function App() {
 	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.platform} onChange={(event) => updateOnboardingAssetDraft({ platform: event.target.value })} placeholder="支付宝 / 证券账户 / 银行" />
 	                      </label>
 	                      <label>
+	                        当前金额
+	                        <input value={onboardingAssetDraft.monthEndAmount} onChange={(event) => updateOnboardingAssetDraft({ monthEndAmount: event.target.value })} placeholder="当前市值 / 余额" type="number" />
+	                      </label>
+	                      <label>
 	                        标签
 	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.tags} onChange={(event) => updateOnboardingAssetDraft({ tags: event.target.value })} placeholder="中文或英文逗号分隔" />
 	                      </label>
@@ -4039,7 +4866,6 @@ export function App() {
 	                        这是定投资产
 	                      </label>
 	                    </div>
-	                    <div className="notice onboarding-notice">这里只创建资产框架；具体月末金额可以等到月底资产更新时再录入。</div>
 	                    {onboardingAssetDraft.isDca ? (
 	                      <div className="onboarding-dca-list">
 	                        {onboardingAssetDraft.dcaPlans.map((plan, index) => (
@@ -4054,12 +4880,17 @@ export function App() {
 	                                {[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>周{["一", "二", "三", "四", "五", "六", "日"][day - 1]}</option>)}
 	                              </select>
 	                            ) : null}
-	                            {plan.frequency === "monthly" ? (
-	                              <input value={plan.monthlyDay} onChange={(event) => updateOnboardingAssetDcaPlan(index, { monthlyDay: event.target.value })} placeholder="每月几号" type="number" />
-	                            ) : null}
-	                            <input value={plan.amount} onChange={(event) => updateOnboardingAssetDcaPlan(index, { amount: event.target.value })} placeholder="每次金额" type="number" />
-	                            <button className="link-button" onClick={() => removeOnboardingAssetDcaPlan(index)} type="button">删除</button>
-	                          </div>
+		                            {plan.frequency === "monthly" ? (
+		                              <input value={plan.monthlyDay} onChange={(event) => updateOnboardingAssetDcaPlan(index, { monthlyDay: event.target.value })} placeholder="每月几号" type="number" />
+		                            ) : null}
+		                            <input value={plan.amount} onChange={(event) => updateOnboardingAssetDcaPlan(index, { amount: event.target.value })} placeholder="每次金额" type="number" />
+		                            <div className="onboarding-row-actions">
+		                              <button className="link-button" onClick={() => confirmOnboardingAssetDcaPlan(index)} type="button">
+			                                {plan.confirmed ? "已确认" : "确认"}
+		                              </button>
+		                              <button className="link-button danger-link" onClick={() => removeOnboardingAssetDcaPlan(index)} type="button">删除</button>
+		                            </div>
+		                          </div>
 	                        ))}
 	                        <button className="secondary-button compact" onClick={addOnboardingAssetDcaPlan} type="button">
 	                          <Plus size={15} />
@@ -4085,124 +4916,220 @@ export function App() {
 	              </div>
 	            ) : null}
 
-	            {onboardingStep === 2 ? (
+		            {activeStep === 2 ? (
 	              <div className="onboarding-step">
 	                <div className="notice onboarding-notice">这里不提供理财或投资建议。目标配比只按你的个人计划手动填写，可跳过。</div>
 	                <div className="onboarding-inline-choice">
-	                  <label>
-	                    <input checked={onboardingSkipTargets} onChange={(event) => setOnboardingSkipTargets(event.target.checked)} type="checkbox" />
-	                    跳过目标资产配比
-	                  </label>
-	                  <span>跳过后，看板只展示实际资产比例，不显示目标差值。</span>
-	                </div>
-	                {!onboardingSkipTargets ? (
-	                  <>
-	                    <div className="target-section-header">
-	                      <div>
-	                        <strong>一级分类配比</strong>
-	                        <span>自动读取上一步资产清单里的一级类型。</span>
-	                      </div>
-	                    </div>
-	                    <div className="onboarding-target-list">
-	                      {mainTargets.length === 0 ? <div className="dashboard-empty-state compact">还没有可用一级分类。可以返回上一步录入资产，或直接跳过。</div> : mainTargets.map((target) => {
-	                        const targetIndex = onboardingTargets.indexOf(target);
-	                        const categoryId = target.category_id ?? onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
-	                        return (
-	                          <div className="onboarding-target-row main-target-row" key={`main-target-${categoryId}`}>
-	                            <strong>{optionLabel(onboardingSelectedMainAllocationOptions, categoryId)}</strong>
-	                            <label className="percentage-input">
-	                              <input value={Number(target.target_percent || 0)} onChange={(event) => updateOnboardingTarget(targetIndex, { target_percent: Number(event.target.value) })} type="number" placeholder="目标比例" />
-	                              <span>%</span>
-	                            </label>
-	                          </div>
-	                        );
-	                      })}
-	                    </div>
-	                    <div className="target-subsection">
-	                      <div className="target-section-header">
-	                        <div>
-	                          <strong>二级分类配比（可选）</strong>
-	                          <span>只有想细分某个一级分类时才需要填写。</span>
-	                        </div>
-	                        <button className="secondary-button compact" onClick={() => addOnboardingTarget("sub")} type="button">新增二级分类配比</button>
-	                      </div>
-	                      <div className="onboarding-target-list">
-	                        {subTargets.length === 0 ? <div className="dashboard-empty-state compact">暂未填写二级分类目标。</div> : subTargets.map((target) => {
-	                          const targetIndex = onboardingTargets.indexOf(target);
-	                          const parent = target.parent_category_id ?? onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
-	                          return (
-	                            <div className="onboarding-target-row sub-target-row" key={`sub-target-${targetIndex}`}>
-	                              <select value={parent} onChange={(event) => updateOnboardingTarget(targetIndex, { parent_category_id: event.target.value, category_id: onboardingSubAllocationOptions[event.target.value]?.[0]?.[0] ?? null })}>
-	                                {onboardingSelectedMainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-	                              </select>
-	                              <select value={target.category_id ?? onboardingSubAllocationOptions[parent]?.[0]?.[0] ?? ""} onChange={(event) => updateOnboardingTarget(targetIndex, { category_id: event.target.value })}>
-	                                {(onboardingSubAllocationOptions[parent] ?? []).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-	                              </select>
-	                              <label className="percentage-input">
-	                                <input value={Number(target.target_percent || 0)} onChange={(event) => updateOnboardingTarget(targetIndex, { target_percent: Number(event.target.value) })} type="number" placeholder="目标比例" />
-	                                <span>%</span>
-	                              </label>
-	                              <button className="link-button" onClick={() => removeOnboardingTarget(targetIndex)} type="button">删除</button>
-	                            </div>
-	                          );
-	                        })}
-	                      </div>
-	                    </div>
-	                  </>
-	                ) : null}
-	              </div>
-	            ) : null}
+		                  <label>
+		                    <input checked={onboardingSkipTargets} onChange={(event) => setOnboardingSkipTargets(event.target.checked)} type="checkbox" />
+		                    跳过目标资产配比
+		                  </label>
+			                  <span>跳过后只显示实际比例。</span>
+		                </div>
+		                {!onboardingSkipTargets ? (
+		                  <>
+			                    <div className="target-section-header">
+			                      <div>
+			                        <strong>一级分类配比</strong>
+			                        <span>自动读取初始化/月度更新里的资产类别，合计需要等于 100%。</span>
+			                      </div>
+			                      <span className={mainTargetTotalClass}>合计 {mainTargetTotal.toFixed(1)}%</span>
+			                    </div>
+			                    <div className="onboarding-target-list">
+				                      {mainTargets.length === 0 ? <div className="dashboard-empty-state compact">还没有可用一级分类。可以返回上一步录入资产，或直接跳过。</div> : mainTargets.map((target) => {
+				                        const categoryId = target.category_id ?? onboardingSelectedMainAllocationOptions[0]?.[0] ?? "asset_cat_cash";
+				                        const categoryLabel = optionLabel(onboardingSelectedMainAllocationOptions, categoryId);
+				                        return (
+				                          <div className="onboarding-target-row main-target-row" key={`main-target-${categoryId}`}>
+			                            <strong>{categoryLabel}</strong>
+			                            <label className="percentage-input">
+			                              <input
+			                                max="100"
+			                                min="0"
+				                                onChange={(event) => updateMainOnboardingTarget(categoryId, categoryLabel, parsePercentInput(event.target.value))}
+			                                placeholder="目标比例"
+			                                type="number"
+			                                value={percentInputValue(target.target_percent)}
+			                              />
+		                              <span>%</span>
+		                            </label>
+		                          </div>
+		                        );
+		                      })}
+		                    </div>
+			                    {mainTargetTotal > 100.0001 ? <div className="notice onboarding-notice">一级分类配比合计超过 100%，请调整后再继续。</div> : null}
+			                    {mainTargetTotal < 99.9999 ? <div className="notice onboarding-notice">一级分类配比合计需要等于 100%。</div> : null}
+		                    <div className="target-subsection">
+		                      <div className="target-section-header">
+		                        <div>
+		                          <strong>二级分类配比（可选）</strong>
+		                          <span>选择一个一级分类后，填写它下面各子类比例，确认后生成明细。</span>
+		                        </div>
+		                        <button className="secondary-button compact" onClick={() => startSubTargetEditor()} type="button">新增二级分类</button>
+		                      </div>
+		                      {editingSubTargetParentId ? (
+		                        <div className="sub-target-editor">
+		                          <label>
+		                            一级分类
+		                            <select value={onboardingSubTargetDraftParent} onChange={(event) => changeSubTargetDraftParent(event.target.value)}>
+		                              {onboardingSelectedMainAllocationOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+		                            </select>
+		                          </label>
+		                          <div className="sub-target-draft-list">
+		                            {subTargetDraftOptions.length === 0 ? (
+		                              <div className="dashboard-empty-state compact">这个一级分类下没有子类。</div>
+		                            ) : subTargetDraftOptions.map(([categoryId, label]) => (
+		                              <div className="sub-target-draft-row" key={`sub-target-draft-${categoryId}`}>
+		                                <strong>{label}</strong>
+		                                <label className="percentage-input">
+		                                  <input
+		                                    max="100"
+		                                    min="0"
+		                                    onChange={(event) => setOnboardingSubTargetDraftPercents((current) => ({ ...current, [categoryId]: event.target.value }))}
+		                                    placeholder="目标比例"
+		                                    type="number"
+		                                    value={onboardingSubTargetDraftPercents[categoryId] ?? ""}
+		                                  />
+		                                  <span>%</span>
+		                                </label>
+		                              </div>
+		                            ))}
+			                          </div>
+			                          <div className="sub-target-editor-footer">
+			                            <div className="onboarding-row-actions">
+			                              <button className="secondary-button compact" onClick={() => { setEditingSubTargetParentId(null); setOnboardingSubTargetDraftPercents({}); }} type="button">取消</button>
+			                              <button className="primary-button compact" onClick={confirmSubTargetGroup} type="button">确认二级配比</button>
+		                            </div>
+		                          </div>
+		                        </div>
+		                      ) : null}
+		                      <div className="onboarding-target-list">
+			                        {subTargetGroups.length === 0 ? <div className="dashboard-empty-state compact">暂未填写二级分类目标。</div> : subTargetGroups.map((group) => {
+			                          return (
+			                            <div className="sub-target-group" key={`sub-target-group-${group.parentId}`}>
+			                              <div className="sub-target-group-header">
+			                                <div>
+			                                  <strong>{group.parentLabel}</strong>
+			                                </div>
+		                                <div className="onboarding-row-actions">
+		                                  <button className="link-button" onClick={() => startSubTargetEditor(group.parentId)} type="button">编辑</button>
+		                                  <button className="link-button danger-link" onClick={() => deleteSubTargetGroup(group.parentId)} type="button">删除</button>
+		                                </div>
+		                              </div>
+		                              <div className="sub-target-chip-list">
+		                                {group.rows.map((target) => (
+		                                  <span key={`sub-target-chip-${group.parentId}-${target.category_id}`}>
+		                                    {optionLabel(onboardingSubAllocationOptions[group.parentId] ?? [], target.category_id ?? "")} {Number(target.target_percent || 0).toFixed(1)}%
+		                                  </span>
+		                                ))}
+		                              </div>
+		                            </div>
+		                          );
+		                        })}
+		                      </div>
+		                    </div>
+			                  </>
+			                ) : null}
+			                {isPreferenceMode ? (
+			                  <div className="onboarding-row-actions">
+			                    <button className="primary-button compact" disabled={savingOnboarding} onClick={() => void saveAllocationPreference()} type="button">
+			                      {savingOnboarding ? "保存中..." : "保存目标配比"}
+			                    </button>
+			                    {preferenceSaveFeedback?.includes("目标配比") ? <span className="preference-save-feedback"><CheckCircle2 size={15} />已保存</span> : null}
+			                  </div>
+			                ) : null}
+		              </div>
+		            ) : null}
 
-	            {onboardingStep === 3 ? (
-	              <div className="onboarding-step">
-	                <div className="onboarding-chart-grid">
-	                  {onboardingChartOptions.map((option) => (
-	                    <button
-	                      className={onboardingSections.includes(option.section) ? "selected" : ""}
-	                      key={option.section}
+		            {activeStep === 3 ? (
+		              <div className="onboarding-step">
+		                <div className="notice onboarding-notice">以下模块会出现在财务健康看板里，单击卡片可以取消。每个模块下面列出了默认分析图表。</div>
+		                <div className="onboarding-chart-grid">
+		                  {onboardingChartOptions.map((option) => (
+		                    <button
+		                      className={onboardingSections.includes(option.section) ? "selected" : ""}
+		                      key={option.section}
 	                      onClick={() => toggleOnboardingSection(option.section)}
 	                      type="button"
-	                    >
-	                      <CheckCircle2 size={18} />
-	                      <strong>{option.title}</strong>
-	                      <span>{option.detail}</span>
-	                    </button>
-	                  ))}
-	                </div>
-	                <div className="custom-analysis-box">
-	                  <label>
-	                    自定义想看的分析
-	                    <textarea value={customAnalysisInput} onChange={(event) => setCustomAnalysisInput(event.target.value)} placeholder="例如：我想看纳斯达克和标普分开后的年度趋势。" />
-	                  </label>
-	                  <button className="secondary-button compact" onClick={addCustomAnalysisPrompt} type="button">
-	                    <Plus size={15} />
-	                    加入关注点
-	                  </button>
-	                  <div className="onboarding-list">
-	                    {customAnalysisPrompts.map((item, index) => (
-	                      <div className="onboarding-list-row" key={`${item}-${index}`}>
+		                    >
+		                      <CheckCircle2 size={18} />
+		                      <strong>{option.title}</strong>
+		                      <span>{option.detail}</span>
+		                      <div className="onboarding-chart-chip-list">
+		                        {option.charts.map((chart) => <i key={`${option.section}-${chart}`}>{chart}</i>)}
+		                      </div>
+		                    </button>
+		                  ))}
+		                </div>
+		                <div className="custom-analysis-box">
+		                  <div className="target-section-header">
+		                    <div>
+		                      <strong>自定义分析点</strong>
+		                      <span>先选择放在哪个模块，再选择关注方面；备注只用于补充口径。</span>
+		                    </div>
+		                  </div>
+		                  <div className="custom-analysis-builder">
+		                    <label>
+		                      放在哪个模块
+		                      <select value={customAnalysisSection} onChange={(event) => setCustomAnalysisSection(event.target.value as HealthSection)}>
+		                        {healthSections.map((section) => <option key={section} value={section}>{section}</option>)}
+		                      </select>
+		                    </label>
+		                    <label>
+		                      具体方面
+		                      <select value={customAnalysisAspect} onChange={(event) => setCustomAnalysisAspect(event.target.value)}>
+		                        {customAspectOptions.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.label}</option>)}
+		                      </select>
+		                    </label>
+		                    <label className="custom-analysis-note">
+		                      备注
+		                      <textarea value={customAnalysisInput} onChange={(event) => setCustomAnalysisInput(event.target.value)} placeholder="可空。例如：只看全球资产和现金的年度趋势。" />
+		                    </label>
+		                    <div className="custom-analysis-preview">
+		                      <BarChart3 size={20} />
+		                      <div>
+		                        <strong>{selectedCustomAspect?.preview ?? "图表预览"}</strong>
+		                        <span>{selectedCustomAspect ? `${customAnalysisSection}｜${selectedCustomAspect.detail}` : "选择模块和方面后显示可能的图表形式。"}</span>
+		                      </div>
+		                    </div>
+		                    <button className="secondary-button compact" onClick={addCustomAnalysisPrompt} type="button">
+		                      <Plus size={15} />
+		                      加入关注点
+		                    </button>
+		                  </div>
+		                  <div className="onboarding-list">
+		                    {customAnalysisPrompts.map((item, index) => (
+		                      <div className="onboarding-list-row" key={`${item}-${index}`}>
 	                        <strong>{item}</strong>
 	                        <button className="link-button" onClick={() => setCustomAnalysisPrompts((current) => current.filter((_, itemIndex) => itemIndex !== index))} type="button">删除</button>
 	                      </div>
 	                    ))}
-	                  </div>
-	                </div>
-	              </div>
-	            ) : null}
+		                  </div>
+		                </div>
+		                {isPreferenceMode ? (
+		                  <div className="onboarding-row-actions">
+		                    <button className="primary-button compact" disabled={savingOnboarding} onClick={() => void saveDashboardPreference()} type="button">
+		                      {savingOnboarding ? "保存中..." : "保存看板偏好"}
+		                    </button>
+		                    {preferenceSaveFeedback?.includes("看板") ? <span className="preference-save-feedback"><CheckCircle2 size={15} />已保存</span> : null}
+		                  </div>
+		                ) : null}
+		              </div>
+		            ) : null}
 
 	            <div className="onboarding-actions">
 	              <button className="secondary-button compact" disabled={onboardingStep === 0} onClick={() => setOnboardingStep((step) => Math.max(step - 1, 0))} type="button">
 	                上一步
 	              </button>
-	              {onboardingStep < steps.length - 1 ? (
-	                <button className="primary-button compact" onClick={() => setOnboardingStep((step) => Math.min(step + 1, steps.length - 1))} type="button">
-	                  下一步
-	                </button>
-	              ) : (
-	                <button className="primary-button compact" disabled={savingOnboarding} onClick={() => void saveOnboardingSetup()} type="button">
-	                  {savingOnboarding ? "保存中..." : "完成初始化"}
-	                </button>
-	              )}
+		              {onboardingStep < steps.length - 1 ? (
+			                <button className="primary-button compact" onClick={goToNextOnboardingStep} type="button">
+			                  下一步
+			                </button>
+		              ) : (
+			                <button className="primary-button compact" disabled={savingOnboarding} onClick={() => void (isPreferenceMode ? saveCurrentPreferenceStep() : saveOnboardingSetup())} type="button">
+		                  {savingOnboarding ? "保存中..." : isPreferenceMode ? "保存偏好" : "完成初始化"}
+		                </button>
+		              )}
 	            </div>
 	          </article>
 	        </div>
@@ -5013,7 +5940,7 @@ export function App() {
             value={csvPath}
           />
           <button className="primary-button compact" onClick={handleImportSharkCsv} type="button">
-            上传并识别账单
+            选择文件并识别
           </button>
         </div>
         <div className="month-controls">
@@ -5158,7 +6085,7 @@ export function App() {
             <button
               className="primary-button compact"
               disabled={savingAssets}
-              onClick={saveAssetEntries}
+              onClick={() => void saveAssetEntries()}
               type="button"
             >
               {savingAssets ? "保存中..." : completedSteps.assets ? "已确认，可修改" : "确认资产录入"}
@@ -5186,6 +6113,14 @@ export function App() {
                 去修改
               </button>
             ) : null}
+          </div>
+        ) : null}
+        {assetAllocationPreferenceIssue ? (
+          <div className="form-message asset-validation-message asset-allocation-preference-message">
+            <span>{assetAllocationPreferenceIssue}</span>
+            <button className="link-button" onClick={() => void openAllocationPreferences()} type="button">
+              重新设置配比偏好
+            </button>
           </div>
         ) : null}
         <div className="final-grid asset-summary-grid">
@@ -6119,7 +7054,7 @@ export function App() {
       总览: { eyebrow: "Overview", title: "今年核心状态", text: "净资产、可支配金额、储蓄质量和资金加权收益放在同一屏。" },
       收支储蓄: { eyebrow: "Cashflow", title: "收支与储蓄", text: "看收入支出缺口、储蓄率、目标达成和异常波动。" },
       支出结构: { eyebrow: "Spending", title: "支出结构", text: "看分类占比、环比变化和异常支出。" },
-      资产配置: { eyebrow: "Allocation", title: "资产配置", text: "看配置结构演变、目标偏离、美股拆分和可支配金额。" },
+	      资产配置: { eyebrow: "Allocation", title: "资产配置", text: "看配置结构演变、目标偏离、全球资产拆分和可支配金额。" },
       投资表现: { eyebrow: "Performance", title: "投资表现", text: "看非现金资产组收益率、收益金额和资金加权收益。" },
       月报: { eyebrow: "Report", title: "月报", text: "生成本月总结、变化原因和下月提醒。" }
     };
@@ -6150,7 +7085,7 @@ export function App() {
     const ytdExpense = dashboardTrends.reduce((sum, item) => sum + item.expense, 0);
     const ytdSaving = ytdIncome - ytdExpense;
     const latestDiscretionaryAmount = [...summary.discretionary_trends].reverse().find((item) => item.period_month === summary.snapshot_month)?.amount ?? 0;
-    const returnGroupOrder = ["美股", "红利低波", "债券", "黄金", "A股权益", "其他"];
+    const returnGroupOrder = ["全球资产", "红利低波", "债券", "黄金", "A股权益", "其他"];
     const expenseRowsForRange = dashboardRange === "本月" ? summary.expense_categories : summary.expense_year_rank;
     const expenseScopeLabel = dashboardRange === "本月" ? "本月" : `${rangeLabel} 累计`;
     const expenseTotalForRange = expenseRowsForRange.reduce((sum, item) => sum + item.amount, 0);
@@ -6642,7 +7577,7 @@ export function App() {
       const areaPath = `${linePath(points)} L ${xPoint(rows.length - 1, rows.length)} ${height - bottom} L ${xPoint(0, rows.length)} ${height - bottom} Z`;
       return renderChartCard(
         "可支配金额趋势",
-        "债券 + 现金 + 标普 + 纳斯达克 C 类。",
+        "债券、现金和可支配的全球资产项。",
         <svg className="dashboard-svg-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="可支配金额趋势">
           {renderHorizontalGrid(width, height, top, bottom, (ratio) => chartCurrency(maxAmount * (1 - ratio)))}
           <path d={areaPath} fill="rgba(91, 114, 137, 0.16)" />
@@ -7346,7 +8281,7 @@ export function App() {
                   <div>
                     <span>可支配总额</span>
                     <strong>{formatCurrency(latestDiscretionaryAmount, privacyMode)}</strong>
-                    <small>债券 + 现金 + 标普 + 纳斯达克 C 类</small>
+                    <small>债券、现金和可支配的全球资产项</small>
                   </div>
                   <div>
                     <span>配置偏离提醒</span>
@@ -7358,7 +8293,7 @@ export function App() {
                 {renderDiscretionaryChart()}
                 <div className="dashboard-chart-grid">
                   {renderDonutChart(summary.asset_allocations, "当前资产配置", "各资产类别金额占比。")}
-                  {renderDonutChart(summary.us_equity_allocations, "美股子类拆分", "标普、纳斯达克、科技及其他美股占比。")}
+                  {renderDonutChart(summary.us_equity_allocations, "全球资产拆分", "美股、港股和新兴市场占比。")}
                 </div>
                 <div className="allocation-list">
                   {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
@@ -7415,7 +8350,7 @@ export function App() {
                   <div>
                     <span>非现金资产组</span>
                     <strong>{investmentGroupRows.length}</strong>
-                    <small>现金 / 美股 / 红利低波 / 债券 / 黄金 / A股权益 / 其他</small>
+                    <small>现金 / 全球资产 / 红利低波 / 债券 / 黄金 / A股权益 / 其他</small>
                   </div>
                 </div>
                 {renderInvestmentGroupChart()}
@@ -7539,10 +8474,11 @@ export function App() {
 
   return (
     <main className={`shell dashboard-theme-${dashboardTheme} ${privacyMode ? "privacy-on" : ""}`}>
-	      {renderHeader()}
-	      {view === "home" ? renderHome() : null}
-	      {view === "onboarding" ? renderOnboarding() : null}
-	      {view === "monthlyUpdate" ? renderMonthlyUpdate() : null}
+		      {renderHeader()}
+		      {view === "home" ? renderHome() : null}
+		      {view === "onboarding" ? renderOnboarding("setup") : null}
+		      {view === "preferences" ? renderOnboarding("preferences") : null}
+		      {view === "monthlyUpdate" ? renderMonthlyUpdate() : null}
       {view === "healthDashboard" ? renderHealthDashboard() : null}
       {view === "contentTemplates" ? renderContentTemplateSettings() : null}
       {renderConfirmDialog()}

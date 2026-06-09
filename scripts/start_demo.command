@@ -13,7 +13,6 @@ if [ ! -f "$WORK_DB" ] || [ ! -f "$DASHBOARD_DB" ]; then
 fi
 
 cd "$PROJECT_DIR"
-python3 scripts/reset_demo_to_onboarding.py
 
 OLD_PORT_PIDS="$(lsof -ti tcp:1420 2>/dev/null || true)"
 if [ -n "$OLD_PORT_PIDS" ]; then
@@ -26,6 +25,13 @@ OLD_APP_PIDS="$(pgrep -f 'target/debug/financial-planning' 2>/dev/null || true)"
 if [ -n "$OLD_APP_PIDS" ]; then
   echo "关闭旧 App 进程：$OLD_APP_PIDS"
   kill $OLD_APP_PIDS 2>/dev/null || true
+  sleep 1
+fi
+
+OLD_INSTALLED_APP_PIDS="$(pgrep -f '/Applications/Financial Planning.app/Contents/MacOS/financial-planning' 2>/dev/null || true)"
+if [ -n "$OLD_INSTALLED_APP_PIDS" ]; then
+  echo "关闭已安装 App 进程：$OLD_INSTALLED_APP_PIDS"
+  kill $OLD_INSTALLED_APP_PIDS 2>/dev/null || true
   sleep 1
 fi
 

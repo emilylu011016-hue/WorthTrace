@@ -111,11 +111,9 @@ def asset_guess(name: str) -> tuple[str, str, str]:
         return "fund", "asset_cat_dividend_low_vol", "asset_sub_dividend_low_vol"
     if "现金" in name:
         return "cash_account", "asset_cat_cash", "asset_sub_cash"
-    if "标普" in name:
+    if "标普" in name or "纳斯达克" in name:
         return "fund", "asset_cat_us_equity", "asset_sub_sp500"
-    if "纳斯达克" in name:
-        return "fund", "asset_cat_us_equity", "asset_sub_nasdaq"
-    return "fund", "asset_cat_us_equity", "asset_sub_other_us"
+    return "fund", "asset_cat_us_equity", "asset_sub_sp500"
 
 
 def canonical_asset_name(name: str) -> str:

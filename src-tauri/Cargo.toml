@@ -1,6 +1,6 @@
 [package]
 name = "financial-planning"
-version = "1.0.0"
+version = "2.0.0"
 description = "Local financial planning desktop app"
 authors = ["Emily Lu"]
 edition = "2021"
@@ -22,6 +22,7 @@ sha2 = "0.10"
 hex = "0.4"
 tauri = { version = "2", features = [] }
 thiserror = "1"
+tauri-plugin-dialog = "2"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

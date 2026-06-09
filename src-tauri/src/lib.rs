@@ -212,6 +212,8 @@ struct OnboardingStatus {
   target_saving_rate: f64,
   dashboard_enabled_sections: Vec<String>,
   custom_analysis_prompts: Vec<String>,
+  allocation_targets: Vec<OnboardingAllocationTargetInput>,
+  skip_allocation_targets: bool,
   asset_category_tree: Vec<OnboardingAssetCategoryInput>,
   asset_count: i64,
   portfolio_target_count: i64,
@@ -390,6 +392,8 @@ struct NewAssetInput {
   currency: String,
   platform: Option<String>,
   tags: Vec<String>,
+  #[serde(default)]
+  month_end_amount: f64,
   is_dca: bool,
   status: String,
   note: Option<String>,
@@ -1478,8 +1482,30 @@ fn latest_completed_period_month(connection: &Connection) -> Result<String, AppE
       [],
       |row| row.get::<_, Option<String>>(0),
     )?
-    .unwrap_or_else(|| "2026-04".to_string());
-  Ok(from_closes)
+    .filter(|value| !value.trim().is_empty());
+  if let Some(period) = from_closes {
+    return Ok(period);
+  }
+
+  if setting_bool(connection, "onboarding_completed", false)? {
+    let from_initial_snapshot = connection
+      .query_row(
+        "
+        select max(period_month)
+        from monthly_asset_snapshots
+        where version_no = 1
+          and note = '初始化资产快照'
+        ",
+        [],
+        |row| row.get::<_, Option<String>>(0),
+      )?
+      .filter(|value| !value.trim().is_empty());
+    if let Some(period) = from_initial_snapshot {
+      return Ok(period);
+    }
+  }
+
+  Ok("2026-04".to_string())
 }
 
 fn dashboard_monthly_trends(connection: &Connection) -> Result<Vec<MonthlyTrend>, AppError> {
@@ -1867,10 +1893,9 @@ fn asset_allocation_breakdown(
   if parent_id == Some("asset_cat_us_equity") {
     let mut merged: Vec<AssetAllocationBreakdown> = Vec::new();
     for item in out {
-      let category = if item.category == "信息科技" {
-        "纳斯达克".to_string()
-      } else {
-        item.category
+      let category = match item.category.as_str() {
+        "标普" | "纳斯达克" | "信息科技" | "科技" | "其他" | "其他美股" => "美股".to_string(),
+        _ => item.category,
       };
       if let Some(existing) = merged.iter_mut().find(|row| row.category == category) {
         existing.amount += item.amount;
@@ -2432,6 +2457,20 @@ fn setting_string(connection: &Connection, key: &str, fallback: &str) -> Result<
   }
 }
 
+fn setting_raw_json(connection: &Connection, key: &str, fallback: &str) -> Result<String, AppError> {
+  let value: Result<String, rusqlite::Error> = connection.query_row(
+    "select value_json from app_settings where key = ?1",
+    params![key],
+    |row| row.get(0),
+  );
+
+  match value {
+    Ok(raw) => Ok(raw),
+    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(fallback.to_string()),
+    Err(error) => Err(error.into()),
+  }
+}
+
 fn setting_number(connection: &Connection, key: &str, fallback: f64) -> Result<f64, AppError> {
   let value: Result<String, rusqlite::Error> = connection.query_row(
     "select value_json from app_settings where key = ?1",
@@ -2507,34 +2546,33 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       children: vec![
         OnboardingAssetCategoryInput { id: "asset_sub_bank_payment".to_string(), label: "银行/支付账户".to_string(), children: vec![] },
         OnboardingAssetCategoryInput { id: "asset_sub_money_market_cash".to_string(), label: "货币现金".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_short_deposit".to_string(), label: "短期存款".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_receivable".to_string(), label: "应收押金".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
       id: "asset_cat_us_equity".to_string(),
-      label: "美股".to_string(),
+      label: "全球资产".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_us_tech".to_string(), label: "科技".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_other_us".to_string(), label: "其他".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "美股".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "港股".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_us_tech".to_string(), label: "新兴市场".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
       id: "asset_cat_dividend_low_vol".to_string(),
       label: "红利低波".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_dividend".to_string(), label: "红利/高股息".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_low_vol".to_string(), label: "低波/红利低波".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_dividend".to_string(), label: "红利".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_low_vol".to_string(), label: "低波".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
       id: "asset_cat_bond".to_string(),
       label: "债券".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_short_bond".to_string(), label: "短债/中短债".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_pure_bond".to_string(), label: "纯债/信用债".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_treasury_bond".to_string(), label: "国债/政策金融债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_short_bond".to_string(), label: "短债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_pure_bond".to_string(), label: "纯债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_treasury_bond".to_string(), label: "国债".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
@@ -2556,9 +2594,7 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       id: "asset_cat_other".to_string(),
       label: "其他".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_receivable".to_string(), label: "应收".to_string(), children: vec![] },
         OnboardingAssetCategoryInput { id: "asset_sub_insurance_pension".to_string(), label: "保险/养老金".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_liability".to_string(), label: "负债".to_string(), children: vec![] },
         OnboardingAssetCategoryInput { id: "asset_sub_uncategorized".to_string(), label: "未分类".to_string(), children: vec![] },
       ],
     },
@@ -2679,6 +2715,16 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
     "dashboard_custom_analysis_prompts",
     Vec::new(),
   )?;
+  let allocation_targets = setting_raw_json(connection, "dashboard_custom_allocation_targets", "[]")?;
+  let allocation_targets: Vec<OnboardingAllocationTargetInput> =
+    serde_json::from_str(&allocation_targets).unwrap_or_default();
+  let allocation_targets: Vec<OnboardingAllocationTargetInput> = allocation_targets
+    .into_iter()
+    .map(|target| OnboardingAllocationTargetInput {
+      target_percent: target.target_percent * 100.0,
+      ..target
+    })
+    .collect();
   let asset_category_tree = setting_asset_category_tree(connection)?;
   let asset_count: i64 = connection.query_row(
     "
@@ -2714,16 +2760,19 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
     [],
     |row| row.get(0),
   )?;
-  let completed = setting_bool(connection, "onboarding_completed", false)? || business_count > 0;
+	  let completed = setting_bool(connection, "onboarding_completed", false)? || business_count > 0;
+  let skip_allocation_targets = setting_bool(connection, "onboarding_allocation_targets_skipped", allocation_targets.is_empty())?;
 
-  Ok(OnboardingStatus {
-    completed,
-    target_saving_rate,
-    dashboard_enabled_sections,
-    custom_analysis_prompts,
-    asset_category_tree,
-    asset_count,
-    portfolio_target_count,
+	  Ok(OnboardingStatus {
+	    completed,
+	    target_saving_rate,
+	    dashboard_enabled_sections,
+	    custom_analysis_prompts,
+	    allocation_targets,
+	    skip_allocation_targets,
+	    asset_category_tree,
+	    asset_count,
+	    portfolio_target_count,
   })
 }
 
@@ -2763,6 +2812,25 @@ fn save_onboarding_to_connection(connection: &mut Connection, input: &Onboarding
     &serde_json::to_string(&category_tree).unwrap_or_else(|_| "[]".to_string()),
   )?;
   sync_asset_category_tree(&tx, &category_tree)?;
+  let onboarding_snapshot_date: String = tx.query_row(
+    "select date('now', 'localtime')",
+    [],
+    |row| row.get(0),
+  )?;
+  let onboarding_period_month = onboarding_snapshot_date
+    .get(0..7)
+    .unwrap_or(onboarding_snapshot_date.as_str())
+    .to_string();
+  let has_initial_asset_amount = input.assets.iter().any(|asset| {
+    asset.month_end_amount.is_finite() && asset.month_end_amount > 0.0
+  });
+  if has_initial_asset_amount {
+    upsert_setting_tx(
+      &tx,
+      "official_start_date",
+      &serde_json::to_string(&onboarding_snapshot_date).unwrap_or_else(|_| "\"\"".to_string()),
+    )?;
+  }
 
   for asset in input.assets.iter().filter(|asset| !asset.name.trim().is_empty()) {
     if asset.is_dca && asset.dca_plans.is_empty() {
@@ -2826,6 +2894,39 @@ fn save_onboarding_to_connection(connection: &mut Connection, input: &Onboarding
         asset.note
       ],
     )?;
+
+    if asset.month_end_amount.is_finite() && asset.month_end_amount > 0.0 {
+      let snapshot_id = make_id(
+        "asset_snapshot",
+        &format!("{}|{}|onboarding", asset_id, onboarding_period_month),
+      );
+      tx.execute(
+        "
+        insert into monthly_asset_snapshots (
+          id, asset_id, period_month, snapshot_date, original_amount,
+          currency, fx_rate_to_cny, amount_cny, status, version_no, note
+        )
+        values (?1, ?2, ?3, ?4, ?5, ?6, 1, ?5, 'held', 1, '初始化资产快照')
+        on conflict(asset_id, period_month, version_no) do update set
+          snapshot_date = excluded.snapshot_date,
+          original_amount = excluded.original_amount,
+          currency = excluded.currency,
+          fx_rate_to_cny = excluded.fx_rate_to_cny,
+          amount_cny = excluded.amount_cny,
+          status = excluded.status,
+          note = excluded.note,
+          updated_at = current_timestamp
+        ",
+        params![
+          snapshot_id,
+          asset_id,
+          onboarding_period_month,
+          onboarding_snapshot_date,
+          asset.month_end_amount,
+          asset.currency
+        ],
+      )?;
+    }
 
     tx.execute("delete from asset_tag_links where asset_id = ?1", params![asset_id])?;
     for tag_name in asset.tags.iter().filter(|name| !name.trim().is_empty()) {
@@ -2926,6 +3027,78 @@ fn save_onboarding_to_connection(connection: &mut Connection, input: &Onboarding
 
   tx.commit()?;
   Ok(())
+}
+
+fn table_exists_tx(tx: &Transaction<'_>, table_name: &str) -> Result<bool, AppError> {
+  let count: i64 = tx.query_row(
+    "select count(*) from sqlite_master where type = 'table' and name = ?1",
+    params![table_name],
+    |row| row.get(0),
+  )?;
+  Ok(count > 0)
+}
+
+fn reset_demo_onboarding_connection(connection: &mut Connection) -> Result<(), AppError> {
+  connection.execute_batch("pragma foreign_keys = off;")?;
+  let result = (|| -> Result<(), AppError> {
+    let tx = connection.transaction()?;
+    for table in [
+      "raw_transactions",
+      "import_batches",
+      "confirmed_transactions",
+      "asset_tag_links",
+      "dca_plans",
+      "investment_cashflows",
+      "monthly_asset_snapshots",
+      "credit_card_adjustments",
+      "exchange_rates",
+      "portfolio_target_items",
+      "portfolio_targets",
+      "monthly_closes",
+      "monthly_report_versions",
+      "audit_logs",
+      "monthly_step_status",
+      "credit_cards",
+      "monthly_credit_card_entries",
+      "monthly_dca_cashflow_overrides",
+      "monthly_update_runs",
+      "fx_rate_cache",
+      "fx_rate_overrides",
+      "monthly_fx_rate_locks",
+      "template_render_logs",
+      "assets",
+    ] {
+      if table_exists_tx(&tx, table)? {
+        tx.execute(&format!("delete from {table}"), [])?;
+      }
+    }
+    if table_exists_tx(&tx, "asset_categories")? {
+      tx.execute("delete from asset_categories", [])?;
+      sync_asset_category_tree(&tx, &default_asset_category_tree())?;
+    }
+    upsert_setting_tx(&tx, "official_start_date", "\"2026-04-30\"")?;
+    upsert_setting_tx(&tx, "base_currency", "\"CNY\"")?;
+    upsert_setting_tx(&tx, "target_saving_rate", "0.3")?;
+    upsert_setting_tx(&tx, "onboarding_completed", "false")?;
+    upsert_setting_tx(&tx, "onboarding_asset_entry_skipped", "false")?;
+    upsert_setting_tx(&tx, "onboarding_allocation_targets_skipped", "false")?;
+    upsert_setting_tx(
+      &tx,
+      "dashboard_enabled_sections",
+      &serde_json::to_string(&default_dashboard_sections()).unwrap_or_else(|_| "[]".to_string()),
+    )?;
+    upsert_setting_tx(&tx, "dashboard_custom_analysis_prompts", "[]")?;
+    upsert_setting_tx(&tx, "dashboard_custom_allocation_targets", "[]")?;
+    upsert_setting_tx(
+      &tx,
+      "asset_category_tree",
+      &serde_json::to_string(&default_asset_category_tree()).unwrap_or_else(|_| "[]".to_string()),
+    )?;
+    tx.commit()?;
+    Ok(())
+  })();
+  connection.execute_batch("pragma foreign_keys = on;")?;
+  result
 }
 
 fn password_hash_exists(connection: &Connection) -> Result<bool, AppError> {
@@ -3339,6 +3512,27 @@ fn save_onboarding(
   if db.split_databases {
     let mut dashboard_connection = db.dashboard_connection.lock().expect("database mutex poisoned");
     save_onboarding_to_connection(&mut dashboard_connection, &input)?;
+  }
+
+  read_onboarding_status(&work_connection)
+}
+
+#[tauri::command]
+fn reset_demo_onboarding(
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<OnboardingStatus, AppError> {
+  if env::var("FINANCIAL_PLANNING_ENV_LABEL").unwrap_or_default().to_lowercase() != "demo" {
+    return Err(AppError::InvalidCsvValue("重置初始化只允许在 Demo 环境执行".to_string()));
+  }
+
+  let mut work_connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&work_connection, &security)?;
+  reset_demo_onboarding_connection(&mut work_connection)?;
+
+  if db.split_databases {
+    let mut dashboard_connection = db.dashboard_connection.lock().expect("database mutex poisoned");
+    reset_demo_onboarding_connection(&mut dashboard_connection)?;
   }
 
   read_onboarding_status(&work_connection)
@@ -6149,6 +6343,7 @@ fn get_dashboard_seed_summary(
 
 pub fn run() {
   tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       let work_db_path = work_database_path(app)?;
       let dashboard_db_path = dashboard_database_path(&work_db_path)?;
@@ -6173,6 +6368,7 @@ pub fn run() {
       set_privacy_mode,
       get_onboarding_status,
       save_onboarding,
+      reset_demo_onboarding,
       list_content_templates,
       save_content_template,
       copy_content_template,

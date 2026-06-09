@@ -81,7 +81,7 @@ def asset_demo_name(row: sqlite3.Row, index_by_group: dict[str, int]) -> str:
     main = row["main_asset_category_id"] or ""
     asset_type = row["asset_type"] or ""
     if main == "asset_cat_us_equity":
-      group = "美股"
+      group = "全球资产"
     elif main == "asset_cat_cash":
       group = "现金"
     elif main == "asset_cat_bond":
@@ -234,20 +234,21 @@ def anonymize_asset_category_labels(conn: sqlite3.Connection) -> None:
         "asset_sub_bank_payment": "银行/支付账户",
         "asset_sub_money_market_cash": "货币现金",
         "asset_sub_short_deposit": "短期存款",
-        "asset_cat_us_equity": "美股",
-        "asset_sub_sp500": "标普",
-        "asset_sub_nasdaq": "纳斯达克",
-        "asset_sub_us_tech": "科技",
-        "asset_sub_info_tech": "科技",
+        "asset_sub_receivable": "应收押金",
+        "asset_cat_us_equity": "全球资产",
+        "asset_sub_sp500": "美股",
+        "asset_sub_nasdaq": "港股",
+        "asset_sub_us_tech": "新兴市场",
+        "asset_sub_info_tech": "新兴市场",
         "asset_sub_other_us": "其他",
         "asset_cat_dividend_low_vol": "红利低波",
-        "asset_sub_dividend": "红利/高股息",
-        "asset_sub_low_vol": "低波/红利低波",
+        "asset_sub_dividend": "红利",
+        "asset_sub_low_vol": "低波",
         "asset_sub_dividend_low_vol": "低波",
         "asset_cat_bond": "债券",
-        "asset_sub_short_bond": "短债/中短债",
-        "asset_sub_pure_bond": "纯债/信用债",
-        "asset_sub_treasury_bond": "国债/政策金融债",
+        "asset_sub_short_bond": "短债",
+        "asset_sub_pure_bond": "纯债",
+        "asset_sub_treasury_bond": "国债",
         "asset_sub_bond_fund": "纯债",
         "asset_cat_gold": "黄金",
         "asset_sub_gold_etf": "黄金ETF",
@@ -256,9 +257,7 @@ def anonymize_asset_category_labels(conn: sqlite3.Connection) -> None:
         "asset_sub_a_share_broad": "宽基",
         "asset_sub_a_share_sector_active": "行业/主动",
         "asset_cat_other": "其他",
-        "asset_sub_receivable": "应收",
         "asset_sub_insurance_pension": "保险/养老金",
-        "asset_sub_liability": "负债",
         "asset_sub_uncategorized": "未分类",
     }
     for category_id, label in labels.items():
