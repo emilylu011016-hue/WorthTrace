@@ -5642,3 +5642,147 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+/* Responsive safety pass: prevent right-edge clipping in non-fullscreen app windows. */
+html,
+body,
+#root {
+  max-width: 100%;
+}
+
+body {
+  overflow-x: auto;
+}
+
+.shell {
+  width: 100%;
+  max-width: 1440px;
+  overflow-x: visible;
+}
+
+.shell > *,
+.panel,
+.dashboard-main-panel,
+.onboarding-panel,
+.onboarding-asset-builder,
+.dashboard-visual-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .topbar {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .security-bar,
+  .notice {
+    width: calc(100% - 32px);
+  }
+
+  .hero-panel,
+  .onboarding-hero {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+
+  .hero-panel,
+  .content-grid,
+  .dashboard-heading,
+  .dashboard-hero-panel,
+  .dashboard-module-grid,
+  .dashboard-split,
+  .dashboard-chart-grid,
+  .dashboard-metric-grid,
+  .kpi-grid.dashboard-kpis,
+  .onboarding-layout,
+  .template-layout,
+  .template-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-side-panel {
+    position: static;
+  }
+
+  .dashboard-side-panel.compact-rail {
+    padding: 10px;
+  }
+
+  .dashboard-module-list {
+    grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  }
+
+  .dashboard-module-list strong {
+    right: auto;
+    top: 54px;
+  }
+
+  .dashboard-hero-metric {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .onboarding-rail {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .onboarding-panel {
+    overflow: visible;
+  }
+
+  .onboarding-asset-builder .onboarding-form-grid,
+  .main-target-row,
+  .sub-target-row,
+  .sub-target-draft-row,
+  .custom-analysis-builder {
+    grid-template-columns: 1fr;
+  }
+
+  .custom-analysis-note,
+  .custom-analysis-preview {
+    grid-column: auto;
+  }
+
+  .monthly-quick-nav {
+    right: 12px;
+  }
+}
+
+@media (max-width: 980px) {
+  .shell {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .onboarding-form-grid,
+  .onboarding-chart-grid,
+  .entry-grid,
+  .scroll-grid,
+  .workflow-board,
+  .mini-trend,
+  .summary-grid,
+  .final-grid,
+  .credit-grid,
+  .asset-row,
+  .asset-creator,
+  .asset-classification-grid,
+  .asset-flow-row,
+  .dca-planner-layout,
+  .previous-investment-list,
+  .previous-investment-metrics,
+  .compact-board,
+  .monthly-version-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-preferences,
+  .health-tabs,
+  .dashboard-range-tabs,
+  .return-switcher {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}

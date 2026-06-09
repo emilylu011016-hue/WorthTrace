@@ -7133,13 +7133,16 @@ export function App() {
     const expenseRowsForRange = dashboardRange === "本月" ? summary.expense_categories : summary.expense_year_rank;
     const expenseScopeLabel = dashboardRange === "本月" ? "本月" : `${rangeLabel} 累计`;
     const expenseTotalForRange = expenseRowsForRange.reduce((sum, item) => sum + item.amount, 0);
-    const topExpenseCategory = expenseRowsForRange[0];
-    const topExpensePercent = expenseTotalForRange > 0 && topExpenseCategory ? topExpenseCategory.amount / expenseTotalForRange : 0;
-    const categoryCount = expenseRowsForRange.filter((item) => item.amount > 0).length;
-    const allocationTargetGroups = summary.allocation_target_groups ?? [];
-    const majorAllocationDeviationCount =
-      summary.portfolio_targets.filter((item) => Math.abs(item.deviation_percent) >= 0.05).length +
-      allocationTargetGroups.reduce(
+	    const topExpenseCategory = expenseRowsForRange[0];
+	    const topExpensePercent = expenseTotalForRange > 0 && topExpenseCategory ? topExpenseCategory.amount / expenseTotalForRange : 0;
+	    const categoryCount = expenseRowsForRange.filter((item) => item.amount > 0).length;
+	    const allocationTargetGroups = summary.allocation_target_groups ?? [];
+	    const hasMainAllocationTargets =
+	      summary.portfolio_targets.length > 0 ||
+	      summary.asset_allocations.some((item) => item.target_percent !== null && item.target_percent !== undefined);
+	    const majorAllocationDeviationCount =
+	      summary.portfolio_targets.filter((item) => Math.abs(item.deviation_percent) >= 0.05).length +
+	      allocationTargetGroups.reduce(
         (sum, group) => sum + group.rows.filter((item) => item.target_percent !== null && item.target_percent !== undefined && Math.abs(item.deviation_percent ?? 0) >= 0.05).length,
         0
       );
@@ -8354,33 +8357,35 @@ export function App() {
                       : "这里只显示实际持仓占比；未设置二级目标时不显示目标差距。"
                   )}
                 </div>
-                <div className="allocation-list">
-                  {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
-                    const category = "category" in item ? item.category : "";
-                    const amount = "amount" in item ? item.amount : item.current_amount;
-                    const percent = "percent" in item ? item.percent : item.current_percent;
-                    const target = "target_percent" in item ? item.target_percent : item.target_percent;
-                    const deviation = "deviation_percent" in item ? item.deviation_percent : item.deviation_percent;
-                    return (
-                      <div className="allocation-row" key={category}>
-                        <div className="allocation-label">
-                          <strong>{category}</strong>
-                          <span>{formatCurrency(amount, privacyMode)}</span>
-                        </div>
-                        <div className="allocation-bar" aria-label={`${category} 当前占比`}>
-                          <div className="allocation-fill" style={{ width: `${Math.max(percent * 100, 2)}%` }} />
-                        </div>
-                        <div className="allocation-metrics">
-                          <span>当前 {formatPercent(percent)}</span>
-                          <span>目标 {target === null || target === undefined ? "暂无" : formatPercent(target)}</span>
-                          <b className={(deviation ?? 0) >= 0 ? "positive" : "negative"}>
-                            {deviation === null || deviation === undefined ? "暂无偏离" : `${deviation >= 0 ? "+" : ""}${formatPercent(deviation)}`}
-                          </b>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+	                {hasMainAllocationTargets ? (
+	                  <div className="allocation-list">
+	                    {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
+	                      const category = "category" in item ? item.category : "";
+	                      const amount = "amount" in item ? item.amount : item.current_amount;
+	                      const percent = "percent" in item ? item.percent : item.current_percent;
+	                      const target = "target_percent" in item ? item.target_percent : item.target_percent;
+	                      const deviation = "deviation_percent" in item ? item.deviation_percent : item.deviation_percent;
+	                      return (
+	                        <div className="allocation-row" key={category}>
+	                          <div className="allocation-label">
+	                            <strong>{category}</strong>
+	                            <span>{formatCurrency(amount, privacyMode)}</span>
+	                          </div>
+	                          <div className="allocation-bar" aria-label={`${category} 当前占比`}>
+	                            <div className="allocation-fill" style={{ width: `${Math.max(percent * 100, 2)}%` }} />
+	                          </div>
+	                          <div className="allocation-metrics">
+	                            <span>当前 {formatPercent(percent)}</span>
+	                            <span>目标 {target === null || target === undefined ? "暂无" : formatPercent(target)}</span>
+	                            <b className={(deviation ?? 0) >= 0 ? "positive" : "negative"}>
+	                              {deviation === null || deviation === undefined ? "暂无偏离" : `${deviation >= 0 ? "+" : ""}${formatPercent(deviation)}`}
+	                            </b>
+	                          </div>
+	                        </div>
+	                      );
+	                    })}
+	                  </div>
+	                ) : null}
                 {allocationTargetGroups.length > 0 ? allocationTargetGroups.map((group) => (
                   <div className="dashboard-stack" key={`target-group-${group.parent_category_id}`}>
                     <h3 className="dashboard-subtitle">{group.parent_category}目标差距</h3>
