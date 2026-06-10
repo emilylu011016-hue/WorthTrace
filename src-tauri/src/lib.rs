@@ -892,16 +892,72 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
 }
 
 fn normalize_builtin_asset_category_labels(connection: &Connection) -> Result<(), AppError> {
-  let labels = [
-    ("asset_sub_sp500", "标普"),
-    ("asset_sub_nasdaq", "纳斯达克"),
-    ("asset_sub_us_tech", "科技"),
+  let categories = [
+    ("asset_cat_us_equity", "全球资产", None, "main", 50_i64, 1_i64),
+    ("asset_sub_us_market", "美股", Some("asset_cat_us_equity"), "sub", 60_i64, 1_i64),
+    ("asset_sub_sp500", "标普", Some("asset_sub_us_market"), "sub", 61_i64, 1_i64),
+    ("asset_sub_nasdaq", "纳斯达克", Some("asset_sub_us_market"), "sub", 62_i64, 1_i64),
+    ("asset_sub_hk_market", "港股", Some("asset_cat_us_equity"), "sub", 70_i64, 1_i64),
+    ("asset_sub_emerging_market", "新兴市场", Some("asset_cat_us_equity"), "sub", 80_i64, 1_i64),
+    ("asset_sub_us_tech", "科技", Some("asset_cat_us_equity"), "sub", 81_i64, 0_i64),
+    ("asset_sub_info_tech", "信息科技", Some("asset_cat_us_equity"), "sub", 82_i64, 0_i64),
+    ("asset_sub_other_us", "其他美股", Some("asset_cat_us_equity"), "sub", 83_i64, 0_i64),
   ];
-  for (id, label) in labels {
+  for (id, label, parent_id, level, sort_order, is_active) in categories {
     connection.execute(
-      "update asset_categories set name = ?1 where id = ?2",
-      params![label, id],
+      "
+      insert into asset_categories (id, name, parent_id, level, sort_order, is_active)
+      values (?1, ?2, ?3, ?4, ?5, ?6)
+      on conflict(id) do update set
+        name = excluded.name,
+        parent_id = excluded.parent_id,
+        level = excluded.level,
+        sort_order = excluded.sort_order,
+        is_active = excluded.is_active
+      ",
+      params![id, label, parent_id, level, sort_order, is_active],
     )?;
+  }
+  connection.execute(
+    "
+    update assets
+    set sub_asset_category_id = 'asset_sub_nasdaq',
+      updated_at = current_timestamp
+    where sub_asset_category_id in ('asset_sub_us_tech', 'asset_sub_info_tech')
+    ",
+    [],
+  )?;
+  connection.execute(
+    "
+    update assets
+    set sub_asset_category_id = 'asset_sub_us_market',
+      updated_at = current_timestamp
+    where sub_asset_category_id = 'asset_sub_other_us'
+    ",
+    [],
+  )?;
+  if let Some(raw_tree) = connection
+    .query_row(
+      "select value_json from app_settings where key = 'asset_category_tree'",
+      [],
+      |row| row.get::<_, String>(0),
+    )
+    .optional()?
+  {
+    if let Ok(parsed_tree) = serde_json::from_str::<Vec<OnboardingAssetCategoryInput>>(&raw_tree) {
+      let normalized_tree = normalize_asset_category_tree_labels(parsed_tree);
+      let normalized_json = serde_json::to_string(&normalized_tree).unwrap_or_else(|_| raw_tree.clone());
+      if normalized_json != raw_tree {
+        connection.execute(
+          "
+          insert into app_settings (key, value_json, updated_at)
+          values ('asset_category_tree', ?1, current_timestamp)
+          on conflict(key) do update set value_json = excluded.value_json, updated_at = current_timestamp
+          ",
+          params![normalized_json],
+        )?;
+      }
+    }
   }
   Ok(())
 }
@@ -1859,6 +1915,74 @@ fn asset_allocation_breakdown(
   period_month: &str,
   parent_id: Option<&str>,
 ) -> Result<Vec<AssetAllocationBreakdown>, AppError> {
+  if let Some(parent) = parent_id {
+    let mut statement = connection.prepare(
+      "
+      with recursive direct as (
+        select id, name, sort_order
+        from asset_categories
+        where parent_id = ?2
+          and is_active = 1
+      ),
+      scope(category_id, root_id) as (
+        select id, id from direct
+        union all
+        select child.id, scope.root_id
+        from asset_categories child
+        join scope on child.parent_id = scope.category_id
+        where child.is_active = 1
+      ),
+      rows as (
+        select
+          direct.id as category_id,
+          direct.name as category,
+          coalesce(sum(mas.amount_cny), 0) as amount,
+          pti.target_percent as target_percent
+        from direct
+        left join scope on scope.root_id = direct.id
+        left join assets a on a.sub_asset_category_id = scope.category_id
+        left join monthly_asset_snapshots mas on mas.asset_id = a.id
+          and mas.period_month = ?1
+          and mas.version_no = 1
+          and mas.status = 'held'
+        left join portfolio_targets pt on pt.is_active = 1
+        left join portfolio_target_items pti on pti.target_id = pt.id and pti.main_asset_category_id = direct.id
+        group by direct.id, direct.name, pti.target_percent, direct.sort_order
+        order by direct.sort_order
+      ),
+      total as (
+        select coalesce(sum(amount), 0) as total_amount from rows
+      )
+      select
+        rows.category_id,
+        rows.category,
+        rows.amount,
+        case when total.total_amount > 0 then rows.amount / total.total_amount else 0 end,
+        rows.target_percent
+      from rows cross join total
+      ",
+    )?;
+    let custom_targets = custom_allocation_target_map(connection, "sub", Some(parent))?;
+    let mut rows = statement.query(params![period_month, parent])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+      let category_id: String = row.get(0)?;
+      let target_percent: Option<f64> = custom_targets.get(&category_id).copied().or(row.get(4)?);
+      let percent: f64 = row.get(3)?;
+      let amount: f64 = row.get(2)?;
+      if amount.abs() <= 0.000_001 && target_percent.is_none() {
+        continue;
+      }
+      out.push(AssetAllocationBreakdown {
+        category: row.get(1)?,
+        amount,
+        percent,
+        target_percent,
+        deviation_percent: target_percent.map(|target| percent - target),
+      });
+    }
+    return Ok(out);
+  }
   let (category_join, category_filter) = if parent_id.is_some() {
     ("sub", "sub.parent_id = ?2")
   } else {
@@ -2631,9 +2755,16 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       id: "asset_cat_us_equity".to_string(),
       label: "全球资产".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_us_tech".to_string(), label: "科技".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput {
+          id: "asset_sub_us_market".to_string(),
+          label: "美股".to_string(),
+          children: vec![
+            OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
+            OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
+          ],
+        },
+        OnboardingAssetCategoryInput { id: "asset_sub_hk_market".to_string(), label: "港股".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_emerging_market".to_string(), label: "新兴市场".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
@@ -2682,8 +2813,12 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
 fn normalize_asset_category_tree_labels(mut tree: Vec<OnboardingAssetCategoryInput>) -> Vec<OnboardingAssetCategoryInput> {
   fn normalize_node(node: &mut OnboardingAssetCategoryInput) {
     node.label = match node.id.as_str() {
+      "asset_cat_us_equity" => "全球资产".to_string(),
+      "asset_sub_us_market" => "美股".to_string(),
       "asset_sub_sp500" => "标普".to_string(),
       "asset_sub_nasdaq" => "纳斯达克".to_string(),
+      "asset_sub_hk_market" => "港股".to_string(),
+      "asset_sub_emerging_market" => "新兴市场".to_string(),
       "asset_sub_us_tech" => "科技".to_string(),
       _ => node.label.clone(),
     };
@@ -2691,9 +2826,30 @@ fn normalize_asset_category_tree_labels(mut tree: Vec<OnboardingAssetCategoryInp
       normalize_node(child);
     }
   }
+  fn has_custom_node(nodes: &[OnboardingAssetCategoryInput]) -> bool {
+    nodes.iter().any(|node| node.id.contains("_custom_") || has_custom_node(&node.children))
+  }
 
   for node in tree.iter_mut() {
     normalize_node(node);
+  }
+  let should_upgrade_global = !has_custom_node(&tree)
+    && tree.iter().any(|node| {
+      node.id == "asset_cat_us_equity"
+        && !node.children.iter().any(|child| child.id == "asset_sub_us_market")
+        && node.children.iter().any(|child| child.id == "asset_sub_sp500")
+        && node.children.iter().any(|child| child.id == "asset_sub_nasdaq")
+    });
+  if should_upgrade_global {
+    if let Some(default_global) = default_asset_category_tree()
+      .into_iter()
+      .find(|node| node.id == "asset_cat_us_equity")
+    {
+      if let Some(global) = tree.iter_mut().find(|node| node.id == "asset_cat_us_equity") {
+        global.label = default_global.label;
+        global.children = default_global.children;
+      }
+    }
   }
   tree
 }
@@ -2788,6 +2944,7 @@ fn sync_asset_category_tree(tx: &Transaction<'_>, tree: &[OnboardingAssetCategor
         params![node.id, trimmed_label, parent_id, *sort_order],
       )?;
       *sort_order += 10;
+      next_main_id = Some(node.id.clone());
     }
 
     for child in &node.children {

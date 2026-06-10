@@ -697,13 +697,44 @@ button {
   font-weight: 720;
 }
 
-.sub-target-editor > label select {
+.sub-target-editor label select {
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid #ded4c2;
   border-radius: 12px;
   color: #17231e;
   background: #fff;
+}
+
+.sub-target-path-picker {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(245, 239, 228, 0.46);
+}
+
+.sub-target-depth-choice {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.target-path-summary {
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #4e5b53;
+  background: rgba(229, 222, 208, 0.56);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.onboarding-notice.compact {
+  margin-top: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
 }
 
 .sub-target-draft-list {
@@ -1768,7 +1799,7 @@ h2 {
 
 .dashboard-module-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -1779,28 +1810,36 @@ h2 {
 }
 
 .dashboard-side-panel {
-  position: sticky;
-  top: 16px;
+  position: fixed;
+  top: 50%;
+  right: 22px;
+  z-index: 88;
+  transform: translateY(-50%);
 }
 
 .dashboard-side-panel.compact-rail {
-  padding: 10px;
+  padding: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dash-panel-strong, #ffffff) 90%, transparent);
+  box-shadow: 0 16px 38px rgba(22, 28, 24, 0.12);
+  backdrop-filter: blur(18px);
 }
 
 .dashboard-module-list {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .dashboard-module-list button {
   position: relative;
   display: grid;
   place-items: center;
-  width: 100%;
-  min-height: 48px;
-  padding: 8px;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
   border: 1px solid var(--dash-border, #e8e1d5);
-  border-radius: 8px;
+  border-radius: 999px;
   color: var(--dash-muted, #5f665f);
   background: var(--dash-panel, #fffefd);
   text-align: center;
@@ -1825,7 +1864,7 @@ h2 {
 
 .dashboard-module-list strong {
   position: absolute;
-  right: 76px;
+  right: 52px;
   z-index: 3;
   display: none;
   min-width: 92px;
@@ -1841,6 +1880,10 @@ h2 {
 
 .dashboard-module-list button:hover strong {
   display: block;
+}
+
+.compact-rail .dashboard-detail-panel {
+  display: none;
 }
 
 .dashboard-inline-detail {
@@ -4658,23 +4701,37 @@ button:disabled {
   }
 
   .monthly-quick-nav {
-    right: 12px;
-    bottom: 14px;
-    top: auto;
-    display: flex;
-    transform: none;
+    top: 50%;
+    right: 10px;
+    bottom: auto;
+    display: grid;
+    max-height: min(72vh, 420px);
+    padding: 3px;
+    overflow-y: auto;
+    transform: translateY(-50%);
+    scrollbar-width: none;
+  }
+
+  .monthly-quick-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .monthly-quick-nav button {
+    grid-template-columns: 30px 0fr;
+    min-width: 38px;
+    min-height: 38px;
   }
 
   .monthly-quick-nav button:hover,
   .monthly-quick-nav button:focus-visible {
-    grid-template-columns: 34px 0fr;
-    padding-right: 4px;
-    transform: translateY(-2px);
+    grid-template-columns: 30px minmax(72px, max-content);
+    padding-right: 10px;
+    transform: translateX(-2px);
   }
 
   .monthly-quick-nav button:hover span,
   .monthly-quick-nav button:focus-visible span {
-    opacity: 0;
+    opacity: 1;
   }
 
   .previous-investment-header,
@@ -5784,5 +5841,143 @@ body {
   .return-switcher {
     max-width: 100%;
     overflow-x: auto;
+  }
+}
+
+/* Final monthly-update rail guard: the quick module navigator must stay as a right-side floating rail. */
+.monthly-workspace .monthly-quick-nav {
+  position: fixed !important;
+  top: 50% !important;
+  right: 10px !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 90 !important;
+  display: grid !important;
+  max-height: min(72vh, 420px);
+  padding: 3px;
+  overflow-y: auto;
+  transform: translateY(-50%) !important;
+  scrollbar-width: none;
+}
+
+.monthly-workspace .monthly-quick-nav::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  .monthly-workspace {
+    padding-right: 48px;
+  }
+
+  .monthly-workspace .monthly-quick-nav button {
+    grid-template-columns: 30px 0fr;
+    min-width: 38px;
+    min-height: 38px;
+  }
+
+  .monthly-workspace .monthly-quick-nav button:hover,
+  .monthly-workspace .monthly-quick-nav button:focus-visible {
+    grid-template-columns: 30px minmax(72px, max-content);
+    padding-right: 10px;
+    transform: translateX(-2px);
+  }
+
+  .monthly-workspace .monthly-quick-nav button:hover span,
+  .monthly-workspace .monthly-quick-nav button:focus-visible span {
+    opacity: 1;
+  }
+}
+
+/* Final dashboard rail guard: keep health-board module navigation as a right floating rail. */
+.dashboard-workspace .dashboard-module-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.dashboard-workspace .dashboard-main-panel {
+  min-width: 0;
+}
+
+.dashboard-workspace .dashboard-side-panel.compact-rail {
+  position: fixed !important;
+  top: 50% !important;
+  right: 10px !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 88 !important;
+  width: auto !important;
+  max-width: none !important;
+  padding: 6px !important;
+  border-radius: 999px;
+  transform: translateY(-50%) !important;
+}
+
+.dashboard-workspace .dashboard-module-list {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 7px;
+}
+
+.dashboard-workspace .dashboard-module-list button {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.dashboard-workspace .dashboard-module-list strong {
+  right: 52px !important;
+  top: 50% !important;
+  transform: translateY(-50%);
+}
+
+.dashboard-workspace .compact-rail .dashboard-detail-panel {
+  display: none;
+}
+
+/* Compact overview KPI tiles: default remains four items, but each tile is short. */
+.dashboard-workspace .kpi-grid.dashboard-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 8px;
+}
+
+.dashboard-workspace .kpi-card {
+  min-height: 82px;
+  padding: 11px;
+  gap: 2px 9px;
+}
+
+.dashboard-workspace .kpi-icon {
+  grid-row: span 2;
+  width: 30px;
+  height: 30px;
+}
+
+.dashboard-workspace .kpi-card p {
+  align-self: end;
+  font-size: 12px;
+}
+
+.dashboard-workspace .kpi-card strong {
+  font-size: clamp(17px, 1.7vw, 22px);
+  line-height: 1.12;
+}
+
+.dashboard-workspace .kpi-card span {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .dashboard-workspace {
+    padding-right: 48px;
+  }
+
+  .dashboard-workspace .kpi-grid.dashboard-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
