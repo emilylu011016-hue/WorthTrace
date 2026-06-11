@@ -10,7 +10,7 @@ use std::{env, fs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Manager, State};
 use thiserror::Error;
 
@@ -3566,6 +3566,82 @@ fn reset_demo_onboarding_connection(connection: &mut Connection) -> Result<(), A
   result
 }
 
+fn reset_account_connection(connection: &mut Connection) -> Result<(), AppError> {
+  connection.execute_batch("pragma foreign_keys = off;")?;
+  let result = (|| -> Result<(), AppError> {
+    let tx = connection.transaction()?;
+    for table in [
+      "raw_transactions",
+      "import_batches",
+      "confirmed_transactions",
+      "category_mappings",
+      "categories",
+      "asset_tag_links",
+      "dca_plans",
+      "investment_cashflows",
+      "monthly_asset_snapshots",
+      "credit_card_adjustments",
+      "exchange_rates",
+      "portfolio_target_items",
+      "portfolio_targets",
+      "monthly_closes",
+      "monthly_report_versions",
+      "audit_logs",
+      "monthly_step_status",
+      "credit_cards",
+      "monthly_credit_card_entries",
+      "monthly_dca_cashflow_overrides",
+      "monthly_update_runs",
+      "fx_rate_cache",
+      "fx_rate_overrides",
+      "monthly_fx_rate_locks",
+      "template_render_logs",
+      "assets",
+      "asset_categories",
+      "tags",
+      "content_templates",
+      "app_settings",
+    ] {
+      if table_exists_tx(&tx, table)? {
+        tx.execute(&format!("delete from {table}"), [])?;
+      }
+    }
+    tx.execute_batch(INITIAL_SEED)?;
+    sync_asset_category_tree(&tx, &default_asset_category_tree())?;
+    upsert_setting_tx(&tx, "onboarding_completed", "false")?;
+    upsert_setting_tx(&tx, "onboarding_asset_entry_skipped", "false")?;
+    upsert_setting_tx(&tx, "onboarding_allocation_targets_skipped", "false")?;
+    upsert_setting_tx(
+      &tx,
+      "dashboard_enabled_sections",
+      &serde_json::to_string(&default_dashboard_sections()).unwrap_or_else(|_| "[]".to_string()),
+    )?;
+    upsert_setting_tx(
+      &tx,
+      "dashboard_enabled_items",
+      &serde_json::to_string(&default_dashboard_items()).unwrap_or_else(|_| "[]".to_string()),
+    )?;
+    upsert_setting_tx(
+      &tx,
+      "dashboard_custom_settings",
+      &serde_json::to_string(&default_dashboard_custom_settings()).unwrap_or_else(|_| "{}".to_string()),
+    )?;
+    upsert_setting_tx(&tx, "dashboard_custom_analysis_prompts", "[]")?;
+    upsert_setting_tx(&tx, "dashboard_custom_allocation_targets", "[]")?;
+    upsert_setting_tx(
+      &tx,
+      "asset_category_tree",
+      &serde_json::to_string(&default_asset_category_tree()).unwrap_or_else(|_| "[]".to_string()),
+    )?;
+    tx.commit()?;
+    seed_default_content_templates(connection)?;
+    normalize_builtin_asset_category_labels(connection)?;
+    Ok(())
+  })();
+  connection.execute_batch("pragma foreign_keys = on;")?;
+  result
+}
+
 fn password_hash_exists(connection: &Connection) -> Result<bool, AppError> {
   let count: i64 = connection.query_row(
     "select count(*) from app_settings where key = 'security_password_hash'",
@@ -3593,6 +3669,12 @@ fn hash_password(password: &str, salt: &str) -> String {
     digest = hasher.finalize().to_vec();
   }
   hex::encode(digest)
+}
+
+fn verify_password(connection: &Connection, password: &str) -> Result<bool, AppError> {
+  let salt = setting_string(connection, "security_password_salt", "")?;
+  let expected_hash = setting_string(connection, "security_password_hash", "")?;
+  Ok(!expected_hash.is_empty() && hash_password(password, &salt) == expected_hash)
 }
 
 fn read_security_status(
@@ -4260,6 +4342,9 @@ fn set_app_password(
   }
 
   let connection = db.work_connection.lock().expect("database mutex poisoned");
+  if password_hash_exists(&connection)? {
+    return Err(AppError::InvalidCsvValue("密码已存在，请从设置里验证当前密码后修改。".to_string()));
+  }
   let salt = generate_salt();
   let hash = hash_password(&password, &salt);
   upsert_setting(&connection, "security_password_salt", &serde_json::to_string(&salt).unwrap())?;
@@ -4275,16 +4360,70 @@ fn unlock_app(
   security: State<'_, SecuritySession>,
 ) -> Result<SecurityStatus, AppError> {
   let connection = db.work_connection.lock().expect("database mutex poisoned");
-  let salt = setting_string(&connection, "security_password_salt", "")?;
-  let expected_hash = setting_string(&connection, "security_password_hash", "")?;
-  let actual_hash = hash_password(&password, &salt);
-
-  if actual_hash != expected_hash {
+  if !verify_password(&connection, &password)? {
     return Err(AppError::InvalidPassword);
   }
 
   *security.unlocked.lock().expect("security mutex poisoned") = true;
   read_security_status(&connection, &security)
+}
+
+#[tauri::command]
+fn change_app_password(
+  current_password: Option<String>,
+  new_password: String,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<SecurityStatus, AppError> {
+  if new_password.chars().count() < 6 {
+    return Err(AppError::WeakPassword);
+  }
+
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  if password_hash_exists(&connection)? {
+    let current = current_password.unwrap_or_default();
+    if !verify_password(&connection, &current)? {
+      return Err(AppError::InvalidPassword);
+    }
+  }
+
+  let salt = generate_salt();
+  let hash = hash_password(&new_password, &salt);
+  upsert_setting(&connection, "security_password_salt", &serde_json::to_string(&salt).unwrap())?;
+  upsert_setting(&connection, "security_password_hash", &serde_json::to_string(&hash).unwrap())?;
+  *security.unlocked.lock().expect("security mutex poisoned") = true;
+  read_security_status(&connection, &security)
+}
+
+#[tauri::command]
+fn reset_account(
+  current_password: Option<String>,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+  app: tauri::AppHandle,
+) -> Result<(), AppError> {
+  {
+    let mut work_connection = db.work_connection.lock().expect("database mutex poisoned");
+    if password_hash_exists(&work_connection)? {
+      let current = current_password.unwrap_or_default();
+      if !verify_password(&work_connection, &current)? {
+        return Err(AppError::InvalidPassword);
+      }
+    }
+    reset_account_connection(&mut work_connection)?;
+  }
+
+  if db.split_databases {
+    let mut dashboard_connection = db.dashboard_connection.lock().expect("database mutex poisoned");
+    reset_account_connection(&mut dashboard_connection)?;
+  }
+
+  *security.unlocked.lock().expect("security mutex poisoned") = false;
+  std::thread::spawn(move || {
+    std::thread::sleep(Duration::from_millis(250));
+    app.exit(0);
+  });
+  Ok(())
 }
 
 #[tauri::command]
@@ -6839,6 +6978,8 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       get_security_status,
       set_app_password,
+      change_app_password,
+      reset_account,
       unlock_app,
       lock_app,
       set_privacy_mode,

@@ -94,6 +94,13 @@ button {
   margin-top: 24px;
 }
 
+.auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .auth-form label {
   display: grid;
   gap: 8px;
@@ -4058,6 +4065,128 @@ svg .negative {
 
 .confirm-dialog .row-actions {
   justify-content: flex-end;
+}
+
+.settings-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 145;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(28, 29, 27, 0.22);
+  backdrop-filter: blur(12px);
+}
+
+.settings-dialog {
+  width: min(640px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--dash-border, #e4d8c7);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--dash-panel-strong, #ffffff) 95%, transparent);
+  box-shadow: 0 28px 80px rgba(38, 34, 26, 0.22);
+}
+
+.settings-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-dialog-header h2 {
+  margin: 2px 0 0;
+  color: var(--dash-ink, #1d1d1f);
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.icon-only-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: var(--dash-ink, #1d1d1f);
+  background: color-mix(in srgb, var(--dash-panel, #f8f3ea) 88%, white);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--dash-border, #e4d8c7);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dash-panel, #f8f3ea) 82%, white);
+}
+
+.settings-tabs button {
+  min-height: 38px;
+  border-radius: 999px;
+  color: var(--dash-muted, #6e6e73);
+  background: transparent;
+  font-weight: 760;
+}
+
+.settings-tabs button.active {
+  color: var(--dash-ink, #1d1d1f);
+  background: var(--dash-panel-strong, #ffffff);
+  box-shadow: 0 10px 24px rgba(45, 40, 32, 0.08);
+}
+
+.settings-tabs .danger-tab.active {
+  color: #9f3d2d;
+}
+
+.settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--dash-ink, #1d1d1f);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.settings-form input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--dash-border, #e4d8c7);
+  border-radius: 14px;
+  color: var(--dash-ink, #1d1d1f);
+  background: color-mix(in srgb, var(--dash-panel-strong, #ffffff) 96%, transparent);
+  outline: none;
+}
+
+.settings-copy,
+.settings-message,
+.settings-warning {
+  margin: 0;
+  color: var(--dash-muted, #6e6e73);
+  line-height: 1.6;
+}
+
+.settings-warning {
+  padding: 12px 14px;
+  border: 1px solid rgba(199, 91, 72, 0.3);
+  border-radius: 14px;
+  color: #8f3d30;
+  background: rgba(199, 91, 72, 0.08);
+  font-weight: 700;
+}
+
+.settings-message {
+  color: var(--dash-accent-strong, #6f927f);
+  font-weight: 760;
 }
 
 .danger-action {

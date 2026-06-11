@@ -19,6 +19,7 @@ import {
   Plus,
   RefreshCcw,
   Save,
+  Settings,
   Shield,
   Target,
   Trash2,
@@ -1596,6 +1597,16 @@ export function App() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [securityMessage, setSecurityMessage] = useState<string | null>(null);
+  const [initialPasswordSetupSkipped, setInitialPasswordSetupSkipped] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"password" | "reset">("password");
+  const [settingsCurrentPassword, setSettingsCurrentPassword] = useState("");
+  const [settingsNewPassword, setSettingsNewPassword] = useState("");
+  const [settingsConfirmPassword, setSettingsConfirmPassword] = useState("");
+  const [settingsResetPassword, setSettingsResetPassword] = useState("");
+  const [settingsResetConfirmText, setSettingsResetConfirmText] = useState("");
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const [view, setView] = useState<AppView>(browserPreviewSummary ? "healthDashboard" : "home");
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
   const [onboardingStep, setOnboardingStep] = useState(0);
@@ -1722,6 +1733,13 @@ export function App() {
   const [reportPreview, setReportPreview] = useState<TemplateRenderResult | null>(null);
   const environmentLabel = security?.environment_label || (browserPreviewSummary ? "Demo" : "");
   const isDemoEnvironment = environmentLabel.toLowerCase() === "demo";
+  const shouldShowInitialPasswordSetup = Boolean(
+    security &&
+      !security.password_set &&
+      !initialPasswordSetupSkipped &&
+      onboardingStatus &&
+      !onboardingStatus.completed
+  );
 
   useEffect(() => {
     if (browserPreviewSummary) {
@@ -2695,8 +2713,87 @@ export function App() {
 	      await refreshOnboardingStatus();
 	      await loadContentTemplates();
 	    } catch (err) {
-	      setSecurityMessage(String(err));
-	    }
+      setSecurityMessage(String(err));
+    }
+  }
+
+  function skipInitialPasswordSetup() {
+    setInitialPasswordSetupSkipped(true);
+    setSecurityMessage(null);
+    setPassword("");
+    setConfirmPassword("");
+    if (!onboardingStatus?.completed) {
+      setView("onboarding");
+    }
+  }
+
+  function openSettings(tab: "password" | "reset" = "password") {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+    setSettingsMessage(null);
+    setSettingsCurrentPassword("");
+    setSettingsNewPassword("");
+    setSettingsConfirmPassword("");
+    setSettingsResetPassword("");
+    setSettingsResetConfirmText("");
+  }
+
+  async function handleChangePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSettingsMessage(null);
+    if (security?.password_set && !settingsCurrentPassword.trim()) {
+      setSettingsMessage("请输入当前密码。");
+      return;
+    }
+    if (settingsNewPassword.length < 6) {
+      setSettingsMessage("新密码至少 6 位。");
+      return;
+    }
+    if (settingsNewPassword !== settingsConfirmPassword) {
+      setSettingsMessage("两次新密码不一致。");
+      return;
+    }
+    setSettingsBusy(true);
+    try {
+      const result = await invoke<SecurityStatus>("change_app_password", {
+        currentPassword: security?.password_set ? settingsCurrentPassword : null,
+        newPassword: settingsNewPassword
+      });
+      setSecurity(result);
+      setInitialPasswordSetupSkipped(true);
+      setSettingsCurrentPassword("");
+      setSettingsNewPassword("");
+      setSettingsConfirmPassword("");
+      setSettingsMessage(security?.password_set ? "密码已修改。" : "密码已设置。");
+    } catch (err) {
+      setSettingsMessage(String(err).includes("invalid password") ? "当前密码不正确。" : String(err));
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function handleResetAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSettingsMessage(null);
+    if (security?.password_set && !settingsResetPassword.trim()) {
+      setSettingsMessage("请输入当前密码。");
+      return;
+    }
+    if (settingsResetConfirmText !== "清空当前账号") {
+      setSettingsMessage("请输入“清空当前账号”后才能继续。");
+      return;
+    }
+    setSettingsBusy(true);
+    try {
+      window.localStorage.removeItem(onboardingDraftStorageKey);
+      await invoke("reset_account", {
+        currentPassword: security?.password_set ? settingsResetPassword : null
+      });
+      setSettingsMessage("账号已重置，App 即将退出。");
+    } catch (err) {
+      setSettingsMessage(String(err).includes("invalid password") ? "当前密码不正确。" : String(err));
+      setSettingsBusy(false);
+    }
   }
 
   async function handleUnlock(event: React.FormEvent<HTMLFormElement>) {
@@ -4786,7 +4883,133 @@ export function App() {
     );
   };
 
-  if (security && !security.password_set) {
+  const renderSettingsDialog = () => {
+    if (!settingsOpen) return null;
+    const passwordMode = security?.password_set ? "modify" : "create";
+    return (
+      <div className="settings-dialog-backdrop" role="presentation">
+        <section aria-modal="true" className="settings-dialog" role="dialog">
+          <div className="settings-dialog-header">
+            <div>
+              <p className="eyebrow">Settings</p>
+              <h2>设置</h2>
+            </div>
+            <button className="icon-only-button" onClick={() => setSettingsOpen(false)} type="button" aria-label="关闭设置">
+              ×
+            </button>
+          </div>
+
+          <div className="settings-tabs" role="tablist">
+            <button className={settingsTab === "password" ? "active" : ""} onClick={() => setSettingsTab("password")} type="button">
+              {passwordMode === "modify" ? "修改密码" : "设置密码"}
+            </button>
+            <button className={settingsTab === "reset" ? "active danger-tab" : "danger-tab"} onClick={() => setSettingsTab("reset")} type="button">
+              初始化重置账号
+            </button>
+          </div>
+
+          {settingsTab === "password" ? (
+            <form className="settings-form" onSubmit={handleChangePassword}>
+              <p className="settings-copy">
+                {passwordMode === "modify"
+                  ? "输入当前密码验证后，可以保存新密码。"
+                  : "当前没有设置密码。设置后，下次打开 App 需要先输入密码。"}
+              </p>
+              {passwordMode === "modify" ? (
+                <label>
+                  当前密码
+                  <input
+                    autoComplete="current-password"
+                    onChange={(event) => setSettingsCurrentPassword(event.target.value)}
+                    type="password"
+                    value={settingsCurrentPassword}
+                  />
+                </label>
+              ) : null}
+              <label>
+                新密码
+                <input
+                  autoComplete="new-password"
+                  minLength={6}
+                  onChange={(event) => setSettingsNewPassword(event.target.value)}
+                  placeholder="至少 6 位"
+                  type="password"
+                  value={settingsNewPassword}
+                />
+              </label>
+              <label>
+                再输入一次新密码
+                <input
+                  autoComplete="new-password"
+                  minLength={6}
+                  onChange={(event) => setSettingsConfirmPassword(event.target.value)}
+                  placeholder="两次完全一致后才能保存"
+                  type="password"
+                  value={settingsConfirmPassword}
+                />
+              </label>
+              {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
+              <div className="row-actions">
+                <button className="secondary-button compact" onClick={() => setSettingsOpen(false)} type="button">
+                  取消
+                </button>
+                <button
+                  className="primary-button compact"
+                  disabled={settingsBusy || settingsNewPassword.length < 6 || settingsNewPassword !== settingsConfirmPassword}
+                  type="submit"
+                >
+                  {settingsBusy ? "保存中..." : "确认保存"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form className="settings-form reset-account-form" onSubmit={handleResetAccount}>
+              <p className="settings-copy">
+                这会清空当前 App 环境里的收入、支出、资产、月报、模板、偏好和密码。完成后 App 会自动退出；再次打开会回到新用户流程。
+              </p>
+              <div className="settings-warning">
+                当前环境：{environmentLabel || "正式版"}。只会重置当前环境数据库，不会同时清空其他版本。
+              </div>
+              {security?.password_set ? (
+                <label>
+                  当前密码
+                  <input
+                    autoComplete="current-password"
+                    onChange={(event) => setSettingsResetPassword(event.target.value)}
+                    type="password"
+                    value={settingsResetPassword}
+                  />
+                </label>
+              ) : null}
+              <label>
+                确认文字
+                <input
+                  onChange={(event) => setSettingsResetConfirmText(event.target.value)}
+                  placeholder="输入：清空当前账号"
+                  value={settingsResetConfirmText}
+                />
+              </label>
+              {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
+              <div className="row-actions">
+                <button className="secondary-button compact" onClick={() => setSettingsOpen(false)} type="button">
+                  取消
+                </button>
+                <button
+                  className="primary-button compact danger-action"
+                  disabled={settingsBusy || settingsResetConfirmText !== "清空当前账号"}
+                  type="submit"
+                >
+                  {settingsBusy ? "重置中..." : "清空并退出"}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+      </div>
+    );
+  };
+
+  if (shouldShowInitialPasswordSetup) {
     return (
       <main className="auth-shell">
         <section className="auth-panel">
@@ -4795,8 +5018,8 @@ export function App() {
           </div>
           {isDemoEnvironment ? <div className="environment-badge demo-badge">Demo 演示版</div> : null}
           <p className="eyebrow">Security</p>
-          <h1>设置 App 密码</h1>
-          <p className="auth-copy">密码用于保护本地财务数据。系统只保存加盐哈希，不保存明文。</p>
+          <h1>设置文档密码</h1>
+          <p className="auth-copy">密码用于保护本地财务数据。系统只保存加盐哈希，不保存明文。也可以先跳过，之后从右上角“设置”里补设。</p>
           <form className="auth-form" onSubmit={handleSetPassword}>
             <label>
               密码
@@ -4819,7 +5042,12 @@ export function App() {
               />
             </label>
             {securityMessage ? <p className="auth-error">{securityMessage}</p> : null}
-            <button type="submit">启用密码保护</button>
+            <div className="auth-actions">
+              <button className="secondary-button compact" onClick={skipInitialPasswordSetup} type="button">
+                先跳过
+              </button>
+              <button type="submit">启用密码保护</button>
+            </div>
           </form>
         </section>
       </main>
@@ -4898,10 +5126,14 @@ export function App() {
       <section className="security-bar">
         <div>
           <Shield size={18} />
-          <span>密码保护已启用</span>
+          <span>{security?.password_set ? "密码保护已启用" : "未设置文档密码"}</span>
         </div>
         <div className="security-actions">
           {renderThemeSwitcher("全局主题")}
+          <button className="icon-button" onClick={() => openSettings("password")} type="button">
+            <Settings size={17} />
+            <span>设置</span>
+          </button>
           <button className="icon-button" onClick={() => void openPreferences()} type="button">
             <Target size={17} />
             <span>偏好设置</span>
@@ -4914,10 +5146,12 @@ export function App() {
             {privacyMode ? <EyeOff size={17} /> : <Eye size={17} />}
             <span>{privacyMode ? "显示金额" : "隐藏金额"}</span>
           </button>
-          <button className="icon-button" onClick={handleLock} type="button">
-            <Lock size={17} />
-            <span>锁定</span>
-          </button>
+          {security?.password_set ? (
+            <button className="icon-button" onClick={handleLock} type="button">
+              <Lock size={17} />
+              <span>锁定</span>
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -9257,6 +9491,7 @@ export function App() {
       {view === "healthDashboard" ? renderHealthDashboard() : null}
       {view === "contentTemplates" ? renderContentTemplateSettings() : null}
       {renderConfirmDialog()}
+      {renderSettingsDialog()}
     </main>
   );
 }
