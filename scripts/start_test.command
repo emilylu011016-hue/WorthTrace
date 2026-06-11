@@ -28,7 +28,7 @@ if [ -n "$OLD_APP_PIDS" ]; then
   sleep 1
 fi
 
-OLD_INSTALLED_APP_PIDS="$(pgrep -f '/Applications/Financial Planning.app/Contents/MacOS/financial-planning' 2>/dev/null || true)"
+OLD_INSTALLED_APP_PIDS="$(pgrep -f '/Applications/钱迹WorthTrace.app/Contents/MacOS/financial-planning' 2>/dev/null || true)"
 if [ -n "$OLD_INSTALLED_APP_PIDS" ]; then
   echo "关闭已安装正式 App 进程：$OLD_INSTALLED_APP_PIDS"
   kill $OLD_INSTALLED_APP_PIDS 2>/dev/null || true

@@ -4884,7 +4884,7 @@ export function App() {
         <button className="brand-button" onClick={() => setView("home")} type="button">
           <span className="brand-mark" />
           <span>
-            <p className="eyebrow">Financial Planning</p>
+            <p className="eyebrow">钱迹WorthTrace</p>
             <strong>财务工作台</strong>
           </span>
         </button>

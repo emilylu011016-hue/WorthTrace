@@ -9,9 +9,9 @@ DASHBOARD_DB="${TEST_DIR}/dashboard_test.sqlite3"
 RUNTIME_DIR="${PROJECT_DIR}/.codex-runtime"
 LOG_FILE="${RUNTIME_DIR}/test-app.log"
 PID_FILE="${RUNTIME_DIR}/test-app.pid"
-SOURCE_APP_BUNDLE="${PROJECT_DIR}/src-tauri/target/release/bundle/macos/Financial Planning.app"
+SOURCE_APP_BUNDLE="${PROJECT_DIR}/src-tauri/target/release/bundle/macos/钱迹WorthTrace.app"
 TEST_APP_DIR="$HOME/Applications"
-TEST_APP_BUNDLE="${TEST_APP_DIR}/Financial Planning Test.app"
+TEST_APP_BUNDLE="${TEST_APP_DIR}/钱迹WorthTrace 测试版.app"
 TEST_APP_EXEC="${TEST_APP_BUNDLE}/Contents/MacOS/financial-planning"
 APP_EXEC="${SOURCE_APP_BUNDLE}/Contents/MacOS/financial-planning"
 
@@ -37,11 +37,11 @@ if [ -n "$OLD_PORT_PIDS" ]; then
 fi
 
 kill_matches 'target/debug/financial-planning'
-kill_matches 'src-tauri/target/release/bundle/macos/Financial Planning.app/Contents/MacOS/financial-planning'
-kill_matches 'Financial Planning Test.app/Contents/MacOS/financial-planning'
+kill_matches 'src-tauri/target/release/bundle/macos/钱迹WorthTrace.app/Contents/MacOS/financial-planning'
+kill_matches '钱迹WorthTrace 测试版.app/Contents/MacOS/financial-planning'
 kill_matches 'node .*/node_modules/.bin/tauri dev'
 kill_matches 'npm run tauri:dev'
-kill_matches '/Applications/Financial Planning.app/Contents/MacOS/financial-planning'
+kill_matches '/Applications/钱迹WorthTrace.app/Contents/MacOS/financial-planning'
 
 sleep 1
 
@@ -64,8 +64,8 @@ fi
 mkdir -p "$TEST_APP_DIR"
 rm -rf "$TEST_APP_BUNDLE"
 cp -R "$SOURCE_APP_BUNDLE" "$TEST_APP_BUNDLE"
-/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Financial Planning Test" "$TEST_APP_BUNDLE/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleName Financial Planning Test" "$TEST_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 钱迹WorthTrace 测试版" "$TEST_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName 钱迹WorthTrace 测试版" "$TEST_APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.emilylu.financial-planning.test" "$TEST_APP_BUNDLE/Contents/Info.plist"
 xattr -dr com.apple.quarantine "$TEST_APP_BUNDLE" 2>/dev/null || true
 
