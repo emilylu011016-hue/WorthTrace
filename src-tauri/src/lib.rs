@@ -5,7 +5,7 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::{env, fs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -84,6 +84,7 @@ struct DashboardSeedSummary {
   spending_anomalies: Vec<SpendingAnomaly>,
   asset_allocations: Vec<AssetAllocationBreakdown>,
   us_equity_allocations: Vec<AssetAllocationBreakdown>,
+  custom_allocation_detail_allocations: Vec<AssetAllocationBreakdown>,
   allocation_target_groups: Vec<AllocationTargetGroup>,
   asset_allocation_trends: Vec<AssetAllocationTrend>,
   investment_assets: Vec<InvestmentAssetPerformance>,
@@ -219,6 +220,8 @@ struct OnboardingStatus {
   completed: bool,
   target_saving_rate: f64,
   dashboard_enabled_sections: Vec<String>,
+  dashboard_enabled_items: Vec<String>,
+  dashboard_custom_settings: DashboardCustomSettings,
   custom_analysis_prompts: Vec<String>,
   allocation_targets: Vec<OnboardingAllocationTargetInput>,
   skip_allocation_targets: bool,
@@ -425,6 +428,18 @@ struct OnboardingAssetCategoryInput {
   children: Vec<OnboardingAssetCategoryInput>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct DashboardCustomSettings {
+  #[serde(default)]
+  discretionary_category_ids: Vec<String>,
+  #[serde(default = "default_allocation_detail_parent_id")]
+  allocation_detail_parent_id: String,
+  #[serde(default = "default_allocation_detail_depth")]
+  allocation_detail_depth: String,
+  #[serde(default = "default_custom_item_sections")]
+  custom_item_sections: HashMap<String, String>,
+}
+
 #[derive(Deserialize)]
 struct OnboardingInput {
   target_saving_rate: f64,
@@ -432,6 +447,8 @@ struct OnboardingInput {
   asset_category_tree: Vec<OnboardingAssetCategoryInput>,
   allocation_targets: Vec<OnboardingAllocationTargetInput>,
   dashboard_sections: Vec<String>,
+  dashboard_items: Vec<String>,
+  dashboard_custom_settings: DashboardCustomSettings,
   custom_analysis_prompts: Vec<String>,
   skip_asset_entry: bool,
   skip_allocation_targets: bool,
@@ -2309,8 +2326,83 @@ fn investment_group_trends(connection: &Connection) -> Result<Vec<InvestmentGrou
   Ok(out)
 }
 
-fn discretionary_trends(connection: &Connection) -> Result<Vec<DiscretionaryTrend>, AppError> {
+fn expanded_asset_category_ids(connection: &Connection, selected_ids: &[String]) -> Result<HashSet<String>, AppError> {
+  let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
+  let mut known_ids: HashSet<String> = HashSet::new();
   let mut statement = connection.prepare(
+    "
+    select id, parent_id
+    from asset_categories
+    where is_active = 1
+    ",
+  )?;
+  let rows = statement.query_map([], |row| {
+    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+  })?;
+  for row in rows {
+    let (id, parent_id) = row?;
+    known_ids.insert(id.clone());
+    if let Some(parent) = parent_id {
+      children_by_parent.entry(parent).or_default().push(id);
+    }
+  }
+
+  let mut expanded = HashSet::new();
+  let mut queue = VecDeque::new();
+  for selected_id in selected_ids {
+    if known_ids.contains(selected_id) {
+      queue.push_back(selected_id.clone());
+    }
+  }
+  while let Some(category_id) = queue.pop_front() {
+    if !expanded.insert(category_id.clone()) {
+      continue;
+    }
+    for child_id in children_by_parent.get(&category_id).cloned().unwrap_or_default() {
+      queue.push_back(child_id);
+    }
+  }
+  Ok(expanded)
+}
+
+fn discretionary_trends(connection: &Connection) -> Result<Vec<DiscretionaryTrend>, AppError> {
+  let settings = setting_dashboard_custom_settings(connection)?;
+  let selected_ids = if settings.discretionary_category_ids.is_empty() {
+    default_dashboard_custom_settings().discretionary_category_ids
+  } else {
+    settings.discretionary_category_ids
+  };
+  let expanded_ids = expanded_asset_category_ids(connection, &selected_ids)?;
+  if expanded_ids.is_empty() {
+    return Ok(Vec::new());
+  }
+
+  let main_ids = expanded_ids
+    .iter()
+    .filter(|id| id.starts_with("asset_cat_"))
+    .cloned()
+    .collect::<Vec<_>>();
+  let sub_ids = expanded_ids
+    .iter()
+    .filter(|id| id.starts_with("asset_sub_"))
+    .cloned()
+    .collect::<Vec<_>>();
+  if main_ids.is_empty() && sub_ids.is_empty() {
+    return Ok(Vec::new());
+  }
+
+  let mut filters = Vec::new();
+  let mut query_params: Vec<String> = Vec::new();
+  if !main_ids.is_empty() {
+    filters.push(format!("a.main_asset_category_id in ({})", vec!["?"; main_ids.len()].join(",")));
+    query_params.extend(main_ids);
+  }
+  if !sub_ids.is_empty() {
+    filters.push(format!("a.sub_asset_category_id in ({})", vec!["?"; sub_ids.len()].join(",")));
+    query_params.extend(sub_ids);
+  }
+
+  let sql = format!(
     "
     select
       mas.period_month,
@@ -2319,25 +2411,15 @@ fn discretionary_trends(connection: &Connection) -> Result<Vec<DiscretionaryTren
     join assets a on a.id = mas.asset_id
     where mas.version_no = 1
       and mas.status = 'held'
-      and (
-        a.main_asset_category_id in ('asset_cat_bond', 'asset_cat_cash')
-        or a.sub_asset_category_id = 'asset_sub_sp500'
-        or (
-          a.sub_asset_category_id = 'asset_sub_nasdaq'
-          and (
-            a.name like '%C%'
-            or a.name like '%c%'
-            or a.name like '%C类%'
-            or a.name like '%c类%'
-          )
-        )
-      )
+      and ({})
     group by mas.period_month
     order by mas.period_month
     ",
-  )?;
+    filters.join(" or ")
+  );
+  let mut statement = connection.prepare(&sql)?;
   let rows = statement
-    .query_map([], |row| {
+    .query_map(params_from_iter(query_params.iter()), |row| {
       Ok(DiscretionaryTrend {
         period_month: row.get(0)?,
         amount: row.get(1)?,
@@ -2740,6 +2822,75 @@ fn default_dashboard_sections() -> Vec<String> {
   ]
 }
 
+fn default_dashboard_items() -> Vec<String> {
+  vec![
+    "cashflow_range_saving".to_string(),
+    "cashflow_month_saving".to_string(),
+    "cashflow_target_rate".to_string(),
+    "cashflow_target_amount".to_string(),
+    "cashflow_gap_chart".to_string(),
+    "saving_goal_chart".to_string(),
+    "expense_category_count".to_string(),
+    "expense_largest_category".to_string(),
+    "expense_category_share_chart".to_string(),
+    "expense_category_delta_chart".to_string(),
+    "expense_category_detail".to_string(),
+    "expense_range_rank".to_string(),
+    "expense_large_anomaly".to_string(),
+    "allocation_trend_chart".to_string(),
+    "allocation_current_chart".to_string(),
+    "investment_cashflow_amounts".to_string(),
+    "investment_weighted_return".to_string(),
+    "investment_non_cash_group_count".to_string(),
+    "investment_asset_return_chart".to_string(),
+    "investment_group_perspective_chart".to_string(),
+    "investment_return_xirr_chart".to_string(),
+    "investment_group_return_table".to_string(),
+    "report_template_picker".to_string(),
+    "report_content_preview".to_string(),
+    "report_export_actions".to_string(),
+  ]
+}
+
+fn default_dashboard_custom_settings() -> DashboardCustomSettings {
+  DashboardCustomSettings {
+    discretionary_category_ids: vec!["asset_cat_cash".to_string(), "asset_cat_bond".to_string()],
+    allocation_detail_parent_id: default_allocation_detail_parent_id(),
+    allocation_detail_depth: default_allocation_detail_depth(),
+    custom_item_sections: default_custom_item_sections(),
+  }
+}
+
+fn default_allocation_detail_parent_id() -> String {
+  "asset_cat_us_equity".to_string()
+}
+
+fn default_allocation_detail_depth() -> String {
+  "second".to_string()
+}
+
+fn default_custom_item_sections() -> HashMap<String, String> {
+  [
+    ("allocation_discretionary_amount", "资产配置"),
+    ("allocation_target_deviation_value", "资产配置"),
+    ("allocation_sub_detail_ratio", "资产配置"),
+    ("allocation_sub_target_gap_chart", "资产配置"),
+  ]
+  .into_iter()
+  .map(|(key, value)| (key.to_string(), value.to_string()))
+  .collect()
+}
+
+fn setting_dashboard_custom_settings(connection: &Connection) -> Result<DashboardCustomSettings, AppError> {
+  let default_json = serde_json::to_string(&default_dashboard_custom_settings()).unwrap_or_else(|_| "{}".to_string());
+  let raw = setting_raw_json(connection, "dashboard_custom_settings", &default_json)?;
+  let mut settings = serde_json::from_str::<DashboardCustomSettings>(&raw).unwrap_or_else(|_| default_dashboard_custom_settings());
+  for (key, value) in default_custom_item_sections() {
+    settings.custom_item_sections.entry(key).or_insert(value);
+  }
+  Ok(settings)
+}
+
 fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
   vec![
     OnboardingAssetCategoryInput {
@@ -2966,6 +3117,12 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
     "dashboard_enabled_sections",
     default_dashboard_sections(),
   )?;
+  let dashboard_enabled_items = setting_string_array(
+    connection,
+    "dashboard_enabled_items",
+    default_dashboard_items(),
+  )?;
+  let dashboard_custom_settings = setting_dashboard_custom_settings(connection)?;
   let custom_analysis_prompts = setting_string_array(
     connection,
     "dashboard_custom_analysis_prompts",
@@ -3053,6 +3210,8 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
 	    completed,
 	    target_saving_rate,
 	    dashboard_enabled_sections,
+	    dashboard_enabled_items,
+	    dashboard_custom_settings,
 	    custom_analysis_prompts,
 	    allocation_targets,
 	    skip_allocation_targets,
@@ -3076,6 +3235,16 @@ fn save_onboarding_to_connection(connection: &mut Connection, input: &Onboarding
     &tx,
     "dashboard_enabled_sections",
     &serde_json::to_string(&input.dashboard_sections).unwrap_or_else(|_| "[]".to_string()),
+  )?;
+  upsert_setting_tx(
+    &tx,
+    "dashboard_enabled_items",
+    &serde_json::to_string(&input.dashboard_items).unwrap_or_else(|_| "[]".to_string()),
+  )?;
+  upsert_setting_tx(
+    &tx,
+    "dashboard_custom_settings",
+    &serde_json::to_string(&input.dashboard_custom_settings).unwrap_or_else(|_| "{}".to_string()),
   )?;
   upsert_setting_tx(
     &tx,
@@ -3372,6 +3541,16 @@ fn reset_demo_onboarding_connection(connection: &mut Connection) -> Result<(), A
       &tx,
       "dashboard_enabled_sections",
       &serde_json::to_string(&default_dashboard_sections()).unwrap_or_else(|_| "[]".to_string()),
+    )?;
+    upsert_setting_tx(
+      &tx,
+      "dashboard_enabled_items",
+      &serde_json::to_string(&default_dashboard_items()).unwrap_or_else(|_| "[]".to_string()),
+    )?;
+    upsert_setting_tx(
+      &tx,
+      "dashboard_custom_settings",
+      &serde_json::to_string(&default_dashboard_custom_settings()).unwrap_or_else(|_| "{}".to_string()),
     )?;
     upsert_setting_tx(&tx, "dashboard_custom_analysis_prompts", "[]")?;
     upsert_setting_tx(&tx, "dashboard_custom_allocation_targets", "[]")?;
@@ -6532,8 +6711,14 @@ fn get_dashboard_seed_summary(
   let expense_year_rank = category_year_rank(&connection, &snapshot_month, "expense")?;
   let income_year_rank = category_year_rank(&connection, &snapshot_month, "income")?;
   let spending_anomalies = spending_anomalies(&connection, &snapshot_month)?;
+  let dashboard_custom_settings = setting_dashboard_custom_settings(&connection)?;
   let asset_allocations = asset_allocation_breakdown(&connection, &snapshot_month, None)?;
   let us_equity_allocations = asset_allocation_breakdown(&connection, &snapshot_month, Some("asset_cat_us_equity"))?;
+  let custom_allocation_detail_allocations = asset_allocation_breakdown(
+    &connection,
+    &snapshot_month,
+    Some(&dashboard_custom_settings.allocation_detail_parent_id),
+  )?;
   let allocation_target_groups = allocation_target_groups(&connection, &snapshot_month)?;
   let asset_allocation_trends = asset_allocation_trends(&connection)?;
   let investment_assets = investment_asset_performance(&connection, &snapshot_month)?;
@@ -6619,6 +6804,7 @@ fn get_dashboard_seed_summary(
     spending_anomalies,
     asset_allocations,
     us_equity_allocations,
+    custom_allocation_detail_allocations,
     allocation_target_groups,
     asset_allocation_trends,
     investment_assets,

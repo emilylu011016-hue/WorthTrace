@@ -168,6 +168,7 @@ type DashboardSeedSummary = {
   spending_anomalies: SpendingAnomaly[];
   asset_allocations: AssetAllocationBreakdown[];
   us_equity_allocations: AssetAllocationBreakdown[];
+  custom_allocation_detail_allocations: AssetAllocationBreakdown[];
   allocation_target_groups: AllocationTargetGroup[];
   asset_allocation_trends: AssetAllocationTrend[];
   investment_assets: InvestmentAssetPerformance[];
@@ -183,6 +184,8 @@ type OnboardingStatus = {
   completed: boolean;
   target_saving_rate: number;
   dashboard_enabled_sections: string[];
+  dashboard_enabled_items?: string[];
+  dashboard_custom_settings?: Partial<DashboardCustomSettings>;
   custom_analysis_prompts: string[];
   allocation_targets: OnboardingAllocationTarget[];
   skip_allocation_targets?: boolean;
@@ -219,10 +222,8 @@ type OnboardingDraftStorage = {
   subTargetDraftPercents: Record<string, string>;
   editingSubTargetParentId: string | null;
   sections: string[];
-  customAnalysisSection: HealthSection;
-  customAnalysisAspect: string;
-  customAnalysisInput: string;
-  customAnalysisPrompts: string[];
+  dashboardItems: string[];
+  dashboardCustomSettings: DashboardCustomSettings;
 };
 
 type ContentTemplate = {
@@ -505,11 +506,18 @@ type HealthSection = (typeof healthSections)[number];
 const dashboardRanges = ["本月", "3个月", "年初至今", "全部", "整年趋势"] as const;
 type DashboardRange = (typeof dashboardRanges)[number];
 type DashboardTheme = "champagne" | "sage" | "graphite";
-type CustomAnalysisAspect = {
+type DashboardItemDefinition = {
   id: string;
   label: string;
   detail: string;
-  preview: string;
+  defaultEnabled: boolean;
+  customSync?: boolean;
+};
+type DashboardCustomSettings = {
+  discretionary_category_ids: string[];
+  allocation_detail_parent_id: string;
+  allocation_detail_depth: "second" | "third";
+  custom_item_sections: Record<string, HealthSection>;
 };
 
 const defaultOnboardingSections = [...healthSections];
@@ -532,8 +540,8 @@ const dashboardModuleDetails: Record<HealthSection, { title: string; detail: str
   },
   资产配置: {
     title: "资产配置",
-    detail: "实际资产比例、目标差值和资产结构变化。",
-    charts: ["资产配置饼图", "目标偏离", "结构演变"]
+    detail: "实际资产比例和资产结构变化。目标差值放在下方自定义项。",
+    charts: ["资产配置饼图", "结构演变"]
   },
   投资表现: {
     title: "投资表现",
@@ -552,37 +560,74 @@ const onboardingChartOptions = healthSections.map((section) => ({
   ...dashboardModuleDetails[section]
 }));
 
-const customAnalysisAspectOptions: Record<HealthSection, CustomAnalysisAspect[]> = {
-  总览: [
-    { id: "key_metric", label: "关键指标", detail: "净资产、更新月份、关键状态。", preview: "指标卡片" },
-    { id: "trend", label: "长期趋势", detail: "净资产或资产规模的时间变化。", preview: "折线图" },
-    { id: "reminder", label: "本月提醒", detail: "下一次更新、未完成事项。", preview: "提醒清单" }
-  ],
+const dashboardModuleItemDefinitions: Record<Exclude<HealthSection, "总览">, DashboardItemDefinition[]> = {
   收支储蓄: [
-    { id: "cashflow_trend", label: "收支趋势", detail: "收入、支出、储蓄金额同图比较。", preview: "柱线组合图" },
-    { id: "saving_rate", label: "储蓄率", detail: "实际储蓄率和目标储蓄率对比。", preview: "目标线图" },
-    { id: "saving_gap", label: "储蓄缺口", detail: "每月离目标还差多少。", preview: "差额柱图" }
+    { id: "cashflow_range_saving", label: "当前范围累计储蓄", detail: "所选范围内收入减支出后的累计储蓄。", defaultEnabled: true },
+    { id: "cashflow_month_saving", label: "本月储蓄", detail: "当前更新月份的储蓄金额。", defaultEnabled: true },
+    { id: "cashflow_target_rate", label: "目标储蓄率", detail: "来自储蓄偏好设置。", defaultEnabled: true },
+    { id: "cashflow_target_amount", label: "目标储蓄金额", detail: "本月收入乘以目标储蓄率。", defaultEnabled: true },
+    { id: "cashflow_gap_chart", label: "收入支出储蓄缺口图表", detail: "收入、支出、储蓄率和目标线。", defaultEnabled: true },
+    { id: "saving_goal_chart", label: "储蓄目标达成图表", detail: "实际储蓄、目标储蓄和目标差额。", defaultEnabled: true }
   ],
   支出结构: [
-    { id: "expense_pie", label: "支出比例", detail: "各支出分类占比。", preview: "饼图" },
-    { id: "expense_rank", label: "支出排行", detail: "年度累计和 Top 分类。", preview: "横向排行" },
-    { id: "expense_exception", label: "异常支出", detail: "大额、重复、未映射分类。", preview: "异常列表" }
+    { id: "expense_category_count", label: "支出分类数", detail: "所选范围内有金额的分类数量。", defaultEnabled: true },
+    { id: "expense_largest_category", label: "最大支出分类", detail: "所选范围内金额最高的支出分类。", defaultEnabled: true },
+    { id: "expense_category_share_chart", label: "支出分类占比图表", detail: "支出分类占比饼图。", defaultEnabled: true },
+    { id: "expense_category_delta_chart", label: "分类环比变化图表", detail: "各分类金额环比变化。", defaultEnabled: true },
+    { id: "expense_category_detail", label: "分类金额明细", detail: "默认折叠，可以展开查看。", defaultEnabled: true },
+    { id: "expense_range_rank", label: "所选范围内分类累计排行", detail: "按所选范围累计金额排序。", defaultEnabled: true },
+    { id: "expense_large_anomaly", label: "大额异常支出", detail: "超过阈值或需确认的大额支出。", defaultEnabled: true }
   ],
   资产配置: [
-    { id: "allocation_actual", label: "实际比例", detail: "当前各资产类型占比。", preview: "环形图" },
-    { id: "allocation_target", label: "目标差值", detail: "实际比例和目标比例的偏离。", preview: "偏离条形图" },
-    { id: "allocation_trend", label: "结构演变", detail: "不同月份资产结构变化。", preview: "堆叠面积图" }
+    { id: "allocation_trend_chart", label: "资产配置轨迹图表", detail: "不同月份的资产配置结构变化。", defaultEnabled: true },
+    { id: "allocation_current_chart", label: "当前资产配置图表", detail: "当前资产类别金额占比。", defaultEnabled: true }
   ],
   投资表现: [
-    { id: "xirr", label: "XIRR", detail: "按现金流日期计算资金加权收益率。", preview: "收益率卡片" },
-    { id: "cashflow", label: "投资现金流", detail: "买入、卖出、分红。", preview: "现金流柱图" },
-    { id: "asset_return", label: "资产组表现", detail: "不同资产组收益对比。", preview: "收益排行" }
+    { id: "investment_cashflow_amounts", label: "买入卖出分红金额", detail: "所选范围内投资现金流金额。", defaultEnabled: true },
+    { id: "investment_weighted_return", label: "所选范围内资金加权收益", detail: "按现金流日期计算的 XIRR 折算收益。", defaultEnabled: true },
+    { id: "investment_non_cash_group_count", label: "非现金资产组数", detail: "有持仓、现金流或收益数据的非现金资产组。", defaultEnabled: true },
+    { id: "investment_asset_return_chart", label: "资产所选范围内收益率图表", detail: "不同资产组收益率对比。", defaultEnabled: true },
+    { id: "investment_group_perspective_chart", label: "资产组回报透视图表", detail: "资产组收益、买入、卖出和分红。", defaultEnabled: true },
+    { id: "investment_return_xirr_chart", label: "所选范围内收益与资金加权收益率图表", detail: "月度收益金额和资金加权收益率同图。", defaultEnabled: true },
+    { id: "investment_group_return_table", label: "所选范围内资产组收益率图表", detail: "资产组收益、区间收益率和月末金额。", defaultEnabled: true }
   ],
   月报: [
-    { id: "report_template", label: "月报模板", detail: "按模板生成月报文案。", preview: "文档预览" },
-    { id: "report_html", label: "HTML 导出", detail: "导出可查看的 HTML 月报。", preview: "网页预览" },
-    { id: "next_month", label: "下月提醒", detail: "自动生成下月关注事项。", preview: "提醒列表" }
+    { id: "report_template_picker", label: "使用模板", detail: "选择默认或自定义月报模板。", defaultEnabled: true },
+    { id: "report_content_preview", label: "预览生成内容", detail: "按模板生成 HTML 月报预览。", defaultEnabled: true },
+    { id: "report_export_actions", label: "导出 HTML", detail: "导出当前月报 HTML 内容。", defaultEnabled: true }
   ]
+};
+
+const dashboardPreferenceSections = healthSections.filter((section): section is Exclude<HealthSection, "总览"> => section !== "总览");
+const defaultDashboardItemIds = dashboardPreferenceSections.flatMap((section) =>
+  dashboardModuleItemDefinitions[section].filter((item) => item.defaultEnabled).map((item) => item.id)
+);
+const dashboardCustomItemDefinitions: DashboardItemDefinition[] = [
+  { id: "allocation_discretionary_amount", label: "可支配总额", detail: "选择哪些资产组金额算作可支配总额。", defaultEnabled: false, customSync: true },
+  { id: "allocation_target_deviation_value", label: "目标资产配置偏离图表", detail: "展示当前资产配置和目标资产配置之间的差值。", defaultEnabled: false, customSync: true },
+  { id: "allocation_sub_detail_ratio", label: "二级 / 三级分类资产明细配比", detail: "选择一级或继续细分到二级，用于看具体下级资产比例。", defaultEnabled: false, customSync: true },
+  { id: "allocation_sub_target_gap_chart", label: "二级 / 三级分类目标差距", detail: "填写下级目标配比后，展示具体下级分类的目标差距。", defaultEnabled: false, customSync: true }
+];
+const targetDependentDashboardItemIds = [
+  "allocation_target_deviation_value",
+  "allocation_sub_target_gap_chart"
+];
+const isTargetDependentDashboardItem = (itemId: string) => targetDependentDashboardItemIds.includes(itemId);
+const deprecatedDashboardItemAliases: Record<string, string> = {
+  allocation_target_gap_chart: "allocation_target_deviation_value"
+};
+function normalizeDashboardItemIds(items: string[]) {
+  return [...new Set(items.map((item) => deprecatedDashboardItemAliases[item] ?? item))];
+}
+const dashboardCustomItemIds = dashboardCustomItemDefinitions.map((item) => item.id);
+const defaultDashboardCustomItemSections = Object.fromEntries(
+  dashboardCustomItemIds.map((id) => [id, "资产配置" as HealthSection])
+) as Record<string, HealthSection>;
+const defaultDashboardCustomSettings: DashboardCustomSettings = {
+  discretionary_category_ids: ["asset_cat_cash", "asset_cat_bond"],
+  allocation_detail_parent_id: "asset_cat_us_equity",
+  allocation_detail_depth: "second",
+  custom_item_sections: defaultDashboardCustomItemSections
 };
 
 const dashboardThemes: { id: DashboardTheme; label: string; detail: string; swatches: string[] }[] = [
@@ -1058,6 +1103,50 @@ function assetCategoryPathIds(nodes: AssetCategoryNode[], id: string): string[] 
   return visit(nodes, []) ?? [];
 }
 
+function assetCategoryPathOptions(nodes: AssetCategoryNode[]) {
+  const rows: { id: string; label: string; hasChildren: boolean }[] = [];
+  const visit = (items: AssetCategoryNode[]) => {
+    items.forEach((item) => {
+      rows.push({ id: item.id, label: assetCategoryPathLabel(nodes, item.id), hasChildren: (item.children ?? []).length > 0 });
+      visit(item.children ?? []);
+    });
+  };
+  visit(nodes);
+  return rows;
+}
+
+function normalizeDashboardCustomSettings(
+  input: Partial<DashboardCustomSettings> | null | undefined,
+  tree: AssetCategoryNode[] = defaultAssetCategoryTree
+): DashboardCustomSettings {
+  const pathOptions = assetCategoryPathOptions(tree);
+  const allIds = new Set(pathOptions.map((item) => item.id));
+  const fallbackDiscretionaryIds = defaultDashboardCustomSettings.discretionary_category_ids.filter((id) => allIds.has(id));
+  const fallbackParentId = allIds.has(defaultDashboardCustomSettings.allocation_detail_parent_id)
+    ? defaultDashboardCustomSettings.allocation_detail_parent_id
+    : pathOptions.find((item) => item.hasChildren)?.id ?? pathOptions[0]?.id ?? defaultDashboardCustomSettings.allocation_detail_parent_id;
+  const discretionaryIds = (input?.discretionary_category_ids ?? fallbackDiscretionaryIds)
+    .filter((id) => allIds.has(id));
+  const parentId = input?.allocation_detail_parent_id && allIds.has(input.allocation_detail_parent_id)
+    ? input.allocation_detail_parent_id
+    : fallbackParentId;
+  const depth = input?.allocation_detail_depth === "third" ? "third" : "second";
+  const rawCustomItemSections = input?.custom_item_sections ?? {};
+  const customItemSections = Object.fromEntries(
+    dashboardCustomItemIds.map((id) => {
+      const rawSection = rawCustomItemSections[id];
+      const section = healthSections.includes(rawSection as HealthSection) ? (rawSection as HealthSection) : defaultDashboardCustomItemSections[id] ?? "资产配置";
+      return [id, section];
+    })
+  ) as Record<string, HealthSection>;
+  return {
+    discretionary_category_ids: discretionaryIds.length ? discretionaryIds : fallbackDiscretionaryIds.length ? fallbackDiscretionaryIds : pathOptions[0] ? [pathOptions[0].id] : [],
+    allocation_detail_parent_id: parentId,
+    allocation_detail_depth: depth,
+    custom_item_sections: customItemSections
+  };
+}
+
 function updateAssetCategoryNode(nodes: AssetCategoryNode[], id: string, patch: Partial<AssetCategoryNode>): AssetCategoryNode[] {
   return nodes.map((node) => {
     if (node.id === id) {
@@ -1263,6 +1352,7 @@ const fallbackSummary: DashboardSeedSummary = {
   spending_anomalies: [],
   asset_allocations: [],
   us_equity_allocations: [],
+  custom_allocation_detail_allocations: [],
   allocation_target_groups: [],
   asset_allocation_trends: [],
   investment_assets: [],
@@ -1522,10 +1612,11 @@ export function App() {
   const [onboardingSubTargetDraftPercents, setOnboardingSubTargetDraftPercents] = useState<Record<string, string>>({});
   const [editingSubTargetParentId, setEditingSubTargetParentId] = useState<string | null>(null);
   const [onboardingSections, setOnboardingSections] = useState<string[]>(defaultOnboardingSections);
-  const [customAnalysisSection, setCustomAnalysisSection] = useState<HealthSection>("总览");
-  const [customAnalysisAspect, setCustomAnalysisAspect] = useState("key_metric");
-  const [customAnalysisInput, setCustomAnalysisInput] = useState("");
-  const [customAnalysisPrompts, setCustomAnalysisPrompts] = useState<string[]>([]);
+  const [onboardingDashboardItems, setOnboardingDashboardItems] = useState<string[]>(defaultDashboardItemIds);
+  const [dashboardCustomSettings, setDashboardCustomSettings] = useState<DashboardCustomSettings>(defaultDashboardCustomSettings);
+  const [discretionaryDraftTopId, setDiscretionaryDraftTopId] = useState(defaultDashboardCustomSettings.discretionary_category_ids[0] ?? "asset_cat_cash");
+  const [discretionaryDraftSecondId, setDiscretionaryDraftSecondId] = useState("");
+  const [discretionaryDraftThirdId, setDiscretionaryDraftThirdId] = useState("");
   const [onboardingMessage, setOnboardingMessage] = useState<string | null>(null);
   const [preferenceSaveFeedback, setPreferenceSaveFeedback] = useState<string | null>(null);
   const [onboardingDraftHydrated, setOnboardingDraftHydrated] = useState(false);
@@ -1645,6 +1736,8 @@ export function App() {
 	        completed: true,
 		        target_saving_rate: browserPreviewSummary.target_saving_rate,
 			        dashboard_enabled_sections: defaultOnboardingSections,
+			        dashboard_enabled_items: defaultDashboardItemIds,
+			        dashboard_custom_settings: defaultDashboardCustomSettings,
 			        custom_analysis_prompts: [],
 			        allocation_targets: [],
 			        skip_allocation_targets: true,
@@ -1652,6 +1745,7 @@ export function App() {
 	        asset_count: browserPreviewSummary.asset_count,
 	        portfolio_target_count: browserPreviewSummary.portfolio_targets.length
 	      });
+	      setDashboardCustomSettings(defaultDashboardCustomSettings);
 	      setLoadState("ready");
 	      return;
 	    }
@@ -1680,8 +1774,10 @@ export function App() {
 	          setOnboardingStatus(result[2]);
 	          setOnboardingSavingRate(String(Math.round((result[2].target_saving_rate || 0.3) * 100)));
 	          setOnboardingSections(result[2].dashboard_enabled_sections?.length ? result[2].dashboard_enabled_sections : defaultOnboardingSections);
-	          setCustomAnalysisPrompts(result[2].custom_analysis_prompts ?? []);
-	          setAssetCategoryTree(result[2].asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(result[2].asset_category_tree) : cloneAssetCategoryTree());
+	          setOnboardingDashboardItems(normalizeDashboardItemIds(result[2].dashboard_enabled_items?.length ? result[2].dashboard_enabled_items : defaultDashboardItemIds));
+	          const cleanTree = result[2].asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(result[2].asset_category_tree) : cloneAssetCategoryTree();
+		          setDashboardCustomSettings(normalizeDashboardCustomSettings(result[2].dashboard_custom_settings, cleanTree));
+	          setAssetCategoryTree(cleanTree);
 	          if (!result[2].completed) {
 	            setView("onboarding");
 	          }
@@ -1702,13 +1798,6 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem("financial-planning-dashboard-theme", dashboardTheme);
   }, [dashboardTheme]);
-
-  useEffect(() => {
-    const options = customAnalysisAspectOptions[customAnalysisSection] ?? [];
-    if (!options.some((option) => option.id === customAnalysisAspect)) {
-      setCustomAnalysisAspect(options[0]?.id ?? "");
-    }
-  }, [customAnalysisAspect, customAnalysisSection]);
 
   useEffect(() => {
     if (browserPreviewSummary || !onboardingStatus || onboardingDraftHydrated) return;
@@ -1741,10 +1830,8 @@ export function App() {
       setOnboardingSubTargetDraftPercents(draft.subTargetDraftPercents ?? {});
 	      setEditingSubTargetParentId(draft.editingSubTargetParentId ?? null);
 	      setOnboardingSections(draft.sections?.length ? draft.sections : defaultOnboardingSections);
-	      setCustomAnalysisSection(healthSections.includes(draft.customAnalysisSection as HealthSection) ? (draft.customAnalysisSection as HealthSection) : "总览");
-	      setCustomAnalysisAspect(draft.customAnalysisAspect ?? "key_metric");
-	      setCustomAnalysisInput(draft.customAnalysisInput ?? "");
-	      setCustomAnalysisPrompts(draft.customAnalysisPrompts ?? []);
+		      setOnboardingDashboardItems(normalizeDashboardItemIds(draft.dashboardItems?.length ? draft.dashboardItems : defaultDashboardItemIds));
+		      setDashboardCustomSettings(normalizeDashboardCustomSettings(draft.dashboardCustomSettings, draftTree));
     } catch {
       window.localStorage.removeItem(onboardingDraftStorageKey);
     } finally {
@@ -1767,19 +1854,15 @@ export function App() {
       subTargetDraftPercents: onboardingSubTargetDraftPercents,
 	      editingSubTargetParentId,
 	      sections: onboardingSections,
-	      customAnalysisSection,
-	      customAnalysisAspect,
-	      customAnalysisInput,
-	      customAnalysisPrompts
-	    };
+		      dashboardItems: onboardingDashboardItems,
+		      dashboardCustomSettings
+		    };
     window.localStorage.setItem(onboardingDraftStorageKey, JSON.stringify(draft));
   }, [
 	    assetCategoryTree,
 	    browserPreviewSummary,
-	    customAnalysisAspect,
-	    customAnalysisInput,
-	    customAnalysisPrompts,
-	    customAnalysisSection,
+		    dashboardCustomSettings,
+	    onboardingDashboardItems,
     onboardingAssetDraft,
     onboardingAssets,
     onboardingDraftHydrated,
@@ -1800,6 +1883,10 @@ export function App() {
   }, [expenseReview, incomeReview, assetItems, dcaCashflows, displayCurrency, selectedMonth]);
 
   const privacyMode = Boolean(security?.privacy_mode);
+  const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dashboard_enabled_items?.length
+    ? onboardingStatus.dashboard_enabled_items
+    : defaultDashboardItemIds);
+  const enabledDashboardItemSet = useMemo(() => new Set(effectiveDashboardItems), [effectiveDashboardItems]);
   const visibleHealthSections = useMemo(() => {
     const enabled = onboardingStatus?.dashboard_enabled_sections?.length
       ? onboardingStatus.dashboard_enabled_sections
@@ -1972,7 +2059,26 @@ export function App() {
       const normalized = normalizeOnboardingAssetDraft(current, assetCategoryTree);
       return JSON.stringify(normalized) === JSON.stringify(current) ? current : normalized;
     });
+    setDashboardCustomSettings((current) => normalizeDashboardCustomSettings(current, assetCategoryTree));
   }, [assetCategoryTree]);
+
+  useEffect(() => {
+    const firstTopId = categoryOptions(assetCategoryTree)[0]?.[0] ?? "asset_cat_cash";
+    if (!findAssetCategoryNode(assetCategoryTree, discretionaryDraftTopId)) {
+      setDiscretionaryDraftTopId(firstTopId);
+      setDiscretionaryDraftSecondId("");
+      setDiscretionaryDraftThirdId("");
+      return;
+    }
+    if (discretionaryDraftSecondId && !findAssetCategoryNode(assetCategoryTree, discretionaryDraftSecondId)) {
+      setDiscretionaryDraftSecondId("");
+      setDiscretionaryDraftThirdId("");
+      return;
+    }
+    if (discretionaryDraftThirdId && !findAssetCategoryNode(assetCategoryTree, discretionaryDraftThirdId)) {
+      setDiscretionaryDraftThirdId("");
+    }
+  }, [assetCategoryTree, discretionaryDraftSecondId, discretionaryDraftThirdId, discretionaryDraftTopId]);
 
 			  useEffect(() => {
 			    if (effectiveOnboardingStep !== 2 || onboardingSkipTargets) return;
@@ -2344,15 +2450,17 @@ export function App() {
 	  }
 
   function applyOnboardingStatus(status: OnboardingStatus) {
+	    const cleanTree = status.asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(status.asset_category_tree) : cloneAssetCategoryTree();
 		    setOnboardingStatus(status);
 		    setOnboardingSavingRate(String(Math.round((status.target_saving_rate || 0.3) * 100)));
 		    setOnboardingSections(status.dashboard_enabled_sections?.length ? status.dashboard_enabled_sections : defaultOnboardingSections);
-			    setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
-			    setOnboardingTargets(allocationTargetsForEditor(status.allocation_targets ?? []));
+			    setOnboardingDashboardItems(normalizeDashboardItemIds(status.dashboard_enabled_items?.length ? status.dashboard_enabled_items : defaultDashboardItemIds));
+		    setDashboardCustomSettings(normalizeDashboardCustomSettings(status.dashboard_custom_settings, cleanTree));
+				    setOnboardingTargets(allocationTargetsForEditor(status.allocation_targets ?? []));
 			    setEditedMainTargetIds(new Set());
 			    setOnboardingMainTargetDraftPercents({});
 			    setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? (status.allocation_targets ?? []).length === 0));
-		    setAssetCategoryTree(status.asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(status.asset_category_tree) : cloneAssetCategoryTree());
+		    setAssetCategoryTree(cleanTree);
 	    if (!status.completed) {
 	      setView("onboarding");
 	    }
@@ -3511,25 +3619,178 @@ export function App() {
 	  }
 
 	  function toggleOnboardingSection(section: HealthSection) {
+	    if (section === "总览") return;
+	    const itemIds = dashboardModuleItemDefinitions[section as Exclude<HealthSection, "总览">]?.map((item) => item.id) ?? [];
+	    const defaultItemIds = dashboardModuleItemDefinitions[section as Exclude<HealthSection, "总览">]?.filter((item) => item.defaultEnabled).map((item) => item.id) ?? [];
 	    setOnboardingSections((current) =>
 	      current.includes(section)
 	        ? current.filter((item) => item !== section)
-	        : [...current, section]
+	        : [...new Set(["总览", ...current, section])]
+	    );
+	    setOnboardingDashboardItems((current) =>
+	      onboardingSections.includes(section)
+	        ? current.filter((item) => !itemIds.includes(item))
+	        : [...new Set([...current, ...defaultItemIds])]
 	    );
 	  }
 
-	  function addCustomAnalysisPrompt() {
-	    const aspect = (customAnalysisAspectOptions[customAnalysisSection] ?? []).find((item) => item.id === customAnalysisAspect);
-	    if (!aspect) {
-	      setOnboardingMessage("请先选择一个分析方面。");
+		  function toggleDashboardPreferenceItem(section: Exclude<HealthSection, "总览">, itemId: string) {
+	    const sectionItemIds = dashboardModuleItemDefinitions[section].map((item) => item.id);
+	    setOnboardingDashboardItems((current) => {
+	      const next = current.includes(itemId)
+	        ? current.filter((item) => item !== itemId)
+	        : [...current, itemId];
+	      const hasSectionItem = next.some((item) => sectionItemIds.includes(item));
+	      setOnboardingSections((sections) => {
+	        if (hasSectionItem) return [...new Set(["总览", ...sections, section])];
+	        return sections.filter((item) => item !== section);
+	      });
+		      return [...new Set(next)];
+		    });
+		  }
+
+		  function editorHasAllocationTargets() {
+		    return !onboardingSkipTargets && effectiveOnboardingTargetsForEditor().length > 0;
+		  }
+
+		  function dashboardItemsForSave() {
+		    const hasTargets = editorHasAllocationTargets();
+		    return normalizeDashboardItemIds(onboardingDashboardItems).filter((item) => hasTargets || !isTargetDependentDashboardItem(item));
+		  }
+
+		  function toggleCustomDashboardItem(itemId: string) {
+	    if (isTargetDependentDashboardItem(itemId) && !editorHasAllocationTargets()) {
+	      setOnboardingMessage("请先在上一步填写目标资产配比，再开启目标偏离类分析。");
 	      return;
 	    }
-	    const note = customAnalysisInput.trim();
-	    const value = `${customAnalysisSection}｜${aspect.label}${note ? `｜${note}` : ""}`;
-	    setCustomAnalysisPrompts((current) => [...current, value]);
-	    setCustomAnalysisInput("");
-	    setOnboardingMessage("自定义关注点已加入。");
+	    setOnboardingDashboardItems((current) => {
+	      const next = current.includes(itemId)
+	        ? current.filter((item) => item !== itemId)
+	        : [...current, itemId];
+	      const targetSection = dashboardCustomSettings.custom_item_sections[itemId] ?? "资产配置";
+	      if (next.includes(itemId)) {
+	        setOnboardingSections((sections) => [...new Set(["总览", ...sections, targetSection])]);
+	      }
+	      return [...new Set(next)];
+	    });
 	  }
+
+	  function updateDashboardCustomSettings(patch: Partial<DashboardCustomSettings>) {
+	    setDashboardCustomSettings((current) => normalizeDashboardCustomSettings({ ...current, ...patch }, assetCategoryTree));
+	  }
+
+	  function customItemSection(itemId: string): HealthSection {
+	    return dashboardCustomSettings.custom_item_sections[itemId] ?? "资产配置";
+	  }
+
+	  function changeCustomDashboardItemSection(itemId: string, section: HealthSection) {
+	    setDashboardCustomSettings((current) =>
+	      normalizeDashboardCustomSettings(
+	        {
+	          ...current,
+	          custom_item_sections: {
+	            ...current.custom_item_sections,
+	            [itemId]: section
+	          }
+	        },
+	        assetCategoryTree
+	      )
+	    );
+	    if (onboardingDashboardItems.includes(itemId)) {
+	      setOnboardingSections((sections) => [...new Set(["总览", ...sections, section])]);
+	    }
+	  }
+
+	  function changeDiscretionaryDraftTopCategory(categoryId: string) {
+	    setDiscretionaryDraftTopId(categoryId);
+	    setDiscretionaryDraftSecondId("");
+	    setDiscretionaryDraftThirdId("");
+	  }
+
+	  function changeDiscretionaryDraftSecondCategory(categoryId: string) {
+	    setDiscretionaryDraftSecondId(categoryId);
+	    setDiscretionaryDraftThirdId("");
+	  }
+
+	  function addDiscretionaryCategorySelection() {
+	    const selectedId = discretionaryDraftThirdId || discretionaryDraftSecondId || discretionaryDraftTopId;
+	    if (!selectedId || !findAssetCategoryNode(assetCategoryTree, selectedId)) {
+	      setOnboardingMessage("请先选择一个有效资产范围。");
+	      return;
+	    }
+	    const selectedPath = assetCategoryPathIds(assetCategoryTree, selectedId);
+	    setDashboardCustomSettings((current) => {
+	      const nextIds = current.discretionary_category_ids.filter((id) => {
+	        const path = assetCategoryPathIds(assetCategoryTree, id);
+	        return id !== selectedId && !path.includes(selectedId) && !selectedPath.includes(id);
+	      });
+	      return normalizeDashboardCustomSettings({ ...current, discretionary_category_ids: [...nextIds, selectedId] }, assetCategoryTree);
+	    });
+	    setOnboardingDashboardItems((current) => [...new Set([...current, "allocation_discretionary_amount"])]);
+	    setOnboardingSections((sections) => [...new Set(["总览", ...sections, "资产配置"])]);
+	    setOnboardingMessage(`已加入可支配总额范围：${assetCategoryPathLabel(assetCategoryTree, selectedId)}。记得保存看板偏好。`);
+	  }
+
+	  function removeDiscretionaryCategorySelection(categoryId: string) {
+	    if (dashboardCustomSettings.discretionary_category_ids.length <= 1) {
+	      setOnboardingMessage("可支配总额至少保留一个资产范围。");
+	      return;
+	    }
+	    setDashboardCustomSettings((current) =>
+	      normalizeDashboardCustomSettings(
+	        { ...current, discretionary_category_ids: current.discretionary_category_ids.filter((id) => id !== categoryId) },
+	        assetCategoryTree
+	      )
+	    );
+	  }
+
+	  function changeCustomAllocationDetailTop(topCategoryId: string) {
+	    updateDashboardCustomSettings({
+	      allocation_detail_parent_id: topCategoryId,
+	      allocation_detail_depth: "second"
+	    });
+	  }
+
+	  function changeCustomAllocationDetailDepth(shouldUseDeeperLevel: boolean) {
+	    const path = assetCategoryPathIds(assetCategoryTree, dashboardCustomSettings.allocation_detail_parent_id);
+	    const topCategoryId = path[0] ?? categoryOptions(assetCategoryTree)[0]?.[0] ?? "asset_cat_cash";
+	    if (!shouldUseDeeperLevel) {
+	      updateDashboardCustomSettings({
+	        allocation_detail_parent_id: topCategoryId,
+	        allocation_detail_depth: "second"
+	      });
+	      return;
+	    }
+	    const topNode = findAssetCategoryNode(assetCategoryTree, topCategoryId);
+	    const secondParentOptions = categoryOptions((topNode?.children ?? []).filter((child) => (child.children ?? []).length > 0));
+	    updateDashboardCustomSettings({
+	      allocation_detail_parent_id: path[1] && secondParentOptions.some(([id]) => id === path[1]) ? path[1] : secondParentOptions[0]?.[0] ?? topCategoryId,
+	      allocation_detail_depth: "third"
+	    });
+	  }
+
+	  function changeCustomAllocationDetailSecond(categoryId: string) {
+	    updateDashboardCustomSettings({
+	      allocation_detail_parent_id: categoryId,
+	      allocation_detail_depth: "third"
+	    });
+	  }
+
+			  function dashboardSectionsForSave() {
+			    const savedItems = dashboardItemsForSave();
+			    const customSections = savedItems
+			      .filter((item) => dashboardCustomItemIds.includes(item))
+			      .map((item) => customItemSection(item));
+		    return [
+		      "总览",
+		      ...dashboardPreferenceSections.filter((section) => {
+		        if (customSections.includes(section)) return true;
+			        if (!onboardingSections.includes(section)) return false;
+			        const itemIds = dashboardModuleItemDefinitions[section].map((item) => item.id);
+			        return savedItems.some((item) => itemIds.includes(item));
+			      })
+			    ];
+			  }
 
 	  async function resetDemoOnboarding() {
 	    if (!isDemoEnvironment) {
@@ -3559,10 +3820,8 @@ export function App() {
 	      setOnboardingSubTargetDraftPercents({});
 	      setEditingSubTargetParentId(null);
 	      setOnboardingSections(status.dashboard_enabled_sections?.length ? status.dashboard_enabled_sections : defaultOnboardingSections);
-	      setCustomAnalysisSection("总览");
-	      setCustomAnalysisAspect("key_metric");
-	      setCustomAnalysisInput("");
-	      setCustomAnalysisPrompts(status.custom_analysis_prompts ?? []);
+		      setOnboardingDashboardItems(normalizeDashboardItemIds(status.dashboard_enabled_items?.length ? status.dashboard_enabled_items : defaultDashboardItemIds));
+		      setDashboardCustomSettings(normalizeDashboardCustomSettings(status.dashboard_custom_settings, cleanTree));
 	      setOnboardingStatus(status);
 	      setView("onboarding");
 	      setSuccessBanner(null);
@@ -3584,7 +3843,7 @@ export function App() {
 	      setOnboardingStep(0);
 	      return;
 	    }
-	    if (onboardingSections.length === 0) {
+	    if (dashboardSectionsForSave().length <= 1) {
 	      setOnboardingMessage("至少保留一个看板模块。");
 	      setOnboardingStep(3);
 	      return;
@@ -3610,8 +3869,10 @@ export function App() {
 	          assets: onboardingSkipAssets ? [] : onboardingAssets.map((asset) => assetPayloadFromDraft(asset, selectedMonth, assetCategoryTree)),
 	          asset_category_tree: assetCategoryTree,
 	          allocation_targets: payloadTargets,
-	          dashboard_sections: onboardingSections,
-	          custom_analysis_prompts: customAnalysisPrompts,
+	          dashboard_sections: dashboardSectionsForSave(),
+		          dashboard_items: dashboardItemsForSave(),
+	          dashboard_custom_settings: dashboardCustomSettings,
+		          custom_analysis_prompts: [],
 	          skip_asset_entry: onboardingSkipAssets,
 	          skip_allocation_targets: onboardingSkipTargets
 	        }
@@ -3664,7 +3925,7 @@ export function App() {
 	      setOnboardingStep(0);
 	      return;
 	    }
-	    if (onboardingSections.length === 0) {
+	    if (dashboardSectionsForSave().length <= 1) {
 	      setOnboardingMessage("至少保留一个看板模块。");
 	      setOnboardingStep(2);
 	      return;
@@ -3677,8 +3938,10 @@ export function App() {
 	          assets: [],
 	          asset_category_tree: assetCategoryTree,
 	          allocation_targets: options.allocationTargets,
-	          dashboard_sections: onboardingSections,
-	          custom_analysis_prompts: customAnalysisPrompts,
+	          dashboard_sections: dashboardSectionsForSave(),
+		          dashboard_items: dashboardItemsForSave(),
+	          dashboard_custom_settings: dashboardCustomSettings,
+		          custom_analysis_prompts: [],
 	          skip_asset_entry: true,
 	          skip_allocation_targets: options.skipAllocationTargets
 	        }
@@ -4805,8 +5068,33 @@ export function App() {
 	    const subTargetDraftSecondParentId = subTargetDraftPath[1] ?? subTargetDraftSecondParentOptions[0]?.[0] ?? "";
 	    const subTargetDraftParentLabel = assetCategoryPathLabel(assetCategoryTree, onboardingSubTargetDraftParent);
 	    const mainTargetTotalClass = mainTargetTotal > 100.0001 ? "target-total over" : mainTargetTotal < 99.9999 ? "target-total incomplete" : "target-total";
-	    const customAspectOptions = customAnalysisAspectOptions[customAnalysisSection] ?? [];
-	    const selectedCustomAspect = customAspectOptions.find((option) => option.id === customAnalysisAspect) ?? customAspectOptions[0];
+			    const selectedDashboardItemSet = new Set(normalizeDashboardItemIds(onboardingDashboardItems));
+		    const effectiveEditorTargets = effectiveOnboardingTargetsForEditor();
+		    const hasAllocationTargetsForCustom = !onboardingSkipTargets && effectiveEditorTargets.length > 0;
+		    const visibleDashboardCustomItemDefinitions = dashboardCustomItemDefinitions.filter(
+		      (item) => hasAllocationTargetsForCustom || !isTargetDependentDashboardItem(item.id)
+		    );
+		    const selectedDiscretionaryLabels = dashboardCustomSettings.discretionary_category_ids
+	      .map((id) => assetCategoryPathLabel(assetCategoryTree, id))
+	      .filter(Boolean);
+	    const discretionaryTopOptions = categoryOptions(assetCategoryTree);
+	    const discretionaryTopNode = findAssetCategoryNode(assetCategoryTree, discretionaryDraftTopId);
+	    const discretionarySecondOptions = categoryOptions(discretionaryTopNode?.children ?? []);
+	    const discretionarySecondNode = discretionaryDraftSecondId ? findAssetCategoryNode(assetCategoryTree, discretionaryDraftSecondId) : null;
+	    const discretionaryThirdOptions = discretionaryDraftSecondId ? categoryOptions(discretionarySecondNode?.children ?? []) : [];
+	    const discretionaryDraftSelectionId = discretionaryDraftThirdId || discretionaryDraftSecondId || discretionaryDraftTopId;
+	    const discretionaryDraftSelectionLabel = assetCategoryPathLabel(assetCategoryTree, discretionaryDraftSelectionId);
+	    const customDetailPath = assetCategoryPathIds(assetCategoryTree, dashboardCustomSettings.allocation_detail_parent_id);
+	    const customDetailTopId = customDetailPath[0] ?? categoryOptions(assetCategoryTree)[0]?.[0] ?? "asset_cat_cash";
+	    const customDetailTopNode = findAssetCategoryNode(assetCategoryTree, customDetailTopId);
+	    const customDetailTopOptions = categoryOptions(assetCategoryTree.filter((node) => (node.children ?? []).length > 0));
+	    const customDetailSecondParentOptions = categoryOptions((customDetailTopNode?.children ?? []).filter((node) => (node.children ?? []).length > 0));
+	    const customDetailCanGoDeeper = customDetailSecondParentOptions.length > 0;
+	    const customDetailUsesDeeperLevel = dashboardCustomSettings.allocation_detail_depth === "third" && customDetailCanGoDeeper;
+	    const customDetailSecondParentId = customDetailPath[1] && customDetailSecondParentOptions.some(([id]) => id === customDetailPath[1])
+	      ? customDetailPath[1]
+	      : customDetailSecondParentOptions[0]?.[0] ?? "";
+	    const customDetailParentLabel = assetCategoryPathLabel(assetCategoryTree, dashboardCustomSettings.allocation_detail_parent_id);
 
 	    return (
 	      <section
@@ -5234,69 +5522,168 @@ export function App() {
 
 		            {activeStep === 3 ? (
 		              <div className="onboarding-step">
-		                <div className="notice onboarding-notice">以下模块会出现在财务健康看板里，单击卡片可以取消。每个模块下面列出了默认分析图表。</div>
+		                <div className="notice onboarding-notice">以下是默认会出现在财务健康看板里的模块和明细。总览不单独设置，会从已启用模块里自动汇总。</div>
 		                <div className="onboarding-chart-grid">
-		                  {onboardingChartOptions.map((option) => (
-		                    <button
-		                      className={onboardingSections.includes(option.section) ? "selected" : ""}
-		                      key={option.section}
-	                      onClick={() => toggleOnboardingSection(option.section)}
-	                      type="button"
-		                    >
-		                      <CheckCircle2 size={18} />
-		                      <strong>{option.title}</strong>
-		                      <span>{option.detail}</span>
-		                      <div className="onboarding-chart-chip-list">
-		                        {option.charts.map((chart) => <i key={`${option.section}-${chart}`}>{chart}</i>)}
-		                      </div>
-		                    </button>
-		                  ))}
+		                  {dashboardPreferenceSections.map((section) => {
+		                    const option = dashboardModuleDetails[section];
+		                    const isSelected = onboardingSections.includes(section);
+		                    return (
+		                      <article className={`dashboard-module-preference-card ${isSelected ? "selected" : ""}`} key={section}>
+		                        <div className="dashboard-module-preference-header">
+		                          <label>
+		                            <input
+		                              checked={isSelected}
+		                              onChange={() => toggleOnboardingSection(section)}
+		                              type="checkbox"
+		                            />
+		                            <CheckCircle2 size={18} />
+		                            <strong>{option.title}</strong>
+		                          </label>
+		                          <span>{option.detail}</span>
+		                        </div>
+		                        <div className="dashboard-preference-item-list">
+		                          {dashboardModuleItemDefinitions[section].map((item) => {
+		                            const itemSelected = selectedDashboardItemSet.has(item.id);
+		                            return (
+		                              <label className={item.customSync ? "custom-sync-item" : ""} key={`${section}-${item.id}`}>
+		                                <input
+		                                  checked={itemSelected}
+		                                  onChange={() => toggleDashboardPreferenceItem(section, item.id)}
+		                                  type="checkbox"
+		                                />
+		                                <span>
+		                                  <strong>{item.label}</strong>
+		                                  <small>{item.detail}</small>
+		                                </span>
+		                              </label>
+		                            );
+		                          })}
+		                        </div>
+		                      </article>
+		                    );
+		                  })}
 		                </div>
 		                <div className="custom-analysis-box">
 		                  <div className="target-section-header">
 		                    <div>
 		                      <strong>自定义分析点</strong>
-		                      <span>先选择放在哪个模块，再选择关注方面；备注只用于补充口径。</span>
+		                      <span>系统联动项会从储蓄偏好、目标配比和看板明细开关反向同步；手动项可继续新增。</span>
 		                    </div>
 		                  </div>
-		                  <div className="custom-analysis-builder">
-		                    <label>
-		                      放在哪个模块
-		                      <select value={customAnalysisSection} onChange={(event) => setCustomAnalysisSection(event.target.value as HealthSection)}>
-		                        {healthSections.map((section) => <option key={section} value={section}>{section}</option>)}
-		                      </select>
-		                    </label>
-		                    <label>
-		                      具体方面
-		                      <select value={customAnalysisAspect} onChange={(event) => setCustomAnalysisAspect(event.target.value)}>
-		                        {customAspectOptions.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.label}</option>)}
-		                      </select>
-		                    </label>
-		                    <label className="custom-analysis-note">
-		                      备注
-		                      <textarea value={customAnalysisInput} onChange={(event) => setCustomAnalysisInput(event.target.value)} placeholder="可空。例如：只看全球资产和现金的年度趋势。" />
-		                    </label>
-		                    <div className="custom-analysis-preview">
-		                      <BarChart3 size={20} />
-		                      <div>
-		                        <strong>{selectedCustomAspect?.preview ?? "图表预览"}</strong>
-		                        <span>{selectedCustomAspect ? `${customAnalysisSection}｜${selectedCustomAspect.detail}` : "选择模块和方面后显示可能的图表形式。"}</span>
-		                      </div>
-		                    </div>
-		                    <button className="secondary-button compact" onClick={addCustomAnalysisPrompt} type="button">
-		                      <Plus size={15} />
-		                      加入关注点
-		                    </button>
-		                  </div>
-		                  <div className="onboarding-list">
-		                    {customAnalysisPrompts.map((item, index) => (
-		                      <div className="onboarding-list-row" key={`${item}-${index}`}>
-	                        <strong>{item}</strong>
-	                        <button className="link-button" onClick={() => setCustomAnalysisPrompts((current) => current.filter((_, itemIndex) => itemIndex !== index))} type="button">删除</button>
-	                      </div>
-	                    ))}
-		                  </div>
-		                </div>
+		                  <div className="custom-dashboard-row-list">
+			                    {visibleDashboardCustomItemDefinitions.map((item) => {
+		                      const itemSelected = selectedDashboardItemSet.has(item.id);
+		                      return (
+		                        <div className={`custom-dashboard-row ${itemSelected ? "selected" : ""}`} key={item.id}>
+		                          <label className="custom-dashboard-row-main">
+		                            <input checked={itemSelected} onChange={() => toggleCustomDashboardItem(item.id)} type="checkbox" />
+		                            <span>
+		                              <strong>{item.label}</strong>
+		                              <small>{item.detail}</small>
+		                            </span>
+		                          </label>
+		                          <div className="custom-dashboard-row-board">
+		                            <label>
+		                              放在哪个板块
+		                              <select
+		                                value={customItemSection(item.id)}
+		                                onChange={(event) => changeCustomDashboardItemSection(item.id, event.target.value as HealthSection)}
+		                              >
+		                                {healthSections.map((section) => <option key={`${item.id}-${section}`} value={section}>{section}</option>)}
+		                              </select>
+		                            </label>
+		                          </div>
+		                          {item.id === "allocation_discretionary_amount" && itemSelected ? (
+		                            <div className="custom-dashboard-row-controls custom-path-picker">
+		                              <div className="custom-path-picker-grid">
+		                                <label>
+		                                  一级
+		                                  <select value={discretionaryDraftTopId} onChange={(event) => changeDiscretionaryDraftTopCategory(event.target.value)}>
+		                                    {discretionaryTopOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+		                                  </select>
+		                                </label>
+		                                {discretionarySecondOptions.length > 0 ? (
+		                                  <label>
+		                                    二级
+		                                    <select value={discretionaryDraftSecondId} onChange={(event) => changeDiscretionaryDraftSecondCategory(event.target.value)}>
+		                                      <option value="">全部 {optionLabel(discretionaryTopOptions, discretionaryDraftTopId)}</option>
+		                                      {discretionarySecondOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+		                                    </select>
+		                                  </label>
+		                                ) : null}
+		                                {discretionaryThirdOptions.length > 0 ? (
+		                                  <label>
+		                                    三级
+		                                    <select value={discretionaryDraftThirdId} onChange={(event) => setDiscretionaryDraftThirdId(event.target.value)}>
+		                                      <option value="">全部 {optionLabel(discretionarySecondOptions, discretionaryDraftSecondId)}</option>
+		                                      {discretionaryThirdOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+		                                    </select>
+		                                  </label>
+		                                ) : null}
+		                                <button className="secondary-button compact" onClick={addDiscretionaryCategorySelection} type="button">
+		                                  <Plus size={15} />
+		                                  加入范围
+		                                </button>
+		                              </div>
+		                              <div className="target-path-summary">当前将加入：{discretionaryDraftSelectionLabel}</div>
+		                              <div className="custom-selected-paths">
+		                                {selectedDiscretionaryLabels.length === 0 ? (
+		                                  <div className="dashboard-empty-state compact">还没有选择可支配范围。</div>
+		                                ) : dashboardCustomSettings.discretionary_category_ids.map((id) => (
+		                                  <span key={`discretionary-selected-${id}`}>
+		                                    {assetCategoryPathLabel(assetCategoryTree, id)}
+		                                    <button aria-label={`删除 ${assetCategoryPathLabel(assetCategoryTree, id)}`} onClick={() => removeDiscretionaryCategorySelection(id)} type="button">×</button>
+		                                  </span>
+		                                ))}
+		                              </div>
+		                              <div className="custom-dashboard-row-note">保存看板偏好后，财务健康看板里的可支配总额会按这些范围重新计算。</div>
+		                            </div>
+		                          ) : null}
+		                          {item.id === "allocation_sub_detail_ratio" && itemSelected ? (
+		                            <div className="custom-dashboard-row-controls custom-allocation-picker">
+		                              <label>
+		                                先选择一级分类
+		                                <select value={customDetailTopId} onChange={(event) => changeCustomAllocationDetailTop(event.target.value)}>
+		                                  {customDetailTopOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+		                                </select>
+		                              </label>
+		                              {customDetailCanGoDeeper ? (
+		                                <div className="onboarding-inline-choice sub-target-depth-choice">
+		                                  <label>
+		                                    <input
+		                                      checked={customDetailUsesDeeperLevel}
+		                                      onChange={(event) => changeCustomAllocationDetailDepth(event.target.checked)}
+		                                      type="checkbox"
+		                                    />
+		                                    继续选择二级分类，查看三级明细
+		                                  </label>
+		                                  <span>不勾选时，展示 {assetCategoryPathLabel(assetCategoryTree, customDetailTopId)} 下面的二级比例。</span>
+		                                </div>
+		                              ) : (
+		                                <div className="notice onboarding-notice compact">这个一级分类当前只能展示二级比例。</div>
+		                              )}
+		                              {customDetailUsesDeeperLevel ? (
+		                                <label>
+		                                  再选择二级分类
+		                                  <select value={customDetailSecondParentId} onChange={(event) => changeCustomAllocationDetailSecond(event.target.value)}>
+		                                    {customDetailSecondParentOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+		                                  </select>
+		                                </label>
+		                              ) : null}
+		                              <div className="target-path-summary">当前明细：{customDetailParentLabel} 的下级资产比例</div>
+		                            </div>
+		                          ) : null}
+		                          {item.id === "allocation_target_deviation_value" && itemSelected ? (
+		                            <div className="custom-dashboard-row-note">{hasAllocationTargetsForCustom ? "已读取目标配比设置。" : "还没有目标配比；保存后看板会等目标配比存在时显示。"}</div>
+		                          ) : null}
+		                          {item.id === "allocation_sub_target_gap_chart" && itemSelected ? (
+		                            <div className="custom-dashboard-row-note">{hasAllocationTargetsForCustom ? "下级目标差距会按二级或三级目标配比同步。" : "未填写下级目标配比时，这里不会显示差距。"}</div>
+		                          ) : null}
+			                    </div>
+			                  );
+		                })}
+			                  </div>
+			                </div>
 		                {isPreferenceMode ? (
 		                  <div className="onboarding-row-actions">
 		                    <button className="primary-button compact" disabled={savingOnboarding} onClick={() => void saveDashboardPreference()} type="button">
@@ -7270,7 +7657,7 @@ export function App() {
       总览: { eyebrow: "Overview", title: "今年核心状态", text: "净资产、可支配金额、储蓄质量和资金加权收益放在同一屏。" },
       收支储蓄: { eyebrow: "Cashflow", title: "收支与储蓄", text: "看收入支出缺口、储蓄率、目标达成和异常波动。" },
       支出结构: { eyebrow: "Spending", title: "支出结构", text: "看分类占比、环比变化和异常支出。" },
-	      资产配置: { eyebrow: "Allocation", title: "资产配置", text: "看配置结构演变、目标偏离、全球资产拆分和可支配金额。" },
+	      资产配置: { eyebrow: "Allocation", title: "资产配置", text: "看配置结构演变和当前资产比例；目标偏离、细分配比放在自定义项。" },
       投资表现: { eyebrow: "Performance", title: "投资表现", text: "看非现金资产组收益率、收益金额和资金加权收益。" },
       月报: { eyebrow: "Report", title: "月报", text: "生成本月总结、变化原因和下月提醒。" }
     };
@@ -7311,6 +7698,11 @@ export function App() {
     const ytdExpense = dashboardTrends.reduce((sum, item) => sum + item.expense, 0);
     const ytdSaving = ytdIncome - ytdExpense;
     const latestDiscretionaryAmount = [...summary.discretionary_trends].reverse().find((item) => item.period_month === summary.snapshot_month)?.amount ?? 0;
+    const discretionaryScopeLabel = dashboardCustomSettings.discretionary_category_ids
+      .map((id) => assetCategoryPathLabel(assetCategoryTree, id))
+      .filter(Boolean)
+      .slice(0, 3)
+      .join("、");
     const returnGroupOrder = ["全球资产", "红利低波", "债券", "黄金", "A股权益", "其他"];
     const investmentTrendGroupNames = new Set(
       summary.investment_group_trends
@@ -7325,9 +7717,10 @@ export function App() {
     const expenseTotalForRange = expenseRowsForRange.reduce((sum, item) => sum + item.amount, 0);
 	    const topExpenseCategory = expenseRowsForRange[0];
 	    const topExpensePercent = expenseTotalForRange > 0 && topExpenseCategory ? topExpenseCategory.amount / expenseTotalForRange : 0;
-	    const categoryCount = expenseRowsForRange.filter((item) => item.amount > 0).length;
-	    const allocationTargetGroups = summary.allocation_target_groups ?? [];
-	    const hasMainAllocationTargets =
+		    const categoryCount = expenseRowsForRange.filter((item) => item.amount > 0).length;
+		    const allocationTargetGroups = summary.allocation_target_groups ?? [];
+		    const customAllocationDetailLabel = assetCategoryPathLabel(assetCategoryTree, dashboardCustomSettings.allocation_detail_parent_id);
+		    const hasMainAllocationTargets =
 	      summary.portfolio_targets.length > 0 ||
 	      summary.asset_allocations.some((item) => item.target_percent !== null && item.target_percent !== undefined);
 	    const majorAllocationDeviationCount =
@@ -7394,8 +7787,12 @@ export function App() {
         onClick?.();
         showTooltip(event, title, body, true);
       }
-    });
-    const renderChartCard = (title: string, subtitle: string, children: ReactNode, className = "") => (
+	    });
+		    const dashboardItemEnabled = (id: string) =>
+		      enabledDashboardItemSet.has(id) && (!isTargetDependentDashboardItem(id) || hasMainAllocationTargets);
+	    const customDashboardItemEnabledInSection = (id: string, section: HealthSection = activeHealthSection) =>
+	      dashboardItemEnabled(id) && customItemSection(id) === section;
+	    const renderChartCard = (title: string, subtitle: string, children: ReactNode, className = "") => (
       <article className={`dashboard-visual-card ${className}`}>
         <div className="visual-card-header">
           <div>
@@ -7807,9 +8204,9 @@ export function App() {
         "wide"
       );
     };
-    const renderDiscretionaryChart = () => {
-      const rows = summary.discretionary_trends.filter((item) => trendMonths.has(item.period_month));
-      if (rows.length === 0) return <div className="dashboard-empty-state compact">暂无数据：缺少可支配资产快照。</div>;
+	    const renderDiscretionaryChart = () => {
+	      const rows = summary.discretionary_trends.filter((item) => trendMonths.has(item.period_month));
+	      if (rows.length === 0) return <div className="dashboard-empty-state compact">暂无数据：缺少可支配资产快照。</div>;
       const width = 720;
       const height = 220;
       const top = 24;
@@ -7818,10 +8215,10 @@ export function App() {
       const yAmount = (value: number) => top + (height - top - bottom) * (1 - value / maxAmount);
       const points = rows.map((item, index) => ({ x: xPoint(index, rows.length), y: yAmount(item.amount) }));
       const areaPath = `${linePath(points)} L ${xPoint(rows.length - 1, rows.length)} ${height - bottom} L ${xPoint(0, rows.length)} ${height - bottom} Z`;
-      return renderChartCard(
-        "可支配金额趋势",
-        "债券、现金和可支配的全球资产项。",
-        <svg className="dashboard-svg-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="可支配金额趋势">
+	      return renderChartCard(
+	        "可支配金额趋势",
+	        discretionaryScopeLabel ? `按自定义范围：${discretionaryScopeLabel}` : "按自定义范围计算。",
+	        <svg className="dashboard-svg-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="可支配金额趋势">
           {renderHorizontalGrid(width, height, top, bottom, (ratio) => chartCurrency(maxAmount * (1 - ratio)))}
           <path d={areaPath} fill="rgba(91, 114, 137, 0.16)" />
           <path className="chart-line primary" d={linePath(points)} />
@@ -7844,10 +8241,123 @@ export function App() {
             );
           })}
         </svg>,
-        "wide"
-      );
-    };
-    const renderInvestmentGroupChart = () => {
+	        "wide"
+	      );
+	    };
+	    const renderAllocationTargetGapList = () => (
+	      <div className="allocation-list">
+	        {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
+	          const category = "category" in item ? item.category : "";
+	          const amount = "amount" in item ? item.amount : item.current_amount;
+	          const percent = "percent" in item ? item.percent : item.current_percent;
+	          const target = "target_percent" in item ? item.target_percent : item.target_percent;
+	          const deviation = "deviation_percent" in item ? item.deviation_percent : item.deviation_percent;
+	          return (
+	            <div className="allocation-row" key={category}>
+	              <div className="allocation-label">
+	                <strong>{category}</strong>
+	                <span>{formatCurrency(amount, privacyMode)}</span>
+	              </div>
+	              <div className="allocation-bar" aria-label={`${category} 当前占比`}>
+	                <div className="allocation-fill" style={{ width: `${Math.max(percent * 100, 2)}%` }} />
+	              </div>
+	              <div className="allocation-metrics">
+	                <span>当前 {formatPercent(percent)}</span>
+	                <span>目标 {target === null || target === undefined ? "暂无" : formatPercent(target)}</span>
+	                <b className={(deviation ?? 0) >= 0 ? "positive" : "negative"}>
+	                  {deviation === null || deviation === undefined ? "暂无偏离" : `${deviation >= 0 ? "+" : ""}${formatPercent(deviation)}`}
+	                </b>
+	              </div>
+	            </div>
+	          );
+	        })}
+	      </div>
+	    );
+		    const renderSubAllocationDetailGroups = () => (
+		      <>
+		        {allocationTargetGroups.length === 0 ? <div className="dashboard-empty-state compact">暂无下级目标配比。</div> : allocationTargetGroups.map((group) => (
+	          <div className="dashboard-stack" key={`target-group-${group.parent_category_id}`}>
+	            <h3 className="dashboard-subtitle">{group.parent_category}目标差距</h3>
+	            <div className="allocation-list">
+	              {group.rows.map((item) => {
+	                const hasTarget = item.target_percent !== null && item.target_percent !== undefined;
+	                const deviation = item.deviation_percent ?? 0;
+	                return (
+	                  <div className="allocation-row" key={`${group.parent_category_id}-${item.category}`}>
+	                    <div className="allocation-label">
+	                      <strong>{item.category}</strong>
+	                      <span>{formatCurrency(item.amount, privacyMode)}</span>
+	                    </div>
+	                    <div className="allocation-bar" aria-label={`${group.parent_category} ${item.category} 当前占比`}>
+	                      <div className="allocation-fill" style={{ width: `${Math.max(item.percent * 100, item.amount > 0 ? 2 : 0)}%` }} />
+	                    </div>
+	                    <div className="allocation-metrics">
+	                      <span>当前 {formatPercent(item.percent)}</span>
+	                      <span>目标 {hasTarget ? formatPercent(item.target_percent ?? 0) : "暂无"}</span>
+	                      <b className={!hasTarget ? "" : deviation >= 0 ? "positive" : "negative"}>
+	                        {!hasTarget ? "未设目标" : `${deviation >= 0 ? "+" : ""}${formatPercent(deviation)}`}
+	                      </b>
+	                    </div>
+	                  </div>
+	                );
+	              })}
+	            </div>
+	          </div>
+		        ))}
+		      </>
+		    );
+		    const renderCustomAllocationDetailRatioChart = () =>
+		      renderDonutChart(
+		        summary.custom_allocation_detail_allocations ?? [],
+		        `${customAllocationDetailLabel || "自定义分类"}下级资产配比`,
+		        "只展示实际资产金额占比，不比较目标配置。"
+		      );
+		    const renderAssignedCustomPanels = (section: HealthSection) => {
+	      const rows = section === "资产配置" ? [] : dashboardCustomItemDefinitions.filter((item) => customDashboardItemEnabledInSection(item.id, section));
+	      if (rows.length === 0) return null;
+	      return (
+	        <div className="dashboard-stack custom-dashboard-panels">
+	          <h3 className="dashboard-subtitle">自定义分析点</h3>
+	          {rows.map((item) => {
+	            if (item.id === "allocation_discretionary_amount") {
+	              return (
+	                <div className="dashboard-stack" key={item.id}>
+	                  <div className="dashboard-split">
+	                    <div>
+	                      <span>{item.label}</span>
+	                      <strong>{formatCurrency(latestDiscretionaryAmount, privacyMode)}</strong>
+	                      <small>{discretionaryScopeLabel ? `按自定义范围：${discretionaryScopeLabel}` : "按自定义范围计算"}</small>
+	                    </div>
+	                  </div>
+	                  {renderDiscretionaryChart()}
+	                </div>
+	              );
+	            }
+		            if (item.id === "allocation_target_deviation_value") {
+		              return renderChartCard(
+		                item.label,
+		                hasMainAllocationTargets ? "显示当前比例、目标比例和偏离值。" : "暂无目标配比；请先设置目标资产配比。",
+		                hasMainAllocationTargets ? renderAllocationTargetGapList() : <div className="dashboard-empty-state compact">暂无目标配比。</div>,
+		                "wide"
+		              );
+	            }
+		            if (item.id === "allocation_sub_detail_ratio") {
+		              return renderCustomAllocationDetailRatioChart();
+		            }
+		            if (item.id === "allocation_sub_target_gap_chart") {
+		              return renderChartCard(
+		                item.label,
+		                "按已填写的下级目标配比，展示实际比例和目标比例的差距。",
+		                renderSubAllocationDetailGroups(),
+		                "wide"
+		              );
+		            }
+	            return null;
+	          })}
+		        </div>
+	      );
+	    };
+	    const renderInvestmentGroupChart = () => {
       const sourceRows = summary.investment_group_trends.filter((item) => trendMonths.has(item.period_month) && item.group_name !== "现金");
       const fallbackRows = investmentGroupRows.map((item) => ({ ...item, period_month: summary.snapshot_month }));
       const rows = sourceRows.length > 0 ? sourceRows : fallbackRows;
@@ -8307,25 +8817,27 @@ export function App() {
     };
     const kpiItems = [
       { label: "最新完成月份", value: summary.snapshot_month || "暂无", meta: "数据库最新 completed 月结", icon: <CheckCircle2 size={20} />, section: "总览" as HealthSection },
-      { label: "本月收入", value: formatCurrency(summary.confirmed_income, privacyMode), meta: "已确认收入", icon: <PiggyBank size={20} />, section: "收支储蓄" as HealthSection },
+      { label: "本月收入", value: formatCurrency(summary.confirmed_income, privacyMode), meta: "已确认收入", icon: <PiggyBank size={20} />, section: "收支储蓄" as HealthSection, itemId: "cashflow_gap_chart" },
       { label: "本月支出", value: formatCurrency(summary.confirmed_expense, privacyMode), meta: `支出占收入 ${formatPercent(spendUsage)}`, icon: <WalletCards size={20} />, section: "支出结构" as HealthSection },
-      { label: "储蓄金额", value: formatCurrency(summary.saving_amount, privacyMode), meta: "收入 - 支出", icon: <PiggyBank size={20} />, section: "收支储蓄" as HealthSection },
-      { label: "储蓄率", value: formatPercent(summary.saving_rate), meta: `目标 ${formatPercent(summary.target_saving_rate)}`, icon: <Target size={20} />, section: "收支储蓄" as HealthSection },
-      { label: "目标储蓄率", value: formatPercent(summary.target_saving_rate), meta: `目标金额 ${formatCurrency(summary.target_saving_amount, privacyMode)}`, icon: <Target size={20} />, section: "收支储蓄" as HealthSection },
-      { label: "资产原值", value: formatCurrency(summary.asset_gross_value, privacyMode), meta: "未扣信用卡调整", icon: <Landmark size={20} />, section: "资产配置" as HealthSection },
+      { label: "储蓄金额", value: formatCurrency(summary.saving_amount, privacyMode), meta: "收入 - 支出", icon: <PiggyBank size={20} />, section: "收支储蓄" as HealthSection, itemId: "cashflow_month_saving" },
+      { label: "储蓄率", value: formatPercent(summary.saving_rate), meta: `目标 ${formatPercent(summary.target_saving_rate)}`, icon: <Target size={20} />, section: "收支储蓄" as HealthSection, itemId: "cashflow_target_rate" },
+      { label: "目标储蓄率", value: formatPercent(summary.target_saving_rate), meta: `目标金额 ${formatCurrency(summary.target_saving_amount, privacyMode)}`, icon: <Target size={20} />, section: "收支储蓄" as HealthSection, itemId: "cashflow_target_rate" },
+      { label: "资产原值", value: formatCurrency(summary.asset_gross_value, privacyMode), meta: "未扣信用卡调整", icon: <Landmark size={20} />, section: "资产配置" as HealthSection, itemId: "allocation_current_chart" },
       { label: "信用卡净调整", value: formatCurrency(summary.credit_card_net_adjustment, privacyMode), meta: "已确认信用卡记录", icon: <WalletCards size={20} />, section: "总览" as HealthSection },
       { label: "净资产", value: formatCurrency(summary.net_worth, privacyMode), meta: `环比 ${netWorthChange >= 0 ? "+" : ""}${formatCurrency(netWorthChange, privacyMode)}`, icon: <Landmark size={20} />, section: "总览" as HealthSection },
-      { label: "本月投资买入", value: formatCurrency(summary.investment_buy, privacyMode), meta: "含手动买入和自动定投", icon: <ArrowRight size={20} />, section: "投资表现" as HealthSection },
-      { label: "本月投资卖出", value: formatCurrency(summary.investment_sell, privacyMode), meta: `已登记分红 ${formatCurrency(summary.investment_dividend, privacyMode)}`, icon: <RefreshCcw size={20} />, section: "投资表现" as HealthSection },
+      { label: "本月投资买入", value: formatCurrency(summary.investment_buy, privacyMode), meta: "含手动买入和自动定投", icon: <ArrowRight size={20} />, section: "投资表现" as HealthSection, itemId: "investment_cashflow_amounts" },
+      { label: "本月投资卖出", value: formatCurrency(summary.investment_sell, privacyMode), meta: `已登记分红 ${formatCurrency(summary.investment_dividend, privacyMode)}`, icon: <RefreshCcw size={20} />, section: "投资表现" as HealthSection, itemId: "investment_cashflow_amounts" },
       {
         label: "本月投资收益",
         value: formatCurrency(investmentGain, privacyMode),
         meta: `资金加权收益 ${monthlyXirrPeriodReturn === null ? "待计算" : formatPercent(monthlyXirrPeriodReturn)}`,
         icon: <BarChart3 size={20} />,
-        section: "投资表现" as HealthSection
+        section: "投资表现" as HealthSection,
+        itemId: "investment_weighted_return"
       }
     ];
-    const visibleKpis = kpisExpanded ? kpiItems : kpiItems.slice(0, 4);
+    const filteredKpiItems = kpiItems.filter((item) => !("itemId" in item) || !item.itemId || dashboardItemEnabled(item.itemId));
+    const visibleKpis = kpisExpanded ? filteredKpiItems : filteredKpiItems.slice(0, 4);
     const reportTemplateOptions = contentTemplates.filter((item) => item.template_type === "monthly_report");
 
     return (
@@ -8453,29 +8965,29 @@ export function App() {
             {activeHealthSection === "收支储蓄" ? (
               <div className="dashboard-stack">
                 <div className="dashboard-metric-grid">
-                  <div>
+                  {dashboardItemEnabled("cashflow_range_saving") ? <div>
                     <span>当前范围累计储蓄</span>
                     <strong>{formatCurrency(ytdSaving, privacyMode)}</strong>
                     <small>{dashboardRange}</small>
-                  </div>
-                  <div>
+                  </div> : null}
+                  {dashboardItemEnabled("cashflow_month_saving") ? <div>
                     <span>本月储蓄</span>
                     <strong>{formatCurrency(summary.saving_amount, privacyMode)}</strong>
                     <small className={savingGap >= 0 ? "positive" : "negative"}>距目标 {savingGap >= 0 ? "+" : ""}{formatCurrency(savingGap, privacyMode)}</small>
-                  </div>
-                  <div>
+                  </div> : null}
+                  {dashboardItemEnabled("cashflow_target_rate") ? <div>
                     <span>目标储蓄率</span>
                     <strong>{formatPercent(summary.target_saving_rate)}</strong>
                     <small>当前 {formatPercent(summary.saving_rate)}</small>
-                  </div>
-                  <div>
+                  </div> : null}
+                  {dashboardItemEnabled("cashflow_target_amount") ? <div>
                     <span>目标储蓄金额</span>
                     <strong>{formatCurrency(summary.target_saving_amount, privacyMode)}</strong>
                     <small>本月收入 × 目标率</small>
-                  </div>
+                  </div> : null}
                 </div>
-                {renderCashflowAreaChart()}
-                {renderSavingTargetChart()}
+                {dashboardItemEnabled("cashflow_gap_chart") ? renderCashflowAreaChart() : null}
+                {dashboardItemEnabled("saving_goal_chart") ? renderSavingTargetChart() : null}
                 <div className="dashboard-alerts">
                   <h3 className="dashboard-subtitle">异常</h3>
                   {alerts.length === 0 ? <div className="dashboard-empty-state compact">暂无异常：收入、支出、储蓄率未触发提醒。</div> : alerts.map((item) => <button key={item} onClick={() => setDashboardDetail(item)} type="button">{item}</button>)}
@@ -8486,228 +8998,208 @@ export function App() {
             {activeHealthSection === "支出结构" ? (
               <div className="dashboard-stack">
                 <div className="dashboard-split">
-                  <div>
+                  {dashboardItemEnabled("expense_category_count") ? <div>
                     <span>支出分类数</span>
                     <strong>{categoryCount}</strong>
                     <small>{expenseScopeLabel} 有金额的分类</small>
-                  </div>
-                  <div>
+                  </div> : null}
+                  {dashboardItemEnabled("expense_largest_category") ? <div>
                     <span>最大支出分类</span>
                     <strong>{topExpenseCategory?.category ?? "暂无"}</strong>
                     <small>{topExpenseCategory ? `${formatCurrency(topExpenseCategory.amount, privacyMode)}｜${formatPercent(topExpensePercent)}` : "暂无占比"}</small>
-                  </div>
+                  </div> : null}
                 </div>
-                {renderDonutChart(expenseRowsForRange, "支出分类占比", `${expenseScopeLabel}主要类别占比，完整明细在下方展开。`)}
-                {renderDeltaChart(summary.expense_categories)}
-                <h3 className="dashboard-subtitle">分类金额明细</h3>
-                {renderCollapsedCategoryRows("expenseCategories", expenseRowsForRange)}
-                <h3 className="dashboard-subtitle">年内分类累计排行</h3>
-                {renderCategoryRows("expenseYearRank", summary.expense_year_rank, false)}
-                <h3 className="dashboard-subtitle">大额异常支出</h3>
-                <div className="dashboard-table">
-                  {summary.spending_anomalies.length === 0 ? (
-                    <div className="dashboard-empty-state compact">暂无数据：未发现超过阈值的大额异常支出。</div>
-                  ) : (
-                    summary.spending_anomalies.map((item) => (
-                      <button className="dashboard-table-row" key={`${item.transaction_date}-${item.category}-${item.amount}`} onClick={() => setDashboardDetail(`${item.transaction_date}｜${item.category}｜${item.reason}`)} type="button">
-                        <strong>{item.category}</strong>
-                        <span>{item.transaction_date}</span>
-                        <span>{formatCurrency(item.amount, privacyMode)}</span>
-                        <small>{item.reason}</small>
-                      </button>
-                    ))
-                  )}
-                </div>
+                {dashboardItemEnabled("expense_category_share_chart") ? renderDonutChart(expenseRowsForRange, "支出分类占比", `${expenseScopeLabel}主要类别占比，完整明细在下方展开。`) : null}
+                {dashboardItemEnabled("expense_category_delta_chart") ? renderDeltaChart(summary.expense_categories) : null}
+                {dashboardItemEnabled("expense_category_detail") ? (
+                  <>
+                    <h3 className="dashboard-subtitle">分类金额明细</h3>
+                    {renderCollapsedCategoryRows("expenseCategories", expenseRowsForRange)}
+                  </>
+                ) : null}
+                {dashboardItemEnabled("expense_range_rank") ? (
+                  <>
+                    <h3 className="dashboard-subtitle">年内分类累计排行</h3>
+                    {renderCategoryRows("expenseYearRank", summary.expense_year_rank, false)}
+                  </>
+                ) : null}
+                {dashboardItemEnabled("expense_large_anomaly") ? (
+                  <>
+                    <h3 className="dashboard-subtitle">大额异常支出</h3>
+                    <div className="dashboard-table">
+                      {summary.spending_anomalies.length === 0 ? (
+                        <div className="dashboard-empty-state compact">暂无数据：未发现超过阈值的大额异常支出。</div>
+                      ) : (
+                        summary.spending_anomalies.map((item) => (
+                          <button className="dashboard-table-row" key={`${item.transaction_date}-${item.category}-${item.amount}`} onClick={() => setDashboardDetail(`${item.transaction_date}｜${item.category}｜${item.reason}`)} type="button">
+                            <strong>{item.category}</strong>
+                            <span>{item.transaction_date}</span>
+                            <span>{formatCurrency(item.amount, privacyMode)}</span>
+                            <small>{item.reason}</small>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : null}
               </div>
             ) : null}
 
-            {activeHealthSection === "资产配置" ? (
-              <div className="dashboard-stack">
-                <div className="dashboard-split">
-                  <div>
-                    <span>可支配总额</span>
-                    <strong>{formatCurrency(latestDiscretionaryAmount, privacyMode)}</strong>
-                    <small>债券、现金和可支配的全球资产项</small>
-                  </div>
-                  <div>
-                    <span>配置偏离提醒</span>
-                    <strong>{majorAllocationDeviationCount}</strong>
-                    <small>偏离超过 5% 的目标项</small>
-                  </div>
-                </div>
-                {renderStackedAllocationChart()}
-                {renderDiscretionaryChart()}
-                <div className="dashboard-chart-grid">
-                  {renderDonutChart(summary.asset_allocations, "当前资产配置", "各资产类别金额占比。")}
-                  {renderDonutChart(
-                    summary.us_equity_allocations,
-                    "全球资产实际拆分",
-                    allocationTargetGroups.some((group) => group.parent_category_id === "asset_cat_us_equity")
-                      ? "这里显示实际持仓占比；目标差距在下方单独展示。"
-                      : "这里只显示实际持仓占比；未设置二级目标时不显示目标差距。"
-                  )}
-                </div>
-	                {hasMainAllocationTargets ? (
-	                  <div className="allocation-list">
-	                    {(summary.asset_allocations.length ? summary.asset_allocations : summary.portfolio_targets).map((item) => {
-	                      const category = "category" in item ? item.category : "";
-	                      const amount = "amount" in item ? item.amount : item.current_amount;
-	                      const percent = "percent" in item ? item.percent : item.current_percent;
-	                      const target = "target_percent" in item ? item.target_percent : item.target_percent;
-	                      const deviation = "deviation_percent" in item ? item.deviation_percent : item.deviation_percent;
-	                      return (
-	                        <div className="allocation-row" key={category}>
-	                          <div className="allocation-label">
-	                            <strong>{category}</strong>
-	                            <span>{formatCurrency(amount, privacyMode)}</span>
-	                          </div>
-	                          <div className="allocation-bar" aria-label={`${category} 当前占比`}>
-	                            <div className="allocation-fill" style={{ width: `${Math.max(percent * 100, 2)}%` }} />
-	                          </div>
-	                          <div className="allocation-metrics">
-	                            <span>当前 {formatPercent(percent)}</span>
-	                            <span>目标 {target === null || target === undefined ? "暂无" : formatPercent(target)}</span>
-	                            <b className={(deviation ?? 0) >= 0 ? "positive" : "negative"}>
-	                              {deviation === null || deviation === undefined ? "暂无偏离" : `${deviation >= 0 ? "+" : ""}${formatPercent(deviation)}`}
-	                            </b>
-	                          </div>
-	                        </div>
-	                      );
-	                    })}
+	            {activeHealthSection === "资产配置" ? (
+	              <div className="dashboard-stack">
+	                {customDashboardItemEnabledInSection("allocation_discretionary_amount", "资产配置") ? (
+	                  <div className="dashboard-split">
+	                    <div>
+	                      <span>可支配总额</span>
+	                      <strong>{formatCurrency(latestDiscretionaryAmount, privacyMode)}</strong>
+	                      <small>{discretionaryScopeLabel ? `按自定义范围：${discretionaryScopeLabel}` : "按自定义范围计算"}</small>
+	                    </div>
 	                  </div>
 	                ) : null}
-                {allocationTargetGroups.length > 0 ? allocationTargetGroups.map((group) => (
-                  <div className="dashboard-stack" key={`target-group-${group.parent_category_id}`}>
-                    <h3 className="dashboard-subtitle">{group.parent_category}目标差距</h3>
-                    <div className="allocation-list">
-                      {group.rows.map((item) => {
-                        const hasTarget = item.target_percent !== null && item.target_percent !== undefined;
-                        const deviation = item.deviation_percent ?? 0;
-                        return (
-                          <div className="allocation-row" key={`${group.parent_category_id}-${item.category}`}>
-                            <div className="allocation-label">
-                              <strong>{item.category}</strong>
-                              <span>{formatCurrency(item.amount, privacyMode)}</span>
-                            </div>
-                            <div className="allocation-bar" aria-label={`${group.parent_category} ${item.category} 当前占比`}>
-                              <div className="allocation-fill" style={{ width: `${Math.max(item.percent * 100, item.amount > 0 ? 2 : 0)}%` }} />
-                            </div>
-                            <div className="allocation-metrics">
-                              <span>当前 {formatPercent(item.percent)}</span>
-                              <span>目标 {hasTarget ? formatPercent(item.target_percent ?? 0) : "暂无"}</span>
-                              <b className={!hasTarget ? "" : deviation >= 0 ? "positive" : "negative"}>
-                                {!hasTarget ? "未设目标" : `${deviation >= 0 ? "+" : ""}${formatPercent(deviation)}`}
-                              </b>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                {dashboardItemEnabled("allocation_trend_chart") ? renderStackedAllocationChart() : null}
+                {customDashboardItemEnabledInSection("allocation_discretionary_amount", "资产配置") ? renderDiscretionaryChart() : null}
+                {dashboardItemEnabled("allocation_current_chart") ? (
+                  <div className="dashboard-chart-grid">
+                    {renderDonutChart(summary.asset_allocations, "当前资产配置", "各资产类别金额占比。")}
                   </div>
-                )) : null}
+                ) : null}
+			                {customDashboardItemEnabledInSection("allocation_target_deviation_value", "资产配置")
+			                  ? renderChartCard(
+			                      "目标资产配置偏离图表",
+			                      hasMainAllocationTargets ? "按当前实际配置和目标配置计算；显示当前比例、目标比例和偏离值。" : "暂无目标配比；请先在偏好设置里填写目标资产配比。",
+			                      hasMainAllocationTargets ? renderAllocationTargetGapList() : <div className="dashboard-empty-state compact">暂无目标配比。</div>,
+			                      "wide"
+		                    )
+		                  : null}
+                {customDashboardItemEnabledInSection("allocation_sub_detail_ratio", "资产配置") ? renderCustomAllocationDetailRatioChart() : null}
+                {customDashboardItemEnabledInSection("allocation_sub_target_gap_chart", "资产配置") ? renderChartCard(
+                  "二级 / 三级分类目标差距",
+                  "按已填写的下级目标配比，展示实际比例和目标比例的差距。",
+                  renderSubAllocationDetailGroups(),
+                  "wide"
+                ) : null}
               </div>
             ) : null}
 
             {activeHealthSection === "投资表现" ? (
               <div className="dashboard-stack">
                 <div className="dashboard-split">
-                  <div>
+                  {dashboardItemEnabled("investment_cashflow_amounts") ? <div>
                     <span>买入 / 卖出 / 分红</span>
                     <strong>{formatCurrency(summary.investment_buy, privacyMode)}</strong>
                     <small>
                       卖出 {formatCurrency(summary.investment_sell, privacyMode)}，现金分红 {formatCurrency(summary.investment_dividend, privacyMode)}
                     </small>
-                  </div>
-                  <div>
+                  </div> : null}
+                  {dashboardItemEnabled("investment_weighted_return") ? <div>
                     <span>本月资金加权收益</span>
                     <strong>{monthlyXirrPeriodReturn === null ? "待计算" : formatPercent(monthlyXirrPeriodReturn)}</strong>
                     <small>{xirrDetail}</small>
-                  </div>
+                  </div> : null}
                 </div>
                 <div className="dashboard-split">
-                  <div>
+                  {dashboardItemEnabled("investment_asset_return_chart") ? <div>
                     <span>本月收益金额</span>
                     <strong>{formatCurrency(investmentGain, privacyMode)}</strong>
                     <small>月末市值 - 月初市值 - 买入 + 卖出；现金分红另列</small>
-                  </div>
-	                  <div>
+                  </div> : null}
+	                  {dashboardItemEnabled("investment_non_cash_group_count") ? <div>
 	                    <span>非现金资产组</span>
 	                    <strong>{availableReturnGroups.length}</strong>
 	                    <small>只展示有持仓、现金流或收益数据的资产组</small>
-	                  </div>
+	                  </div> : null}
                 </div>
-                {renderInvestmentGroupChart()}
-                {renderReturnWheelChart()}
-                <h3 className="dashboard-subtitle">历史月度收益与资金加权收益</h3>
-                {renderInvestmentMonthlyChart()}
-                <h3 className="dashboard-subtitle">资产组收益 / 区间收益率</h3>
-                <div className="dashboard-table">
-                  {investmentGroupRows.length === 0 ? (
-                    <div className="dashboard-empty-state compact">暂无数据：缺少分组收益数据。</div>
-                  ) : (
-                    investmentGroupRows.map((item) => (
-                      <button
-                        className="dashboard-table-row"
-                        key={item.group_name}
-                        type="button"
-                        {...tooltipEvents(
-                          item.group_name,
-                          `收益 ${formatCurrency(item.gain, privacyMode)}｜收益率 ${item.return_rate === null || item.return_rate === undefined ? "待计算" : formatPercent(item.return_rate)}｜月末 ${formatCurrency(item.ending_value, privacyMode)}`
-                        )}
-                      >
-                        <strong>{item.group_name}</strong>
-                        <span>收益 {formatCurrency(item.gain, privacyMode)}</span>
-                        <span>{item.return_rate === null || item.return_rate === undefined ? "收益率待算" : formatPercent(item.return_rate)}</span>
-                        <small>月末 {formatCurrency(item.ending_value, privacyMode)}</small>
-                      </button>
-                    ))
-                  )}
-                </div>
+                {dashboardItemEnabled("investment_asset_return_chart") ? renderInvestmentGroupChart() : null}
+                {dashboardItemEnabled("investment_group_perspective_chart") ? renderReturnWheelChart() : null}
+                {dashboardItemEnabled("investment_return_xirr_chart") ? (
+                  <>
+                    <h3 className="dashboard-subtitle">历史月度收益与资金加权收益</h3>
+                    {renderInvestmentMonthlyChart()}
+                  </>
+                ) : null}
+                {dashboardItemEnabled("investment_group_return_table") ? (
+                  <>
+                    <h3 className="dashboard-subtitle">资产组收益 / 区间收益率</h3>
+                    <div className="dashboard-table">
+                      {investmentGroupRows.length === 0 ? (
+                        <div className="dashboard-empty-state compact">暂无数据：缺少分组收益数据。</div>
+                      ) : (
+                        investmentGroupRows.map((item) => (
+                          <button
+                            className="dashboard-table-row"
+                            key={item.group_name}
+                            type="button"
+                            {...tooltipEvents(
+                              item.group_name,
+                              `收益 ${formatCurrency(item.gain, privacyMode)}｜收益率 ${item.return_rate === null || item.return_rate === undefined ? "待计算" : formatPercent(item.return_rate)}｜月末 ${formatCurrency(item.ending_value, privacyMode)}`
+                            )}
+                          >
+                            <strong>{item.group_name}</strong>
+                            <span>收益 {formatCurrency(item.gain, privacyMode)}</span>
+                            <span>{item.return_rate === null || item.return_rate === undefined ? "收益率待算" : formatPercent(item.return_rate)}</span>
+                            <small>月末 {formatCurrency(item.ending_value, privacyMode)}</small>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : null}
               </div>
             ) : null}
 
             {activeHealthSection === "月报" ? (
               <div className="dashboard-stack">
-                <div className="report-template-bar">
-                  <label>
-                    使用模板
-                    <select value={reportTemplateId} onChange={(event) => setReportTemplateId(event.target.value)}>
-                      <option value="">默认月报模板</option>
-                      {reportTemplateOptions.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.name}{template.is_default ? "（默认）" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button className="primary-button compact" onClick={() => renderMonthlyReportWithTemplate()} type="button">
-                    <Eye size={15} />
-                    预览生成内容
-                  </button>
-                  <button className="secondary-button compact" onClick={() => {
-                    const template = reportTemplateOptions.find((item) => item.id === reportTemplateId) ?? reportTemplateOptions.find((item) => item.is_default);
-                    if (template) applyTemplateToDraft(template);
-                    setView("contentTemplates");
-                  }} type="button">
-                    <Edit3 size={15} />
-                    编辑模板
-                  </button>
-                </div>
-                {reportPreview ? (
+                {dashboardItemEnabled("report_template_picker") || dashboardItemEnabled("report_content_preview") ? (
+                  <div className="report-template-bar">
+                    {dashboardItemEnabled("report_template_picker") ? (
+                      <label>
+                        使用模板
+                        <select value={reportTemplateId} onChange={(event) => setReportTemplateId(event.target.value)}>
+                          <option value="">默认月报模板</option>
+                          {reportTemplateOptions.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}{template.is_default ? "（默认）" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    {dashboardItemEnabled("report_content_preview") ? (
+                      <button className="primary-button compact" onClick={() => renderMonthlyReportWithTemplate()} type="button">
+                        <Eye size={15} />
+                        预览生成内容
+                      </button>
+                    ) : null}
+                    <button className="secondary-button compact" onClick={() => {
+                      const template = reportTemplateOptions.find((item) => item.id === reportTemplateId) ?? reportTemplateOptions.find((item) => item.is_default);
+                      if (template) applyTemplateToDraft(template);
+                      setView("contentTemplates");
+                    }} type="button">
+                      <Edit3 size={15} />
+                      编辑模板
+                    </button>
+                  </div>
+                ) : null}
+                {dashboardItemEnabled("report_content_preview") && reportPreview ? (
                   <div className="dashboard-inline-detail">
                     <span>当前模板</span>
                     <strong>{reportPreview.template_name}｜{reportPreview.period_month}</strong>
                   </div>
                 ) : null}
-                <div className="report-preview" dangerouslySetInnerHTML={{ __html: (reportPreview?.html ?? summary.monthly_report_html) || "<p>暂无数据：缺少月报 HTML。</p>" }} />
-                <div className="report-actions">
-                  <button className="secondary-button compact" onClick={() => setDashboardDetail("导出 HTML 将使用当前月报 HTML 预览内容。")} type="button">导出 HTML</button>
-                  <button className="secondary-button compact" disabled type="button">导出 PDF 后续接入</button>
-                  <button className="secondary-button compact" disabled type="button">导出 Excel 后续接入</button>
-                </div>
-              </div>
-            ) : null}
-          </article>
+                {dashboardItemEnabled("report_content_preview") ? (
+                  <div className="report-preview" dangerouslySetInnerHTML={{ __html: (reportPreview?.html ?? summary.monthly_report_html) || "<p>暂无数据：缺少月报 HTML。</p>" }} />
+                ) : null}
+                {dashboardItemEnabled("report_export_actions") ? (
+                  <div className="report-actions">
+                    <button className="secondary-button compact" onClick={() => setDashboardDetail("导出 HTML 将使用当前月报 HTML 预览内容。")} type="button">导出 HTML</button>
+                    <button className="secondary-button compact" disabled type="button">导出 PDF 后续接入</button>
+                    <button className="secondary-button compact" disabled type="button">导出 Excel 后续接入</button>
+                  </div>
+	                ) : null}
+	              </div>
+	            ) : null}
+	            {renderAssignedCustomPanels(activeHealthSection)}
+	          </article>
 
           <aside className="panel dashboard-side-panel compact-rail">
             <div className="dashboard-module-list">
