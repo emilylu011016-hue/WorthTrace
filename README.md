@@ -89,7 +89,7 @@ macOS Intel：适合旧款 Intel Mac
 Windows 用户下载 Windows 安装包：
 
 ```text
-Windows installer / setup
+Windows setup.exe
 ```
 
 数据只保存在用户自己的电脑本地。第一次打开时，如果本机没有旧数据库，会进入初始化流程。

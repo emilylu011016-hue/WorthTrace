@@ -20,15 +20,15 @@ jobs:
           - label: "macOS Apple Silicon"
             platform: "macos-14"
             rust_target: "aarch64-apple-darwin"
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles app,dmg"
           - label: "macOS Intel"
             platform: "macos-13"
             rust_target: "x86_64-apple-darwin"
-            args: "--target x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --bundles app,dmg"
           - label: "Windows"
             platform: "windows-latest"
             rust_target: ""
-            args: ""
+            args: "--bundles nsis"
 
     steps:
       - name: Checkout repository
@@ -53,6 +53,11 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Install Windows installer tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis -y
 
       - name: Build and upload app
         uses: tauri-apps/tauri-action@v0
