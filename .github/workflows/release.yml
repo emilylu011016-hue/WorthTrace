@@ -1,0 +1,74 @@
+name: Build release apps
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: "macOS Apple Silicon"
+            platform: "macos-14"
+            rust_target: "aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin"
+          - label: "macOS Intel"
+            platform: "macos-13"
+            rust_target: "x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin"
+          - label: "Windows"
+            platform: "windows-latest"
+            rust_target: ""
+            args: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust build target
+        if: matrix.rust_target != ''
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Read app version
+        shell: bash
+        run: echo "APP_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v${{ env.APP_VERSION }}
+          releaseName: WorthTrace v${{ env.APP_VERSION }}
+          releaseBody: |
+            WorthTrace desktop release.
+
+            - macOS Apple Silicon: for newer Macs with M-series chips.
+            - macOS Intel: for older Intel Macs.
+            - Windows: for Windows users.
+
+            The app stores data locally on each user's computer.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

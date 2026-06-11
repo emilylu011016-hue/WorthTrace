@@ -71,6 +71,29 @@ npm install
 npm run tauri:dev
 ```
 
+## 用户下载
+
+普通用户不需要下载源码。发布后请进入 GitHub 仓库的 Releases 页面：
+
+```text
+Releases → WorthTrace v版本号
+```
+
+Mac 用户下载对应芯片版本：
+
+```text
+macOS Apple Silicon：适合 M1/M2/M3/M4 等新款 Mac
+macOS Intel：适合旧款 Intel Mac
+```
+
+Windows 用户下载 Windows 安装包：
+
+```text
+Windows installer / setup
+```
+
+数据只保存在用户自己的电脑本地。第一次打开时，如果本机没有旧数据库，会进入初始化流程。
+
 ## 数据说明
 
 App 启动时会在系统应用数据目录创建本地 SQLite 数据库：
