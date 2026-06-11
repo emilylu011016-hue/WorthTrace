@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT_DIR="/Users/emilylu/Documents/Codex/financial_planning "
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DEMO_DIR="${PROJECT_DIR}/backups/demo-databases"
 WORK_DB="${DEMO_DIR}/monthly_update_demo.sqlite3"
 DASHBOARD_DB="${DEMO_DIR}/dashboard_demo.sqlite3"

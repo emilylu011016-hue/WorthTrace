@@ -6,7 +6,7 @@
 
 - App 版本：1.0.0
 - 标记：V1
-- 维护目录：`/Users/emilylu/Documents/Codex/financial_planning `
+- 维护目录：`<project-root>`
 
 ## 代码来源
 

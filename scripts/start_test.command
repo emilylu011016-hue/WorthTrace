@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT_DIR="/Users/emilylu/Documents/Codex/financial_planning "
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REAL_DB="$HOME/Library/Application Support/com.emilylu.financial-planning/financial_planning.sqlite3"
 TEST_DIR="${PROJECT_DIR}/backups/test-databases"
 WORK_DB="${TEST_DIR}/monthly_update_test.sqlite3"

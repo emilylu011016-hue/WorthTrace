@@ -6,9 +6,9 @@
 
 项目主文件夹：
 
-`/Users/emilylu/Documents/Codex/financial_planning `
+`<project-root>`
 
-这里放的是钱迹WorthTrace 的源码、脚本、文档、图标、测试库和 demo 库。
+这里放的是钱迹WorthTrace 的源码、脚本、文档和图标。测试库、demo 库和备份不上传到 GitHub。
 
 ## 不在项目文件夹里的重要东西
 
@@ -18,15 +18,15 @@
 
 用户目录里的正式 App 副本：
 
-`/Users/emilylu/Applications/钱迹WorthTrace.app`
+`~/Applications/钱迹WorthTrace.app`
 
 测试 App：
 
-`/Users/emilylu/Applications/钱迹WorthTrace 测试版.app`
+`~/Applications/钱迹WorthTrace 测试版.app`
 
 正式数据库：
 
-`/Users/emilylu/Library/Application Support/com.emilylu.financial-planning/financial_planning.sqlite3`
+`~/Library/Application Support/com.emilylu.financial-planning/financial_planning.sqlite3`
 
 说明：正式数据库不放在项目文件夹里，这是 macOS App 的正常数据位置。
 
@@ -144,19 +144,19 @@ macOS 自动生成的文件夹显示配置。已经删除。
 
 之前的品牌探索、宣传视频、截图和 demo 素材。已按要求删除。当前正式品牌资料已整理到 `brand/`。
 
-`/Users/emilylu/Documents/Codex/financial-planning-v2.0.0.bundle`
+`<archive-folder>/financial-planning-v2.0.0.bundle`
 
 旧 Git 打包快照。已删除。
 
-`/Users/emilylu/Documents/Codex/financial-planning-v2.0.0.zip`
+`<archive-folder>/financial-planning-v2.0.0.zip`
 
 旧压缩包。已删除。
 
-`/Users/emilylu/Documents/Codex/financial-planning-demo-v2.0.0.bundle`
+`<archive-folder>/financial-planning-demo-v2.0.0.bundle`
 
 旧 demo Git 打包快照。已删除。
 
-`/Users/emilylu/Documents/Codex/financial-planning-demo-v2.0.0.zip`
+`<archive-folder>/financial-planning-demo-v2.0.0.zip`
 
 旧 demo 压缩包。已删除。
 

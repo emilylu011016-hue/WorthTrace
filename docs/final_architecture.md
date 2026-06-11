@@ -4,7 +4,7 @@
 
 - The production SQLite database is the single source of truth.
 - Production database path:
-  `/Users/emilylu/Library/Application Support/com.emilylu.financial-planning/financial_planning.sqlite3`
+  `~/Library/Application Support/com.emilylu.financial-planning/financial_planning.sqlite3`
 - Historical data is loaded only through `2026-04`.
 - `2026-05` is not preloaded. It must be entered by the user through the monthly update flow.
 - Shark CSV is used for income and expense records.
@@ -85,4 +85,3 @@ One SQLite file, separated by tables:
   - Numbers-style asset total.
 - `scripts/export_db_check.py` exports the verification workbook.
 - Historical Shark CSV import scripts are not part of the final flow.
-
