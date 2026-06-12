@@ -8,18 +8,28 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
-<body>
+<body class="theme-champagne">
   <main class="mobile-shell">
     <header class="topbar">
       <div>
         <p class="eyebrow">钱迹 WorthTrace</p>
         <h1 id="pageTitle">今天</h1>
       </div>
-      <button class="icon-button" id="syncButton" type="button" aria-label="同步状态">
-        <span id="syncDot"></span>
-        <b id="syncCount">0</b>
-      </button>
+      <div class="top-actions" aria-label="全局操作">
+        <button class="round-button" id="privacyButton" type="button" aria-label="隐藏金额">隐</button>
+        <button class="round-button" id="themeButton" type="button" aria-label="风格设置">风</button>
+        <button class="sync-button" id="syncButton" type="button" aria-label="同步状态">
+          <span id="syncDot"></span>
+          <b id="syncCount">0</b>
+        </button>
+      </div>
     </header>
+
+    <section class="theme-panel" id="themePanel" hidden>
+      <button class="theme-choice active" data-theme="champagne" type="button"><i></i><span>香槟</span></button>
+      <button class="theme-choice" data-theme="sage" type="button"><i></i><span>鼠尾草</span></button>
+      <button class="theme-choice" data-theme="graphite" type="button"><i></i><span>石墨</span></button>
+    </section>
 
     <section class="offline-banner" id="offlineBanner" hidden>
       <strong>离线模式</strong>
@@ -37,35 +47,45 @@
     <section class="view active" data-view="home">
       <article class="hero-card">
         <p>扣除信用卡后的净资产</p>
-        <strong>CNY 244,229.82</strong>
+        <strong class="money" data-value="CNY 244,229.82">CNY 244,229.82</strong>
         <div class="metric-grid">
-          <span><b>14,325</b>本月支出</span>
+          <span><b class="money" data-value="14,325">14,325</b>本月支出</span>
           <span><b>31.4%</b>储蓄率</span>
           <span><b>7.6%</b>XIRR</span>
         </div>
       </article>
 
-      <div class="quick-actions">
-        <button class="primary" data-nav="book" type="button">+ 记一笔支出</button>
-        <button data-nav="book" type="button">+ 记一笔收入</button>
+      <div class="overview-grid">
+        <article><span>本月收入</span><b class="money" data-value="22,376">22,376</b></article>
+        <article><span>储蓄金额</span><b class="money" data-value="8,051">8,051</b></article>
+        <article><span>资产偏离</span><b>2 项</b></article>
+        <article><span>待同步</span><b id="homePendingCount">0 条</b></article>
       </div>
 
-      <h2 class="section-heading">本月提醒</h2>
+      <div class="quick-actions">
+        <button class="primary" data-nav="book" data-book-type="expense" type="button">+ 记支出</button>
+        <button data-nav="book" data-book-type="income" type="button">+ 记收入</button>
+      </div>
+
+      <div class="section-title">
+        <h2>本月提醒</h2>
+        <span>桌面看板口径</span>
+      </div>
       <div class="list">
-        <button class="list-row" data-nav="monthend" type="button">
+        <button class="list-row" type="button">
           <i class="tile gold"></i>
-          <span><b>6 月 30 日更新当月资产</b><small>收支已由日常记账生成</small></span>
-          <em>进入</em>
+          <span><b>当前已经更新到 2026 年 5 月</b><small>手机端后续会读取桌面发布库的最新快照。</small></span>
+          <em>状态</em>
         </button>
-        <button class="list-row" data-nav="wallet" type="button">
+        <button class="list-row" data-nav="cashflow" type="button">
           <i class="tile green"></i>
-          <span><b>全球资产高于目标</b><small>当前 49.8%，目标 45%</small></span>
+          <span><b>已录入 2025 年 12 月到 2026 年 5 月</b><small>手机展示为趋势摘要，不替代桌面完整看板。</small></span>
           <em>查看</em>
         </button>
-        <button class="list-row" type="button">
+        <button class="list-row" data-nav="allocation" type="button">
           <i class="tile rose"></i>
-          <span><b>2 条支出待确认</b><small>同步后处理重复或退款</small></span>
-          <em>需同步</em>
+          <span><b>2026 年 6 月 30 日更新当月内容</b><small>收支来自实时记账，月底只补资产和信用卡。</small></span>
+          <em>进入</em>
         </button>
       </div>
     </section>
@@ -82,25 +102,12 @@
           <button data-type="income" type="button">收入</button>
         </div>
 
-        <label class="field">
+        <label class="field category-field">
           <span>分类</span>
-          <select id="categoryInput">
-            <option>餐饮</option>
-            <option>交通</option>
-            <option>购物</option>
-            <option>工资</option>
-            <option>投资收入</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>账户</span>
-          <select id="accountInput">
-            <option>招商信用卡</option>
-            <option>银行卡</option>
-            <option>支付宝</option>
-            <option>微信</option>
-          </select>
+          <div>
+            <select id="categoryInput"></select>
+            <button id="addCategoryButton" type="button">新增分类</button>
+          </div>
         </label>
 
         <label class="field">
@@ -116,14 +123,47 @@
         <button class="save-button" type="submit">保存这一笔</button>
       </form>
 
-      <h2 class="section-heading">手机本地最近记录</h2>
+      <div class="section-title">
+        <h2>分类快捷入口</h2>
+        <span id="categoryHint">支出分类</span>
+      </div>
+      <div class="category-grid" id="categoryGrid"></div>
+
+      <div class="section-title">
+        <h2>手机本地最近记录</h2>
+        <span>IndexedDB</span>
+      </div>
       <div class="list" id="localRecords"></div>
     </section>
 
-    <section class="view wallet-view" data-view="wallet">
+    <section class="view" data-view="cashflow">
+      <article class="hero-card compact">
+        <p>收支储蓄</p>
+        <strong>31.4%</strong>
+        <div class="metric-grid">
+          <span><b class="money" data-value="22,376">22,376</b>收入</span>
+          <span><b class="money" data-value="14,325">14,325</b>支出</span>
+          <span><b class="money" data-value="8,051">8,051</b>储蓄</span>
+        </div>
+      </article>
+
+      <div class="chart-card">
+        <div class="bar-row"><span>餐饮</span><i style="--w: 74%"></i><b class="money" data-value="3,260">3,260</b></div>
+        <div class="bar-row"><span>旅游</span><i style="--w: 62%"></i><b class="money" data-value="2,730">2,730</b></div>
+        <div class="bar-row"><span>居住</span><i style="--w: 46%"></i><b class="money" data-value="2,040">2,040</b></div>
+        <div class="bar-row"><span>交通</span><i style="--w: 28%"></i><b class="money" data-value="1,220">1,220</b></div>
+      </div>
+
+      <div class="list">
+        <div class="list-row static"><i class="tile green"></i><span><b>储蓄目标达成</b><small>目标储蓄率 30%，当前 31.4%。</small></span><em>达成</em></div>
+        <div class="list-row static"><i class="tile gold"></i><span><b>大额异常支出</b><small>同步后从桌面规则读取异常明细。</small></span><em>需同步</em></div>
+      </div>
+    </section>
+
+    <section class="view" data-view="allocation">
       <article class="wallet-hero">
-        <p>本月预计资产总额</p>
-        <strong>CNY 244,229.82</strong>
+        <p>资产配置</p>
+        <strong class="money" data-value="CNY 244,229.82">CNY 244,229.82</strong>
         <div class="ring" aria-hidden="true"></div>
         <div class="summary-strip">
           <span>现金 21%</span>
@@ -133,17 +173,14 @@
         </div>
       </article>
 
-      <h2 class="section-heading">资产卡</h2>
       <div class="wallet-stack">
-        <article class="asset-card gold"><span>全球资产</span><strong>CNY 127,771.57</strong><small>美股 / 港股 / 新兴市场</small></article>
-        <article class="asset-card sage"><span>现金</span><strong>CNY 55,719.19</strong><small>银行 / 支付账户 / 货币现金</small></article>
-        <article class="asset-card blue"><span>债券</span><strong>CNY 35,049.26</strong><small>短债 / 纯债 / 国债</small></article>
+        <article class="asset-card gold"><span>全球资产</span><strong class="money" data-value="CNY 127,771.57">CNY 127,771.57</strong><small>美股 / 港股 / 新兴市场</small></article>
+        <article class="asset-card sage"><span>现金</span><strong class="money" data-value="CNY 55,719.19">CNY 55,719.19</strong><small>银行 / 支付账户 / 货币现金</small></article>
+        <article class="asset-card blue"><span>债券</span><strong class="money" data-value="CNY 35,049.26">CNY 35,049.26</strong><small>短债 / 纯债 / 国债</small></article>
       </div>
-    </section>
 
-    <section class="view" data-view="monthend">
-      <article class="monthend-card">
-        <p>本月收支来自实时记账</p>
+      <div class="monthend-card">
+        <p>月底轻更新</p>
         <strong>只补资产</strong>
         <div class="status-list">
           <span><b>1</b>确认本月记账汇总<em>需同步后完成</em></span>
@@ -151,20 +188,14 @@
           <span><b>3</b>补信用卡已出 / 未出<em>V1.1 离线草稿</em></span>
           <span><b>4</b>生成月报<em>需电脑端完成</em></span>
         </div>
-      </article>
-
-      <h2 class="section-heading">离线状态不可完成</h2>
-      <div class="list">
-        <div class="list-row static"><i class="tile rose"></i><span><b>生成月报</b><small>需要电脑数据库校验、XIRR 和汇率锁定。</small></span><em>需同步</em></div>
-        <div class="list-row static"><i class="tile gold"></i><span><b>正式更新看板</b><small>看板发布库必须由电脑端写入。</small></span><em>需同步</em></div>
       </div>
     </section>
 
     <nav class="bottom-nav" aria-label="底部导航">
       <button class="active" data-nav="home" type="button">首页</button>
       <button data-nav="book" type="button">记账</button>
-      <button data-nav="wallet" type="button">资产</button>
-      <button data-nav="monthend" type="button">月末</button>
+      <button data-nav="cashflow" type="button">收支</button>
+      <button data-nav="allocation" type="button">资产</button>
     </nav>
   </main>
 

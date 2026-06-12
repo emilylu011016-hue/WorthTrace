@@ -1,12 +1,24 @@
 const DB_NAME = "worthtrace_mobile_v1";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
+const SETTINGS_KEY = "worthtrace_mobile_settings_v1";
+const CUSTOM_CATEGORIES_KEY = "worthtrace_mobile_custom_categories_v1";
+
+const baseCategories = {
+  expense: ["餐饮", "交通", "购物", "居住", "日用", "医疗", "娱乐", "旅行", "人情", "学习", "运动", "宠物", "保险", "税费", "其他支出"],
+  income: ["工资", "奖金", "副业", "投资收益", "分红", "利息", "报销", "退款", "红包", "租金", "其他收入"]
+};
+
+const settings = readSettings();
+const customCategories = readCustomCategories();
 
 const state = {
   view: "home",
   type: "expense",
   records: [],
-  online: navigator.onLine
+  online: navigator.onLine,
+  privacy: settings.privacy,
+  theme: settings.theme
 };
 
 const pageTitle = document.querySelector("#pageTitle");
@@ -21,24 +33,60 @@ const bookForm = document.querySelector("#bookForm");
 const dateInput = document.querySelector("#dateInput");
 const amountInput = document.querySelector("#amountInput");
 const categoryInput = document.querySelector("#categoryInput");
-const accountInput = document.querySelector("#accountInput");
 const noteInput = document.querySelector("#noteInput");
 const syncDialog = document.querySelector("#syncDialog");
 const syncDialogText = document.querySelector("#syncDialogText");
+const privacyButton = document.querySelector("#privacyButton");
+const themeButton = document.querySelector("#themeButton");
+const themePanel = document.querySelector("#themePanel");
+const categoryGrid = document.querySelector("#categoryGrid");
+const categoryHint = document.querySelector("#categoryHint");
+const homePendingCount = document.querySelector("#homePendingCount");
 
 dateInput.value = new Date().toISOString().slice(0, 10);
+applyTheme();
+renderCategoryOptions();
 
 document.querySelectorAll("[data-nav]").forEach((button) => {
-  button.addEventListener("click", () => navigate(button.dataset.nav));
+  button.addEventListener("click", () => {
+    if (button.dataset.bookType) setBookType(button.dataset.bookType);
+    navigate(button.dataset.nav);
+  });
 });
 
 document.querySelectorAll(".segmented [data-type]").forEach((button) => {
+  button.addEventListener("click", () => setBookType(button.dataset.type));
+});
+
+document.querySelectorAll(".theme-choice").forEach((button) => {
   button.addEventListener("click", () => {
-    state.type = button.dataset.type;
-    document.querySelectorAll(".segmented [data-type]").forEach((item) => {
-      item.classList.toggle("active", item === button);
-    });
+    state.theme = button.dataset.theme;
+    themePanel.hidden = true;
+    writeSettings();
+    applyTheme();
   });
+});
+
+privacyButton.addEventListener("click", () => {
+  state.privacy = !state.privacy;
+  writeSettings();
+  render();
+});
+
+themeButton.addEventListener("click", () => {
+  themePanel.hidden = !themePanel.hidden;
+});
+
+document.querySelector("#addCategoryButton").addEventListener("click", () => {
+  const value = window.prompt(`新增${state.type === "income" ? "收入" : "支出"}分类名称`);
+  const name = value?.trim();
+  if (!name) return;
+  const list = categoriesForType(state.type);
+  if (!list.includes(name)) {
+    customCategories[state.type].push(name);
+    writeCustomCategories();
+  }
+  renderCategoryOptions(name);
 });
 
 bookForm.addEventListener("submit", async (event) => {
@@ -53,12 +101,11 @@ bookForm.addEventListener("submit", async (event) => {
     local_id: crypto.randomUUID(),
     server_id: null,
     operation: "create",
-    sync_status: state.online ? "pending" : "pending",
+    sync_status: "pending",
     transaction_type: state.type,
     amount,
     currency: "CNY",
     category: categoryInput.value,
-    account: accountInput.value,
     transaction_date: dateInput.value,
     note: noteInput.value.trim(),
     created_at: now,
@@ -89,9 +136,7 @@ document.querySelector("#mockSyncButton").addEventListener("click", async () => 
 window.addEventListener("online", () => {
   state.online = true;
   render();
-  if (pendingRecords().length > 0) {
-    showSyncDialog();
-  }
+  if (pendingRecords().length > 0) showSyncDialog();
 });
 
 window.addEventListener("offline", () => {
@@ -117,9 +162,36 @@ function navigate(view) {
   pageTitle.textContent = {
     home: "今天",
     book: "记一笔",
-    wallet: "资产",
-    monthend: "月末"
+    cashflow: "收支",
+    allocation: "资产"
   }[view] || "今天";
+}
+
+function setBookType(type) {
+  state.type = type;
+  document.querySelectorAll(".segmented [data-type]").forEach((item) => {
+    item.classList.toggle("active", item.dataset.type === type);
+  });
+  renderCategoryOptions();
+}
+
+function categoriesForType(type) {
+  return [...baseCategories[type], ...customCategories[type]];
+}
+
+function renderCategoryOptions(selected = categoryInput.value) {
+  const categories = categoriesForType(state.type);
+  categoryInput.innerHTML = categories.map((category) => `<option>${escapeHtml(category)}</option>`).join("");
+  categoryInput.value = categories.includes(selected) ? selected : categories[0];
+  categoryHint.textContent = state.type === "income" ? "收入分类" : "支出分类";
+  categoryGrid.innerHTML = categories.slice(0, 12).map((category) => (
+    `<button type="button" data-category="${escapeHtml(category)}">${escapeHtml(category)}</button>`
+  )).join("");
+  categoryGrid.querySelectorAll("[data-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      categoryInput.value = button.dataset.category;
+    });
+  });
 }
 
 function pendingRecords() {
@@ -129,6 +201,7 @@ function pendingRecords() {
 function render() {
   const pending = pendingRecords();
   syncCount.textContent = String(pending.length);
+  homePendingCount.textContent = `${pending.length} 条`;
   syncDot.classList.toggle("offline", !state.online);
   offlineBanner.hidden = state.online;
   syncCard.hidden = pending.length === 0;
@@ -136,6 +209,11 @@ function render() {
   syncCardText.textContent = state.online
     ? "已检测到网络。下一步会连接电脑本地服务。"
     : "离线记录会先保存在手机，连上电脑后同步。";
+  privacyButton.textContent = state.privacy ? "显" : "隐";
+  document.body.classList.toggle("privacy-on", state.privacy);
+  document.querySelectorAll(".money").forEach((node) => {
+    node.textContent = state.privacy ? "****" : node.dataset.value;
+  });
   renderLocalRecords();
 }
 
@@ -157,10 +235,10 @@ function renderLocalRecords() {
       <div class="list-row static">
         <i class="tile ${record.transaction_type === "income" ? "gold" : "rose"}"></i>
         <span>
-          <b>${record.category}</b>
-          <small>${record.transaction_date} · ${record.account}${record.note ? ` · ${escapeHtml(record.note)}` : ""}</small>
+          <b>${escapeHtml(record.category)}</b>
+          <small>${record.transaction_date}${record.note ? ` · ${escapeHtml(record.note)}` : ""}</small>
         </span>
-        <em>${sign}${record.amount.toFixed(2)} · ${status}</em>
+        <em>${sign}${state.privacy ? "****" : record.amount.toFixed(2)} · ${status}</em>
       </div>
     `;
   }).join("");
@@ -174,8 +252,40 @@ function showSyncDialog() {
   syncDialog.showModal();
 }
 
+function readSettings() {
+  try {
+    return { theme: "champagne", privacy: false, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+  } catch {
+    return { theme: "champagne", privacy: false };
+  }
+}
+
+function writeSettings() {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme: state.theme, privacy: state.privacy }));
+}
+
+function readCustomCategories() {
+  try {
+    return { expense: [], income: [], ...JSON.parse(localStorage.getItem(CUSTOM_CATEGORIES_KEY) || "{}") };
+  } catch {
+    return { expense: [], income: [] };
+  }
+}
+
+function writeCustomCategories() {
+  localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(customCategories));
+}
+
+function applyTheme() {
+  document.body.classList.remove("theme-champagne", "theme-sage", "theme-graphite");
+  document.body.classList.add(`theme-${state.theme}`);
+  document.querySelectorAll(".theme-choice").forEach((button) => {
+    button.classList.toggle("active", button.dataset.theme === state.theme);
+  });
+}
+
 function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (char) => ({
+  return String(value).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
@@ -205,8 +315,7 @@ async function readRecords() {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(RECORD_STORE, "readonly");
-    const store = tx.objectStore(RECORD_STORE);
-    const request = store.getAll();
+    const request = tx.objectStore(RECORD_STORE).getAll();
     request.onsuccess = () => {
       resolve(request.result.sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
     };
