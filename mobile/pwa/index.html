@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f0e2" />
+  <title>钱迹WorthTrace Mobile</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="mobile-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">钱迹 WorthTrace</p>
+        <h1 id="pageTitle">今天</h1>
+      </div>
+      <button class="icon-button" id="syncButton" type="button" aria-label="同步状态">
+        <span id="syncDot"></span>
+        <b id="syncCount">0</b>
+      </button>
+    </header>
+
+    <section class="offline-banner" id="offlineBanner" hidden>
+      <strong>离线模式</strong>
+      <span>新记录会先保存在手机，连上电脑后同步。</span>
+    </section>
+
+    <section class="sync-card" id="syncCard" hidden>
+      <div>
+        <strong id="syncCardTitle">有记录待同步</strong>
+        <span id="syncCardText">连接电脑后可以同步。</span>
+      </div>
+      <button id="confirmSyncButton" type="button">立即同步</button>
+    </section>
+
+    <section class="view active" data-view="home">
+      <article class="hero-card">
+        <p>扣除信用卡后的净资产</p>
+        <strong>CNY 244,229.82</strong>
+        <div class="metric-grid">
+          <span><b>14,325</b>本月支出</span>
+          <span><b>31.4%</b>储蓄率</span>
+          <span><b>7.6%</b>XIRR</span>
+        </div>
+      </article>
+
+      <div class="quick-actions">
+        <button class="primary" data-nav="book" type="button">+ 记一笔支出</button>
+        <button data-nav="book" type="button">+ 记一笔收入</button>
+      </div>
+
+      <h2 class="section-heading">本月提醒</h2>
+      <div class="list">
+        <button class="list-row" data-nav="monthend" type="button">
+          <i class="tile gold"></i>
+          <span><b>6 月 30 日更新当月资产</b><small>收支已由日常记账生成</small></span>
+          <em>进入</em>
+        </button>
+        <button class="list-row" data-nav="wallet" type="button">
+          <i class="tile green"></i>
+          <span><b>全球资产高于目标</b><small>当前 49.8%，目标 45%</small></span>
+          <em>查看</em>
+        </button>
+        <button class="list-row" type="button">
+          <i class="tile rose"></i>
+          <span><b>2 条支出待确认</b><small>同步后处理重复或退款</small></span>
+          <em>需同步</em>
+        </button>
+      </div>
+    </section>
+
+    <section class="view" data-view="book">
+      <form class="book-card" id="bookForm">
+        <label class="amount-field">
+          <span>金额</span>
+          <input id="amountInput" inputmode="decimal" placeholder="0.00" required />
+        </label>
+
+        <div class="segmented" role="group" aria-label="收支类型">
+          <button class="active" data-type="expense" type="button">支出</button>
+          <button data-type="income" type="button">收入</button>
+        </div>
+
+        <label class="field">
+          <span>分类</span>
+          <select id="categoryInput">
+            <option>餐饮</option>
+            <option>交通</option>
+            <option>购物</option>
+            <option>工资</option>
+            <option>投资收入</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>账户</span>
+          <select id="accountInput">
+            <option>招商信用卡</option>
+            <option>银行卡</option>
+            <option>支付宝</option>
+            <option>微信</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>日期</span>
+          <input id="dateInput" type="date" required />
+        </label>
+
+        <label class="field">
+          <span>备注</span>
+          <input id="noteInput" placeholder="可空" />
+        </label>
+
+        <button class="save-button" type="submit">保存这一笔</button>
+      </form>
+
+      <h2 class="section-heading">手机本地最近记录</h2>
+      <div class="list" id="localRecords"></div>
+    </section>
+
+    <section class="view wallet-view" data-view="wallet">
+      <article class="wallet-hero">
+        <p>本月预计资产总额</p>
+        <strong>CNY 244,229.82</strong>
+        <div class="ring" aria-hidden="true"></div>
+        <div class="summary-strip">
+          <span>现金 21%</span>
+          <span>全球 50%</span>
+          <span>债券 14%</span>
+          <span>黄金 8%</span>
+        </div>
+      </article>
+
+      <h2 class="section-heading">资产卡</h2>
+      <div class="wallet-stack">
+        <article class="asset-card gold"><span>全球资产</span><strong>CNY 127,771.57</strong><small>美股 / 港股 / 新兴市场</small></article>
+        <article class="asset-card sage"><span>现金</span><strong>CNY 55,719.19</strong><small>银行 / 支付账户 / 货币现金</small></article>
+        <article class="asset-card blue"><span>债券</span><strong>CNY 35,049.26</strong><small>短债 / 纯债 / 国债</small></article>
+      </div>
+    </section>
+
+    <section class="view" data-view="monthend">
+      <article class="monthend-card">
+        <p>本月收支来自实时记账</p>
+        <strong>只补资产</strong>
+        <div class="status-list">
+          <span><b>1</b>确认本月记账汇总<em>需同步后完成</em></span>
+          <span><b>2</b>填写资产月末金额<em>V1.1 离线草稿</em></span>
+          <span><b>3</b>补信用卡已出 / 未出<em>V1.1 离线草稿</em></span>
+          <span><b>4</b>生成月报<em>需电脑端完成</em></span>
+        </div>
+      </article>
+
+      <h2 class="section-heading">离线状态不可完成</h2>
+      <div class="list">
+        <div class="list-row static"><i class="tile rose"></i><span><b>生成月报</b><small>需要电脑数据库校验、XIRR 和汇率锁定。</small></span><em>需同步</em></div>
+        <div class="list-row static"><i class="tile gold"></i><span><b>正式更新看板</b><small>看板发布库必须由电脑端写入。</small></span><em>需同步</em></div>
+      </div>
+    </section>
+
+    <nav class="bottom-nav" aria-label="底部导航">
+      <button class="active" data-nav="home" type="button">首页</button>
+      <button data-nav="book" type="button">记账</button>
+      <button data-nav="wallet" type="button">资产</button>
+      <button data-nav="monthend" type="button">月末</button>
+    </nav>
+  </main>
+
+  <dialog id="syncDialog">
+    <h2>同步到电脑</h2>
+    <p id="syncDialogText">当前是原型模式。之后会在同 Wi-Fi 下同步到电脑。</p>
+    <div class="dialog-actions">
+      <button id="closeDialogButton" type="button">稍后</button>
+      <button id="mockSyncButton" type="button">模拟同步完成</button>
+    </div>
+  </dialog>
+
+  <script src="./app.js" type="module"></script>
+</body>
+</html>

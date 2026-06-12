@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>钱迹WorthTrace 手机端 V2 Mock</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #171b18;
+      --muted: #69736b;
+      --line: #e4d8c7;
+      --paper: #fffdfa;
+      --warm: #f8f0e2;
+      --sage: #789883;
+      --gold: #c4a46a;
+      --graphite: #1d211c;
+      --blue: #6388a9;
+      --rose: #c8775b;
+      --green: #6f927f;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(196, 164, 106, 0.25), transparent 32%),
+        radial-gradient(circle at 80% 12%, rgba(120, 152, 131, 0.22), transparent 34%),
+        linear-gradient(135deg, #fbf7ef 0%, #f1e8d9 48%, #eef4ee 100%);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .page {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 36px 32px 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(330px, 0.8fr);
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 26px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .brand img {
+      width: 35px;
+      height: 35px;
+      border-radius: 12px;
+      box-shadow: 0 14px 32px rgba(42, 36, 28, 0.13);
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 20px 0 14px;
+      font-size: clamp(42px, 6vw, 82px);
+      line-height: 0.96;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      max-width: 820px;
+      margin: 0;
+      color: #5e685f;
+      font-size: 19px;
+      line-height: 1.65;
+      font-weight: 560;
+    }
+
+    .strategy {
+      padding: 22px;
+      border: 1px solid rgba(198, 177, 143, 0.52);
+      border-radius: 28px;
+      background: rgba(255, 253, 250, 0.68);
+      box-shadow: 0 24px 80px rgba(52, 42, 29, 0.08);
+      backdrop-filter: blur(22px);
+    }
+
+    .strategy strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    .strategy p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.62;
+      font-weight: 560;
+    }
+
+    .tabs {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 10px;
+      padding: 14px 0 18px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+      background: linear-gradient(180deg, rgba(248, 240, 226, 0.96), rgba(248, 240, 226, 0));
+      backdrop-filter: blur(10px);
+    }
+
+    .tabs button {
+      flex: 0 0 auto;
+      padding: 11px 16px;
+      border: 1px solid rgba(196, 164, 106, 0.34);
+      border-radius: 999px;
+      color: #5d675f;
+      background: rgba(255, 255, 255, 0.58);
+      font-weight: 780;
+      cursor: pointer;
+      transition: transform 180ms ease, background 180ms ease;
+    }
+
+    .tabs button:hover {
+      transform: translateY(-1px);
+    }
+
+    .tabs button.active {
+      color: #fffdfa;
+      background: var(--graphite);
+      border-color: var(--graphite);
+      box-shadow: 0 14px 36px rgba(24, 27, 24, 0.18);
+    }
+
+    .variant {
+      display: none;
+      grid-template-columns: minmax(330px, 430px) minmax(0, 1fr);
+      gap: 34px;
+      align-items: start;
+      padding: 22px;
+      border: 1px solid rgba(199, 183, 154, 0.54);
+      border-radius: 38px;
+      background: rgba(255, 253, 250, 0.64);
+      box-shadow: 0 30px 90px rgba(42, 35, 22, 0.09);
+      backdrop-filter: blur(24px);
+    }
+
+    .variant.active {
+      display: grid;
+      animation: rise 420ms cubic-bezier(.2, .8, .2, 1);
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(18px) scale(0.992); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .phone {
+      position: sticky;
+      top: 88px;
+      width: 390px;
+      max-width: 100%;
+      min-height: 812px;
+      padding: 12px;
+      border-radius: 48px;
+      background: #151712;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+        0 42px 100px rgba(30, 27, 22, 0.24);
+    }
+
+    .screen {
+      position: relative;
+      min-height: 788px;
+      overflow: hidden;
+      border-radius: 38px;
+      background: #fbf7ee;
+    }
+
+    .statusbar {
+      display: flex;
+      justify-content: space-between;
+      padding: 16px 22px 8px;
+      color: rgba(23, 27, 24, 0.74);
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .content {
+      padding: 12px 20px 94px;
+    }
+
+    .mobile-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 8px 0 18px;
+    }
+
+    .mobile-title {
+      margin: 0;
+      font-size: 31px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .pill,
+    .circle-button {
+      border: 1px solid rgba(205, 187, 154, 0.58);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.68);
+      color: #5d675f;
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .pill {
+      padding: 8px 11px;
+    }
+
+    .circle-button {
+      display: inline-grid;
+      place-items: center;
+      width: 39px;
+      height: 39px;
+    }
+
+    .hero-card {
+      padding: 21px;
+      border-radius: 30px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(244, 236, 222, 0.5)),
+        radial-gradient(circle at 84% 18%, rgba(197, 164, 109, 0.32), transparent 32%);
+      border: 1px solid rgba(207, 190, 160, 0.5);
+      box-shadow: 0 24px 56px rgba(42, 35, 23, 0.10);
+    }
+
+    .metric-label {
+      margin: 0 0 8px;
+      color: #68736b;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .metric-value {
+      margin: 0;
+      font-size: 37px;
+      line-height: 1;
+      letter-spacing: 0;
+      font-weight: 880;
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .mini {
+      padding: 12px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.64);
+      border: 1px solid rgba(207, 190, 160, 0.42);
+    }
+
+    .mini span,
+    .list-row span,
+    .field span,
+    .wallet-card span {
+      display: block;
+      color: #727b73;
+      font-size: 11px;
+      font-weight: 720;
+    }
+
+    .mini strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 15px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 22px 0 10px;
+      color: #2a302b;
+      font-weight: 840;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .list-row {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr) auto;
+      gap: 11px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid rgba(205, 187, 154, 0.42);
+      border-radius: 21px;
+      background: rgba(255, 255, 255, 0.64);
+    }
+
+    .dot {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--sage), var(--blue));
+    }
+
+    .dot.gold { background: linear-gradient(135deg, var(--gold), #e6cf9f); }
+    .dot.rose { background: linear-gradient(135deg, var(--rose), #eab09d); }
+    .dot.dark { background: linear-gradient(135deg, #262a24, #6f927f); }
+
+    .list-row strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .list-row b {
+      font-size: 13px;
+    }
+
+    .quick-add {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .quick-add button {
+      min-height: 52px;
+      border: 0;
+      border-radius: 19px;
+      color: white;
+      background: var(--graphite);
+      font-weight: 830;
+      box-shadow: 0 16px 34px rgba(29, 33, 28, 0.18);
+    }
+
+    .quick-add button.secondary {
+      color: #1d211c;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(205, 187, 154, 0.48);
+      box-shadow: none;
+    }
+
+    .bottom-nav {
+      position: absolute;
+      left: 28px;
+      right: 28px;
+      bottom: 24px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      padding: 8px;
+      border-radius: 28px;
+      border: 1px solid rgba(205, 187, 154, 0.5);
+      background: rgba(255, 253, 250, 0.78);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 48px rgba(42, 36, 26, 0.14);
+    }
+
+    .bottom-nav button {
+      min-height: 46px;
+      border: 0;
+      border-radius: 20px;
+      color: #6a746c;
+      background: transparent;
+      font-size: 12px;
+      font-weight: 780;
+      cursor: pointer;
+    }
+
+    .bottom-nav button.active {
+      color: #fff;
+      background: var(--graphite);
+    }
+
+    .notes {
+      display: grid;
+      gap: 20px;
+    }
+
+    .notes h2 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    .notes p {
+      margin: 0;
+      color: #5f695f;
+      font-size: 17px;
+      line-height: 1.72;
+      font-weight: 560;
+    }
+
+    .note-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .note-card {
+      min-height: 128px;
+      padding: 18px;
+      border-radius: 24px;
+      border: 1px solid rgba(205, 187, 154, 0.46);
+      background: rgba(255, 255, 255, 0.58);
+    }
+
+    .note-card strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+
+    .note-card span {
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 14px;
+      font-weight: 560;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chips span {
+      padding: 9px 12px;
+      border-radius: 999px;
+      color: #5d675f;
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid rgba(205, 187, 154, 0.44);
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .book-screen {
+      background: #f8f3ea;
+    }
+
+    .amount-pad {
+      padding: 20px;
+      border-radius: 30px;
+      background: var(--paper);
+      border: 1px solid rgba(205, 187, 154, 0.55);
+      box-shadow: 0 24px 56px rgba(42, 35, 23, 0.10);
+    }
+
+    .amount {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(205, 187, 154, 0.44);
+    }
+
+    .amount strong {
+      font-size: 42px;
+      line-height: 1;
+    }
+
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 7px;
+      padding: 6px;
+      margin: 16px 0;
+      border-radius: 999px;
+      background: #f0e7d8;
+    }
+
+    .segmented button {
+      min-height: 38px;
+      border: 0;
+      border-radius: 999px;
+      color: #68736b;
+      background: transparent;
+      font-weight: 800;
+    }
+
+    .segmented button.active {
+      color: white;
+      background: var(--graphite);
+    }
+
+    .fields {
+      display: grid;
+      gap: 10px;
+    }
+
+    .field {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 52px;
+      padding: 0 14px;
+      border-radius: 17px;
+      background: #f8f3ea;
+      border: 1px solid rgba(205, 187, 154, 0.5);
+    }
+
+    .field b {
+      font-size: 15px;
+    }
+
+    .template-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .template-grid button {
+      min-height: 48px;
+      border: 1px solid rgba(205, 187, 154, 0.42);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.66);
+      font-weight: 780;
+    }
+
+    .primary-mobile {
+      width: 100%;
+      min-height: 56px;
+      margin-top: 16px;
+      border: 0;
+      border-radius: 999px;
+      color: white;
+      background: var(--graphite);
+      font-weight: 840;
+      box-shadow: 0 18px 38px rgba(29, 33, 28, 0.20);
+    }
+
+    .asset-screen {
+      color: #f7f1e8;
+      background:
+        radial-gradient(circle at 82% 0%, rgba(197, 164, 109, 0.28), transparent 38%),
+        linear-gradient(165deg, #252622 0%, #11130f 100%);
+    }
+
+    .asset-screen .statusbar,
+    .asset-screen .metric-label,
+    .asset-screen .section-title {
+      color: rgba(247, 241, 232, 0.74);
+    }
+
+    .asset-screen .mobile-title,
+    .asset-screen .metric-value {
+      color: #fffaf0;
+    }
+
+    .asset-balance {
+      padding: 20px;
+      border-radius: 30px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.04)),
+        radial-gradient(circle at 80% 12%, rgba(197, 164, 109, 0.34), transparent 38%);
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.22);
+    }
+
+    .ring {
+      width: 168px;
+      height: 168px;
+      margin: 20px auto 18px;
+      border-radius: 50%;
+      background: conic-gradient(#c7a76d 0 21%, #88a998 21% 50%, #9cacbf 50% 64%, #c47766 64% 72%, #627d9a 72% 100%);
+      display: grid;
+      place-items: center;
+    }
+
+    .ring::after {
+      content: "净资产";
+      display: grid;
+      place-items: center;
+      width: 116px;
+      height: 116px;
+      border-radius: 50%;
+      color: rgba(247, 241, 232, 0.78);
+      background: #181a16;
+      font-weight: 840;
+    }
+
+    .wallet-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .wallet-card {
+      display: grid;
+      gap: 8px;
+      min-height: 104px;
+      padding: 17px;
+      border-radius: 28px;
+      color: #171b18;
+      background: linear-gradient(135deg, #fff6e6, #d8c49a);
+      box-shadow: 0 18px 38px rgba(0, 0, 0, 0.18);
+    }
+
+    .wallet-card.sage { background: linear-gradient(135deg, #eef6ef, #90aa99); }
+    .wallet-card.blue { background: linear-gradient(135deg, #edf3fb, #89a4bd); }
+
+    .wallet-card strong {
+      font-size: 23px;
+    }
+
+    .update-screen {
+      background: #f7f3ea;
+    }
+
+    .progress-card {
+      padding: 20px;
+      border-radius: 30px;
+      background: var(--paper);
+      border: 1px solid rgba(205, 187, 154, 0.55);
+      box-shadow: 0 24px 56px rgba(42, 35, 23, 0.10);
+    }
+
+    .progress-line {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .progress-line div {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      border-radius: 18px;
+      background: #f8f3ea;
+      font-weight: 780;
+    }
+
+    .progress-line i {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 12px;
+      color: white;
+      background: var(--green);
+      font-style: normal;
+      font-size: 12px;
+    }
+
+    .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .calendar i {
+      display: grid;
+      place-items: center;
+      height: 31px;
+      border-radius: 11px;
+      color: #6f766f;
+      background: rgba(255, 255, 255, 0.56);
+      font-style: normal;
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .calendar i.hot {
+      color: white;
+      background: var(--rose);
+      box-shadow: 0 8px 18px rgba(196, 119, 102, 0.25);
+    }
+
+    .summary-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .summary-strip b {
+      display: grid;
+      place-items: center;
+      min-height: 42px;
+      border-radius: 15px;
+      color: #3f473f;
+      background: rgba(255, 255, 255, 0.66);
+      font-size: 12px;
+    }
+
+    @media (max-width: 980px) {
+      .page {
+        padding: 24px 14px 42px;
+      }
+
+      .hero,
+      .variant.active {
+        grid-template-columns: 1fr;
+      }
+
+      .phone {
+        position: relative;
+        top: auto;
+        margin: 0 auto;
+      }
+
+      .note-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="brand">
+          <img src="../assets/logo-qianji-a.svg" alt="钱迹WorthTrace logo" />
+          <span>钱迹WorthTrace · Mobile V2 Direction</span>
+        </div>
+        <h1>手机端变成日常记账入口，月底更新就轻很多。</h1>
+        <p class="lede">新方向：日常在手机记收入和支出；月底只补资产月末金额、买卖分红、信用卡口径。手机端保留看板随身版的克制，也吸收资产 Wallet 的高级感。</p>
+      </div>
+      <aside class="strategy">
+        <strong>推荐路线：A + C + 实时记账。</strong>
+        <p>手机负责高频动作：记一笔、看状态、处理提醒。桌面继续负责重型动作：模板、历史导入、复杂校验、批量数据管理。</p>
+      </aside>
+    </section>
+
+    <nav class="tabs" aria-label="手机端页面">
+      <button class="active" data-target="home">01 首页看板</button>
+      <button data-target="book">02 实时记账</button>
+      <button data-target="wallet">03 资产 Wallet</button>
+      <button data-target="monthend">04 月底轻更新</button>
+    </nav>
+
+    <section class="variant active" id="home">
+      <div class="phone">
+        <div class="screen">
+          <div class="statusbar"><span>9:41</span><span>WorthTrace</span></div>
+          <div class="content">
+            <div class="mobile-header">
+              <h2 class="mobile-title">今天</h2>
+              <span class="pill">已到 2026.05</span>
+            </div>
+            <article class="hero-card">
+              <p class="metric-label">扣除信用卡后的净资产</p>
+              <p class="metric-value">CNY 244,229.82</p>
+              <div class="metric-row">
+                <div class="mini"><span>本月支出</span><strong>14,325</strong></div>
+                <div class="mini"><span>储蓄率</span><strong>31.4%</strong></div>
+                <div class="mini"><span>XIRR</span><strong>7.6%</strong></div>
+              </div>
+            </article>
+            <div class="quick-add">
+              <button>+ 记一笔支出</button>
+              <button class="secondary">+ 记一笔收入</button>
+            </div>
+            <div class="section-title"><span>本月提醒</span><span class="pill">3 项</span></div>
+            <div class="list">
+              <div class="list-row"><i class="dot gold"></i><div><strong>6 月 30 日更新当月资产</strong><span>收支已由日常记账生成</span></div><b>进入</b></div>
+              <div class="list-row"><i class="dot"></i><div><strong>全球资产高于目标</strong><span>当前 49.8%，目标 45%</span></div><b>查看</b></div>
+              <div class="list-row"><i class="dot rose"></i><div><strong>2 条支出待确认</strong><span>可能是退款或重复记录</span></div><b>处理</b></div>
+            </div>
+          </div>
+          <div class="bottom-nav">
+            <button class="active">首页</button><button>记账</button><button>资产</button><button>我的</button>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <h2>01. 首页看板</h2>
+        <p>这是手机端的主入口。它不复制桌面大屏，而是展示最该随身看的 4 类东西：净资产、本月收支、储蓄质量、待处理动作。</p>
+        <div class="note-grid">
+          <div class="note-card"><strong>关键动作</strong><span>快速记支出、快速记收入、进入月末资产更新、处理异常。</span></div>
+          <div class="note-card"><strong>数据来源</strong><span>实时记账产生收支明细；桌面/手机月末更新产生资产快照。</span></div>
+          <div class="note-card"><strong>设计重点</strong><span>少而准。手机首页只给结论和下一步，不堆图表。</span></div>
+          <div class="note-card"><strong>适合 V1</strong><span>是。这个是手机端最应该先做的页面。</span></div>
+        </div>
+        <div class="chips"><span>随身看板</span><span>快速记账</span><span>本月提醒</span><span>隐私模式</span></div>
+      </div>
+    </section>
+
+    <section class="variant" id="book">
+      <div class="phone">
+        <div class="screen book-screen">
+          <div class="statusbar"><span>9:41</span><span>记一笔</span></div>
+          <div class="content">
+            <div class="mobile-header">
+              <h2 class="mobile-title">记一笔</h2>
+              <span class="pill">今天</span>
+            </div>
+            <section class="amount-pad">
+              <div class="amount">
+                <span>金额</span>
+                <strong>¥ 86.50</strong>
+              </div>
+              <div class="segmented">
+                <button class="active">支出</button>
+                <button>收入</button>
+              </div>
+              <div class="fields">
+                <div class="field"><span>分类</span><b>餐饮 / 咖啡</b></div>
+                <div class="field"><span>账户</span><b>招商信用卡</b></div>
+                <div class="field"><span>日期</span><b>2026.06.12</b></div>
+                <div class="field"><span>备注</span><b>可空</b></div>
+              </div>
+              <div class="template-grid">
+                <button>餐饮</button><button>交通</button><button>购物</button><button>恋爱</button>
+              </div>
+              <button class="primary-mobile">保存这一笔</button>
+            </section>
+            <div class="section-title"><span>最近记录</span><span>编辑</span></div>
+            <div class="list">
+              <div class="list-row"><i class="dot rose"></i><div><strong>便利店</strong><span>生活 · 招商信用卡</span></div><b>-32.00</b></div>
+              <div class="list-row"><i class="dot gold"></i><div><strong>工资</strong><span>收入 · 银行卡</span></div><b>+8,051.17</b></div>
+            </div>
+          </div>
+          <div class="bottom-nav">
+            <button>首页</button><button class="active">记账</button><button>资产</button><button>我的</button>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <h2>02. 实时记账</h2>
+        <p>这是新需求的核心。它替代鲨鱼记账：收入支出直接进入钱迹数据库，月底不再导入收支明细。</p>
+        <div class="note-grid">
+          <div class="note-card"><strong>必须有</strong><span>支出/收入、金额、分类、账户、日期、备注、编辑、删除。</span></div>
+          <div class="note-card"><strong>建议有</strong><span>常用模板、退款标记、重复提醒、信用卡账户、补记历史日期。</span></div>
+          <div class="note-card"><strong>需要先设计规则</strong><span>转账、退款、信用卡还款、拆分账单，不能一开始就混成普通支出。</span></div>
+          <div class="note-card"><strong>月底变化</strong><span>月底更新跳过收支导入，只汇总本月已记账数据供确认。</span></div>
+        </div>
+        <div class="chips"><span>替代鲨鱼记账</span><span>分类同步桌面</span><span>账户体系</span><span>可编辑删除</span></div>
+      </div>
+    </section>
+
+    <section class="variant" id="wallet">
+      <div class="phone">
+        <div class="screen asset-screen">
+          <div class="statusbar"><span>9:41</span><span>资产</span></div>
+          <div class="content">
+            <div class="mobile-header">
+              <h2 class="mobile-title">资产</h2>
+              <span class="circle-button">隐私</span>
+            </div>
+            <section class="asset-balance">
+              <p class="metric-label">本月预计资产总额</p>
+              <p class="metric-value">CNY 244,229.82</p>
+              <div class="ring"></div>
+              <div class="summary-strip"><b>现金 21%</b><b>全球 50%</b><b>债券 14%</b><b>黄金 8%</b></div>
+            </section>
+            <div class="section-title"><span>资产卡</span><span>展开全部</span></div>
+            <div class="wallet-stack">
+              <div class="wallet-card"><span>全球资产</span><strong>CNY 127,771.57</strong><small>美股 / 港股 / 新兴市场</small></div>
+              <div class="wallet-card sage"><span>现金</span><strong>CNY 55,719.19</strong><small>银行 / 支付账户 / 货币现金</small></div>
+              <div class="wallet-card blue"><span>债券</span><strong>CNY 35,049.26</strong><small>短债 / 纯债 / 国债</small></div>
+            </div>
+          </div>
+          <div class="bottom-nav">
+            <button>首页</button><button>记账</button><button class="active">资产</button><button>我的</button>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <h2>03. 资产 Wallet</h2>
+        <p>保留你喜欢的第三版 fancy 感。手机端资产页应该像 Apple Wallet + Apple Health：卡片、比例、目标差距、收益状态，一眼看懂。</p>
+        <div class="note-grid">
+          <div class="note-card"><strong>展示内容</strong><span>净资产、资产配置、目标偏离、投资收益、资产卡片。</span></div>
+          <div class="note-card"><strong>不建议放</strong><span>过多表格、复杂模板、长月报编辑。手机上会显得重。</span></div>
+          <div class="note-card"><strong>可交互</strong><span>点资产卡进入明细，查看定投、买卖分红、历史曲线。</span></div>
+          <div class="note-card"><strong>适合 V1</strong><span>适合做首页之外的第二核心页。</span></div>
+        </div>
+        <div class="chips"><span>Apple Wallet 感</span><span>深色高级</span><span>资产卡片</span><span>隐私模式</span></div>
+      </div>
+    </section>
+
+    <section class="variant" id="monthend">
+      <div class="phone">
+        <div class="screen update-screen">
+          <div class="statusbar"><span>9:41</span><span>月末</span></div>
+          <div class="content">
+            <div class="mobile-header">
+              <h2 class="mobile-title">6 月收尾</h2>
+              <span class="pill">轻更新</span>
+            </div>
+            <section class="progress-card">
+              <p class="metric-label">本月收支来自实时记账</p>
+              <p class="metric-value">只补资产</p>
+              <div class="progress-line">
+                <div><i>1</i><span>确认本月记账汇总</span><b>已生成</b></div>
+                <div><i>2</i><span>填写资产月末金额</span><b>继续</b></div>
+                <div><i>3</i><span>补信用卡已出 / 未出</span><b>待填</b></div>
+              </div>
+              <button class="primary-mobile">继续月末更新</button>
+            </section>
+            <div class="section-title"><span>定投日历</span><span>可修改</span></div>
+            <div class="calendar">
+              <i>1</i><i>2</i><i class="hot">3</i><i>4</i><i>5</i><i>6</i><i>7</i>
+              <i>8</i><i>9</i><i>10</i><i class="hot">11</i><i>12</i><i>13</i><i>14</i>
+              <i>15</i><i>16</i><i>17</i><i>18</i><i class="hot">19</i><i>20</i><i>21</i>
+            </div>
+            <div class="section-title"><span>资产待处理</span><span>2 项</span></div>
+            <div class="list">
+              <div class="list-row"><i class="dot gold"></i><div><strong>黄金</strong><span>缺少月末金额</span></div><b>补录</b></div>
+              <div class="list-row"><i class="dot"></i><div><strong>标普 500 A</strong><span>定投 3 笔待确认</span></div><b>确认</b></div>
+            </div>
+          </div>
+          <div class="bottom-nav">
+            <button>首页</button><button>记账</button><button>资产</button><button class="active">我的</button>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <h2>04. 月底轻更新</h2>
+        <p>因为收支已经日常记录，月底不再需要“导入账单向导”。这里只保留资产、信用卡、月报生成。</p>
+        <div class="note-grid">
+          <div class="note-card"><strong>保留</strong><span>资产月末市值、额外买入、卖出、分红、定投日历、信用卡调整。</span></div>
+          <div class="note-card"><strong>删除</strong><span>CSV/Excel 收支导入步骤。它只作为桌面端历史兼容功能保留。</span></div>
+          <div class="note-card"><strong>关键逻辑</strong><span>本月收支来自手机实时记账；生成月报时同步到看板数据库。</span></div>
+          <div class="note-card"><strong>用户感受</strong><span>月底只像做一次“资产体检”，不是重新整理整个月账单。</span></div>
+        </div>
+        <div class="chips"><span>轻更新</span><span>定投日历</span><span>信用卡口径</span><span>生成月报</span></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const tabs = [...document.querySelectorAll(".tabs button")];
+    const variants = [...document.querySelectorAll(".variant")];
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.target;
+        tabs.forEach((item) => item.classList.toggle("active", item === tab));
+        variants.forEach((item) => item.classList.toggle("active", item.id === target));
+      });
+    });
+  </script>
+</body>
+</html>
