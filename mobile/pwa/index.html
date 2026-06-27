@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=4" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.2.0" />
 </head>
 <body class="theme-champagne privacy-on">
   <main class="mobile-shell">
@@ -39,27 +39,28 @@
     <section class="sync-card" id="syncCard" hidden>
       <div>
         <strong id="syncCardTitle">有记录待同步</strong>
-        <span id="syncCardText">连接电脑后可以同步。</span>
+        <span id="syncCardText">连接电脑后可以同步 6 月草稿。</span>
       </div>
-      <button id="confirmSyncButton" type="button">立即同步</button>
+      <button id="confirmSyncButton" type="button">同步草稿</button>
     </section>
 
     <section class="view active" data-view="home">
       <article class="hero-card">
-        <p>扣除信用卡后的净资产</p>
+        <p>已发布月报净资产</p>
         <strong class="money" data-value="CNY 244,229.82">••••••</strong>
+        <small class="data-stamp">截至 2026 年 5 月月报；6 月草稿未计入</small>
         <div class="metric-grid">
-          <span><b class="money" data-value="14,325">••••••</b>本月支出</span>
-          <span><b>31.4%</b>储蓄率</span>
-          <span><b>7.6%</b>月收益率</span>
+          <span><b class="money" data-value="14,325">••••••</b>5 月支出</span>
+          <span><b>31.4%</b>5 月储蓄率</span>
+          <span><b>7.6%</b>5 月收益率</span>
         </div>
       </article>
 
       <div class="overview-grid">
-        <article><span>本月收入</span><b class="money" data-value="22,376">••••••</b></article>
-        <article><span>储蓄金额</span><b class="money" data-value="8,051">••••••</b></article>
+        <article><span>5 月收入</span><b class="money" data-value="22,376">••••••</b></article>
+        <article><span>5 月储蓄</span><b class="money" data-value="8,051">••••••</b></article>
         <article><span>资产偏离</span><b>2 项</b></article>
-        <article><span>待同步</span><b id="homePendingCount">0 条</b></article>
+        <article><span>6 月草稿待同步</span><b id="homePendingCount">0 条</b></article>
       </div>
 
       <div class="quick-actions">
@@ -68,23 +69,23 @@
       </div>
 
       <div class="section-title">
-        <h2>本月提醒</h2>
-        <span>桌面看板口径</span>
+        <h2>数据状态</h2>
+        <span>已发布月报口径</span>
       </div>
       <div class="list">
         <div class="list-row static">
           <i class="tile gold"></i>
-          <span><b>当前已经更新到 2026 年 5 月</b><small>手机端后续会读取桌面发布库的最新快照。</small></span>
+          <span><b>看板数据截至 2026 年 5 月</b><small>首页金额、收益率、收入支出来自已发布月报，不包含 6 月手机草稿。</small></span>
           <em>状态</em>
         </div>
         <button class="list-row" data-nav="cashflow" type="button">
           <i class="tile green"></i>
-          <span><b>已录入 2025 年 12 月到 2026 年 5 月</b><small>手机展示为趋势摘要，不替代桌面完整看板。</small></span>
+          <span><b>收支摘要显示 2026 年 5 月</b><small>6 月记录先作为手机草稿；电脑确认并生成 6 月月报后才更新这里。</small></span>
           <em>查看</em>
         </button>
         <button class="list-row" data-nav="allocation" type="button">
           <i class="tile rose"></i>
-          <span><b>2026 年 6 月 30 日更新当月内容</b><small>收支来自实时记账，月底只补资产和信用卡。</small></span>
+          <span><b>6 月月底更新未完成</b><small>月底补资产和信用卡，并在电脑端生成 6 月月报后，资产和看板才会刷新。</small></span>
           <em>进入</em>
         </button>
       </div>
@@ -124,26 +125,38 @@
       </form>
 
       <div class="section-title">
-        <h2>分类快捷入口</h2>
-        <span id="categoryHint">支出分类</span>
+        <h2>信用卡调整</h2>
+        <span>同步到电脑草稿</span>
       </div>
-      <div class="category-grid" id="categoryGrid"></div>
-
-      <div class="section-title">
-        <h2>手机本地最近记录</h2>
-        <span>IndexedDB</span>
-      </div>
-      <div class="list" id="localRecords"></div>
+      <form class="credit-card-card" id="creditCardForm">
+        <div class="credit-fields">
+          <label class="field">
+            <span>本月已出账单</span>
+            <input id="cardBilledInput" inputmode="decimal" placeholder="0.00" />
+          </label>
+          <label class="field">
+            <span>本月未出账单</span>
+            <input id="cardUnbilledInput" inputmode="decimal" placeholder="0.00" />
+          </label>
+          <label class="field">
+            <span>上月未出账单</span>
+            <input id="cardPreviousUnbilledInput" inputmode="decimal" placeholder="0.00" />
+          </label>
+        </div>
+        <p class="credit-formula">每月最后一天更新一次即可。信用卡净调整 = -本月已出账单 - 本月未出账单 + 上月未出账单；同步后进入电脑端 6 月信用卡草稿。</p>
+        <button class="save-button" type="submit">保存信用卡调整</button>
+      </form>
     </section>
 
     <section class="view" data-view="cashflow">
       <article class="hero-card compact">
-        <p>收支储蓄</p>
+        <p>5 月已发布月报储蓄率</p>
         <strong>31.4%</strong>
+        <small class="data-stamp">2026 年 5 月；6 月手机记账未计入</small>
         <div class="metric-grid">
-          <span><b class="money" data-value="22,376">••••••</b>收入</span>
-          <span><b class="money" data-value="14,325">••••••</b>支出</span>
-          <span><b class="money" data-value="8,051">••••••</b>储蓄</span>
+          <span><b class="money" data-value="22,376">••••••</b>5 月收入</span>
+          <span><b class="money" data-value="14,325">••••••</b>5 月支出</span>
+          <span><b class="money" data-value="8,051">••••••</b>5 月储蓄</span>
         </div>
       </article>
 
@@ -154,41 +167,32 @@
         <div class="bar-row"><span>交通</span><i style="--w: 28%"></i><b class="money" data-value="1,220">••••••</b></div>
       </div>
 
+      <div class="section-title">
+        <h2>6 月记账记录</h2>
+        <span>手机草稿</span>
+      </div>
+      <div class="draft-entry-grid" id="draftEntryGrid"></div>
+      <div class="monthly-draft-list" id="localRecords"></div>
+
       <div class="list">
-        <div class="list-row static"><i class="tile green"></i><span><b>储蓄目标达成</b><small>目标储蓄率 30%，当前 31.4%。</small></span><em>达成</em></div>
-        <div class="list-row static"><i class="tile gold"></i><span><b>大额异常支出</b><small>同步后从桌面规则读取异常明细。</small></span><em>需同步</em></div>
+        <div class="list-row static"><i class="tile green"></i><span><b>5 月储蓄目标达成</b><small>目标储蓄率 30%，5 月月报储蓄率 31.4%。</small></span><em>达成</em></div>
+        <button class="list-row" id="mayAnomalyButton" type="button"><i class="tile gold"></i><span><b>5 月异常支出</b><small>查看 5 月已发布月报里的异常明细。</small></span><em>查看</em></button>
+        <div class="anomaly-detail" id="mayAnomalyDetail" hidden>
+          <strong>暂无 5 月异常支出明细</strong>
+          <span>后续同步电脑端已发布月报后，这里只显示电脑端确认过的异常。</span>
+        </div>
       </div>
     </section>
 
     <section class="view" data-view="allocation">
       <article class="wallet-hero">
-        <p>资产配置</p>
+        <p>已发布月报资产配置</p>
         <strong class="money" data-value="CNY 244,229.82">••••••</strong>
+        <small class="data-stamp">截至 2026 年 5 月月报；6 月资产未更新</small>
         <div class="ring" aria-hidden="true"></div>
-        <div class="summary-strip">
-          <span>现金 21%</span>
-          <span>全球 50%</span>
-          <span>债券 14%</span>
-          <span>黄金 8%</span>
-        </div>
       </article>
 
-      <div class="wallet-stack">
-        <article class="asset-card gold"><span>全球资产</span><strong class="money" data-value="CNY 127,771.57">••••••</strong><small>美股 / 港股 / 新兴市场</small></article>
-        <article class="asset-card sage"><span>现金</span><strong class="money" data-value="CNY 55,719.19">••••••</strong><small>银行 / 支付账户 / 货币现金</small></article>
-        <article class="asset-card blue"><span>债券</span><strong class="money" data-value="CNY 35,049.26">••••••</strong><small>短债 / 纯债 / 国债</small></article>
-      </div>
-
-      <div class="monthend-card">
-        <p>月底轻更新</p>
-        <strong>只补资产</strong>
-        <div class="status-list">
-          <span><b>1</b>确认本月记账汇总<em>需同步后完成</em></span>
-          <span><b>2</b>填写资产月末金额<em>V1.1 离线草稿</em></span>
-          <span><b>3</b>补信用卡已出 / 未出<em>V1.1 离线草稿</em></span>
-          <span><b>4</b>生成月报<em>需电脑端完成</em></span>
-        </div>
-      </div>
+      <div id="targetDeviationSection"></div>
     </section>
 
     <nav class="bottom-nav" aria-label="底部导航">
@@ -200,16 +204,16 @@
   </main>
 
   <dialog id="syncDialog">
-    <h2>同步到电脑</h2>
-    <p id="syncDialogText">当前是原型模式。之后会在同 Wi-Fi 下同步到电脑。</p>
+    <h2>同步 6 月草稿</h2>
+    <div class="sync-dialog-body" id="syncDialogText">当前是原型模式。之后会在同 Wi-Fi 下同步到电脑。</div>
     <div class="dialog-actions">
       <button id="closeDialogButton" type="button">稍后</button>
-      <button id="mockSyncButton" type="button">模拟同步完成</button>
+      <button id="mockSyncButton" type="button">模拟同步草稿</button>
     </div>
   </dialog>
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?v=4" type="module"></script>
+  <script src="./app.js?mobileVersion=0.2.0" type="module"></script>
 </body>
 </html>
