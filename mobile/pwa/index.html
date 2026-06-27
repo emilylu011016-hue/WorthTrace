@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=4" />
 </head>
-<body class="theme-champagne">
+<body class="theme-champagne privacy-on">
   <main class="mobile-shell">
     <header class="topbar">
       <div>
@@ -16,8 +16,8 @@
         <h1 id="pageTitle">今天</h1>
       </div>
       <div class="top-actions" aria-label="全局操作">
-        <button class="round-button" id="privacyButton" type="button" aria-label="隐藏金额">隐</button>
-        <button class="round-button" id="themeButton" type="button" aria-label="风格设置">风</button>
+        <button class="round-button" id="privacyButton" type="button" aria-label="显示金额" title="显示金额" data-tooltip="显示金额"></button>
+        <button class="round-button" id="themeButton" type="button" aria-label="切换风格" title="切换风格" data-tooltip="切换风格"></button>
         <button class="sync-button" id="syncButton" type="button" aria-label="同步状态">
           <span id="syncDot"></span>
           <b id="syncCount">0</b>
@@ -26,9 +26,9 @@
     </header>
 
     <section class="theme-panel" id="themePanel" hidden>
-      <button class="theme-choice active" data-theme="champagne" type="button"><i></i><span>香槟</span></button>
-      <button class="theme-choice" data-theme="sage" type="button"><i></i><span>鼠尾草</span></button>
-      <button class="theme-choice" data-theme="graphite" type="button"><i></i><span>石墨</span></button>
+      <button class="theme-choice active" data-theme="champagne" type="button" title="切换到香槟风格"><i></i><span>香槟</span></button>
+      <button class="theme-choice" data-theme="sage" type="button" title="切换到鼠尾草风格"><i></i><span>鼠尾草</span></button>
+      <button class="theme-choice" data-theme="graphite" type="button" title="切换到石墨风格"><i></i><span>石墨</span></button>
     </section>
 
     <section class="offline-banner" id="offlineBanner" hidden>
@@ -47,17 +47,17 @@
     <section class="view active" data-view="home">
       <article class="hero-card">
         <p>扣除信用卡后的净资产</p>
-        <strong class="money" data-value="CNY 244,229.82">CNY 244,229.82</strong>
+        <strong class="money" data-value="CNY 244,229.82">••••••</strong>
         <div class="metric-grid">
-          <span><b class="money" data-value="14,325">14,325</b>本月支出</span>
+          <span><b class="money" data-value="14,325">••••••</b>本月支出</span>
           <span><b>31.4%</b>储蓄率</span>
-          <span><b>7.6%</b>XIRR</span>
+          <span><b>7.6%</b>月收益率</span>
         </div>
       </article>
 
       <div class="overview-grid">
-        <article><span>本月收入</span><b class="money" data-value="22,376">22,376</b></article>
-        <article><span>储蓄金额</span><b class="money" data-value="8,051">8,051</b></article>
+        <article><span>本月收入</span><b class="money" data-value="22,376">••••••</b></article>
+        <article><span>储蓄金额</span><b class="money" data-value="8,051">••••••</b></article>
         <article><span>资产偏离</span><b>2 项</b></article>
         <article><span>待同步</span><b id="homePendingCount">0 条</b></article>
       </div>
@@ -72,11 +72,11 @@
         <span>桌面看板口径</span>
       </div>
       <div class="list">
-        <button class="list-row" type="button">
+        <div class="list-row static">
           <i class="tile gold"></i>
           <span><b>当前已经更新到 2026 年 5 月</b><small>手机端后续会读取桌面发布库的最新快照。</small></span>
           <em>状态</em>
-        </button>
+        </div>
         <button class="list-row" data-nav="cashflow" type="button">
           <i class="tile green"></i>
           <span><b>已录入 2025 年 12 月到 2026 年 5 月</b><small>手机展示为趋势摘要，不替代桌面完整看板。</small></span>
@@ -141,17 +141,17 @@
         <p>收支储蓄</p>
         <strong>31.4%</strong>
         <div class="metric-grid">
-          <span><b class="money" data-value="22,376">22,376</b>收入</span>
-          <span><b class="money" data-value="14,325">14,325</b>支出</span>
-          <span><b class="money" data-value="8,051">8,051</b>储蓄</span>
+          <span><b class="money" data-value="22,376">••••••</b>收入</span>
+          <span><b class="money" data-value="14,325">••••••</b>支出</span>
+          <span><b class="money" data-value="8,051">••••••</b>储蓄</span>
         </div>
       </article>
 
       <div class="chart-card">
-        <div class="bar-row"><span>餐饮</span><i style="--w: 74%"></i><b class="money" data-value="3,260">3,260</b></div>
-        <div class="bar-row"><span>旅游</span><i style="--w: 62%"></i><b class="money" data-value="2,730">2,730</b></div>
-        <div class="bar-row"><span>居住</span><i style="--w: 46%"></i><b class="money" data-value="2,040">2,040</b></div>
-        <div class="bar-row"><span>交通</span><i style="--w: 28%"></i><b class="money" data-value="1,220">1,220</b></div>
+        <div class="bar-row"><span>餐饮</span><i style="--w: 74%"></i><b class="money" data-value="3,260">••••••</b></div>
+        <div class="bar-row"><span>旅游</span><i style="--w: 62%"></i><b class="money" data-value="2,730">••••••</b></div>
+        <div class="bar-row"><span>居住</span><i style="--w: 46%"></i><b class="money" data-value="2,040">••••••</b></div>
+        <div class="bar-row"><span>交通</span><i style="--w: 28%"></i><b class="money" data-value="1,220">••••••</b></div>
       </div>
 
       <div class="list">
@@ -163,7 +163,7 @@
     <section class="view" data-view="allocation">
       <article class="wallet-hero">
         <p>资产配置</p>
-        <strong class="money" data-value="CNY 244,229.82">CNY 244,229.82</strong>
+        <strong class="money" data-value="CNY 244,229.82">••••••</strong>
         <div class="ring" aria-hidden="true"></div>
         <div class="summary-strip">
           <span>现金 21%</span>
@@ -174,9 +174,9 @@
       </article>
 
       <div class="wallet-stack">
-        <article class="asset-card gold"><span>全球资产</span><strong class="money" data-value="CNY 127,771.57">CNY 127,771.57</strong><small>美股 / 港股 / 新兴市场</small></article>
-        <article class="asset-card sage"><span>现金</span><strong class="money" data-value="CNY 55,719.19">CNY 55,719.19</strong><small>银行 / 支付账户 / 货币现金</small></article>
-        <article class="asset-card blue"><span>债券</span><strong class="money" data-value="CNY 35,049.26">CNY 35,049.26</strong><small>短债 / 纯债 / 国债</small></article>
+        <article class="asset-card gold"><span>全球资产</span><strong class="money" data-value="CNY 127,771.57">••••••</strong><small>美股 / 港股 / 新兴市场</small></article>
+        <article class="asset-card sage"><span>现金</span><strong class="money" data-value="CNY 55,719.19">••••••</strong><small>银行 / 支付账户 / 货币现金</small></article>
+        <article class="asset-card blue"><span>债券</span><strong class="money" data-value="CNY 35,049.26">••••••</strong><small>短债 / 纯债 / 国债</small></article>
       </div>
 
       <div class="monthend-card">
@@ -208,6 +208,8 @@
     </div>
   </dialog>
 
-  <script src="./app.js" type="module"></script>
+  <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
+
+  <script src="./app.js?v=4" type="module"></script>
 </body>
 </html>

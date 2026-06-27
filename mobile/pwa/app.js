@@ -11,13 +11,18 @@ const baseCategories = {
 
 const settings = readSettings();
 const customCategories = readCustomCategories();
+const icons = {
+  eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M9.9 4.4A10.7 10.7 0 0 1 12 4.2c6.3 0 9.9 7 9.9 7a16.2 16.2 0 0 1-3.1 3.9"/><path d="M6.5 6.8A16.1 16.1 0 0 0 2.1 12s3.6 7 9.9 7a10.7 10.7 0 0 0 4.1-.8"/></svg>',
+  palette: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 1.2-3.6 1.2 1.2 0 0 1 .8-2.1H17a4 4 0 0 0 0-8h-1.2A4.9 4.9 0 0 1 12 3Z"/><circle cx="7.8" cy="10" r=".8"/><circle cx="10.4" cy="7.7" r=".8"/><circle cx="14" cy="7.8" r=".8"/></svg>'
+};
 
 const state = {
   view: "home",
   type: "expense",
   records: [],
   online: navigator.onLine,
-  privacy: settings.privacy,
+  privacy: true,
   theme: settings.theme
 };
 
@@ -42,6 +47,8 @@ const themePanel = document.querySelector("#themePanel");
 const categoryGrid = document.querySelector("#categoryGrid");
 const categoryHint = document.querySelector("#categoryHint");
 const homePendingCount = document.querySelector("#homePendingCount");
+const infoToast = document.querySelector("#infoToast");
+let toastTimer = null;
 
 dateInput.value = new Date().toISOString().slice(0, 10);
 applyTheme();
@@ -62,8 +69,10 @@ document.querySelectorAll(".theme-choice").forEach((button) => {
   button.addEventListener("click", () => {
     state.theme = button.dataset.theme;
     themePanel.hidden = true;
+    themeButton.classList.remove("active");
     writeSettings();
     applyTheme();
+    showToast(`已切换为${button.textContent.trim()}风格`);
   });
 });
 
@@ -71,10 +80,13 @@ privacyButton.addEventListener("click", () => {
   state.privacy = !state.privacy;
   writeSettings();
   render();
+  showToast(state.privacy ? "金额已隐藏" : "金额已显示");
 });
 
 themeButton.addEventListener("click", () => {
   themePanel.hidden = !themePanel.hidden;
+  themeButton.classList.toggle("active", !themePanel.hidden);
+  showToast(themePanel.hidden ? "风格面板已收起" : "选择一种风格");
 });
 
 document.querySelector("#addCategoryButton").addEventListener("click", () => {
@@ -209,10 +221,14 @@ function render() {
   syncCardText.textContent = state.online
     ? "已检测到网络。下一步会连接电脑本地服务。"
     : "离线记录会先保存在手机，连上电脑后同步。";
-  privacyButton.textContent = state.privacy ? "显" : "隐";
+  privacyButton.innerHTML = state.privacy ? icons.eyeOff : icons.eye;
+  privacyButton.setAttribute("aria-label", state.privacy ? "显示金额" : "隐藏金额");
+  privacyButton.setAttribute("title", state.privacy ? "显示金额" : "隐藏金额");
+  privacyButton.dataset.tooltip = state.privacy ? "显示金额" : "隐藏金额";
+  themeButton.innerHTML = icons.palette;
   document.body.classList.toggle("privacy-on", state.privacy);
   document.querySelectorAll(".money").forEach((node) => {
-    node.textContent = state.privacy ? "****" : node.dataset.value;
+    node.textContent = state.privacy ? "••••••" : node.dataset.value;
   });
   renderLocalRecords();
 }
@@ -254,14 +270,15 @@ function showSyncDialog() {
 
 function readSettings() {
   try {
-    return { theme: "champagne", privacy: false, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    return { theme: "champagne", ...stored };
   } catch {
-    return { theme: "champagne", privacy: false };
+    return { theme: "champagne" };
   }
 }
 
 function writeSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme: state.theme, privacy: state.privacy }));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme: state.theme }));
 }
 
 function readCustomCategories() {
@@ -292,6 +309,16 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#039;"
   })[char]);
+}
+
+function showToast(message) {
+  if (!message) return;
+  infoToast.textContent = message;
+  infoToast.hidden = false;
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    infoToast.hidden = true;
+  }, 1800);
 }
 
 function openDatabase() {
