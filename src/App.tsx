@@ -1761,6 +1761,7 @@ export function App() {
   const [reportPreview, setReportPreview] = useState<TemplateRenderResult | null>(null);
   const [mobileSyncSummary, setMobileSyncSummary] = useState<MobileSyncSummary | null>(null);
   const [mobileSyncMessage, setMobileSyncMessage] = useState<string | null>(null);
+  const [mobileSyncExpanded, setMobileSyncExpanded] = useState(false);
   const environmentLabel = security?.environment_label || (browserPreviewSummary ? "Demo" : "");
   const isDemoEnvironment = environmentLabel.toLowerCase() === "demo";
   const isTestEnvironment = environmentLabel.toLowerCase() === "test";
@@ -5189,25 +5190,32 @@ export function App() {
           <article><span>已处理</span><strong>{mobileSyncSummary?.reviewed_in_desktop ?? 0} 条</strong></article>
         </div>
         <p className="mobile-sync-copy">
-          只连接 Test 数据库。手机记账会先进这里，不直接刷新首页看板，也不写正式数据库。
-          {mobileSyncSummary?.last_seen_at ? ` 最近连接：${mobileSyncSummary.last_seen_at}。` : " 手机还没有连接过。"}
+          {mobileSyncSummary?.last_seen_at ? `最近连接：${mobileSyncSummary.last_seen_at}。` : "手机还没有连接过。"}
         </p>
         {mobileSyncMessage ? <p className="mobile-sync-message">{mobileSyncMessage}</p> : null}
         {mobileSyncSummary?.records.length ? (
-          <div className="mobile-sync-list">
-            {mobileSyncSummary.records.map((record) => (
-              <div className="mobile-sync-row" key={record.id}>
-                <span>
-                  <b>{mobileRecordLabel(record)}</b>
-                  <small>{record.note || record.local_id}</small>
-                </span>
-                <em>{mobileRecordAmount(record)}</em>
-                <i>{record.sync_status === "reviewed" ? "已处理" : "已收到"}</i>
+          <>
+            <button className="mobile-sync-toggle" onClick={() => setMobileSyncExpanded((current) => !current)} type="button">
+              <span>{mobileSyncExpanded ? "收起明细" : "查看明细"}</span>
+              <small>{mobileSyncSummary.records.length} 条最近记录</small>
+            </button>
+            {mobileSyncExpanded ? (
+              <div className="mobile-sync-list">
+                {mobileSyncSummary.records.map((record) => (
+                  <div className="mobile-sync-row" key={record.id}>
+                    <span>
+                      <b>{mobileRecordLabel(record)}</b>
+                      <small>{record.note || record.local_id}</small>
+                    </span>
+                    <em>{mobileRecordAmount(record)}</em>
+                    <i>{record.sync_status === "reviewed" ? "已处理" : "已收到"}</i>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            ) : null}
+          </>
         ) : null}
-        {allReceivedIds.length ? (
+        {mobileSyncExpanded && allReceivedIds.length ? (
           <button className="secondary-button compact" onClick={() => void markMobileSyncReviewed(allReceivedIds)} type="button">
             标记这些已处理
           </button>

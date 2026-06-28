@@ -1471,6 +1471,36 @@ h2 {
   gap: 8px;
 }
 
+.mobile-sync-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.mobile-sync-toggle:hover,
+.mobile-sync-toggle:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  outline: none;
+}
+
+.mobile-sync-toggle small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .mobile-sync-row {
   justify-content: space-between;
   gap: 12px;
