@@ -6,10 +6,13 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::{env, fs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Manager, State};
 use thiserror::Error;
@@ -25,6 +28,111 @@ struct Database {
 
 struct SecuritySession {
   unlocked: Mutex<bool>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct MobileSyncRecordInput {
+  local_id: String,
+  server_id: Option<String>,
+  record_kind: Option<String>,
+  sync_status: Option<String>,
+  transaction_type: Option<String>,
+  amount: Option<f64>,
+  currency: Option<String>,
+  category: Option<String>,
+  transaction_date: Option<String>,
+  period_month: Option<String>,
+  note: Option<String>,
+  current_billed_amount: Option<f64>,
+  current_unbilled_amount: Option<f64>,
+  previous_unbilled_amount: Option<f64>,
+  net_adjustment: Option<f64>,
+  created_at: Option<String>,
+  updated_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MobileSyncPushInput {
+  device_id: Option<String>,
+  app_version: Option<String>,
+  records: Vec<MobileSyncRecordInput>,
+}
+
+#[derive(Deserialize)]
+struct MobileSyncStatusInput {
+  device_id: Option<String>,
+  app_version: Option<String>,
+  pending_count: i64,
+  synced_count: i64,
+}
+
+#[derive(Serialize)]
+struct MobileSyncAck {
+  local_id: String,
+  server_id: String,
+  sync_status: String,
+}
+
+#[derive(Serialize)]
+struct MobileSyncPushResult {
+  accepted_count: usize,
+  records: Vec<MobileSyncAck>,
+}
+
+#[derive(Serialize)]
+struct MobileSyncInboxRecord {
+  id: String,
+  device_id: String,
+  local_id: String,
+  record_kind: String,
+  transaction_type: Option<String>,
+  transaction_date: Option<String>,
+  period_month: Option<String>,
+  amount: Option<f64>,
+  category: Option<String>,
+  note: Option<String>,
+  net_adjustment: Option<f64>,
+  sync_status: String,
+  received_at: String,
+}
+
+#[derive(Serialize)]
+struct MobileSyncSummary {
+  enabled: bool,
+  device_id: Option<String>,
+  app_version: Option<String>,
+  pending_on_phone: i64,
+  synced_on_phone: i64,
+  received_in_desktop: i64,
+  reviewed_in_desktop: i64,
+  last_seen_at: Option<String>,
+  records: Vec<MobileSyncInboxRecord>,
+}
+
+#[derive(Serialize)]
+struct MobileAssetAllocation {
+  category: String,
+  amount: f64,
+  percent: f64,
+}
+
+#[derive(Serialize)]
+struct MobilePortfolioTarget {
+  category: String,
+  target_percent: f64,
+  current_amount: f64,
+  current_percent: f64,
+  deviation_percent: f64,
+}
+
+#[derive(Serialize)]
+struct MobileDashboardSnapshot {
+  snapshot_month: String,
+  asset_gross_value: f64,
+  credit_card_net_adjustment: f64,
+  net_worth: f64,
+  asset_allocations: Vec<MobileAssetAllocation>,
+  portfolio_targets: Vec<MobilePortfolioTarget>,
 }
 
 #[derive(Debug, Error)]
@@ -739,6 +847,50 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
   )?;
   connection.execute(
     "
+    create table if not exists mobile_sync_devices (
+      device_id text primary key,
+      app_version text,
+      pending_count integer not null default 0,
+      synced_count integer not null default 0,
+      last_seen_at text not null default current_timestamp
+    )
+    ",
+    [],
+  )?;
+  connection.execute(
+    "
+    create table if not exists mobile_sync_inbox (
+      id text primary key,
+      device_id text not null,
+      local_id text not null,
+      record_kind text not null,
+      transaction_type text,
+      transaction_date text,
+      period_month text,
+      amount numeric,
+      currency text not null default 'CNY',
+      category text,
+      note text,
+      current_billed_amount numeric,
+      current_unbilled_amount numeric,
+      previous_unbilled_amount numeric,
+      net_adjustment numeric,
+      payload_json text not null,
+      sync_status text not null default 'received',
+      received_at text not null default current_timestamp,
+      reviewed_at text,
+      updated_at text not null default current_timestamp,
+      unique(device_id, local_id)
+    )
+    ",
+    [],
+  )?;
+  connection.execute(
+    "create index if not exists idx_mobile_sync_inbox_status on mobile_sync_inbox(sync_status, received_at)",
+    [],
+  )?;
+  connection.execute(
+    "
     create table if not exists credit_cards (
       id text primary key,
       name text not null,
@@ -1141,6 +1293,413 @@ fn parse_amount(value: &str) -> Result<f64, AppError> {
     .parse::<f64>()
     .map(|amount| amount.abs())
     .map_err(|_| AppError::InvalidCsvValue(format!("金额 {value}")))
+}
+
+fn is_test_environment() -> bool {
+  env::var("FINANCIAL_PLANNING_ENV_LABEL")
+    .unwrap_or_default()
+    .eq_ignore_ascii_case("test")
+}
+
+fn mobile_sync_device_id(input: Option<String>) -> String {
+  input
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+    .unwrap_or_else(|| "worthtrace-mobile-local".to_string())
+}
+
+fn ensure_mobile_sync_schema(connection: &Connection) -> Result<(), AppError> {
+  ensure_runtime_schema(connection)
+}
+
+fn upsert_mobile_device(
+  connection: &Connection,
+  device_id: &str,
+  app_version: Option<&str>,
+  pending_count: i64,
+  synced_count: i64,
+) -> Result<(), AppError> {
+  connection.execute(
+    "
+    insert into mobile_sync_devices (device_id, app_version, pending_count, synced_count, last_seen_at)
+    values (?1, ?2, ?3, ?4, current_timestamp)
+    on conflict(device_id) do update set
+      app_version = excluded.app_version,
+      pending_count = excluded.pending_count,
+      synced_count = excluded.synced_count,
+      last_seen_at = current_timestamp
+    ",
+    params![device_id, app_version, pending_count, synced_count],
+  )?;
+  Ok(())
+}
+
+fn store_mobile_sync_records(
+  connection: &Connection,
+  input: MobileSyncPushInput,
+) -> Result<MobileSyncPushResult, AppError> {
+  let device_id = mobile_sync_device_id(input.device_id);
+  upsert_mobile_device(connection, &device_id, input.app_version.as_deref(), 0, input.records.len() as i64)?;
+  let tx = connection.unchecked_transaction()?;
+  let mut acknowledgements = Vec::new();
+  for record in input.records {
+    let local_id = record.local_id.trim().to_string();
+    if local_id.is_empty() {
+      continue;
+    }
+    let id = make_unique_id("mobile", &format!("{device_id}|{local_id}"));
+    let record_kind = record
+      .record_kind
+      .as_deref()
+      .unwrap_or("transaction")
+      .trim()
+      .to_string();
+    let payload_json = serde_json::to_string(&record)
+      .map_err(|err| AppError::InvalidCsvValue(format!("手机同步数据无法保存：{err}")))?;
+    tx.execute(
+      "
+      insert into mobile_sync_inbox (
+        id, device_id, local_id, record_kind, transaction_type, transaction_date,
+        period_month, amount, currency, category, note, current_billed_amount,
+        current_unbilled_amount, previous_unbilled_amount, net_adjustment, payload_json, sync_status
+      )
+      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 'received')
+      on conflict(device_id, local_id) do update set
+        record_kind = excluded.record_kind,
+        transaction_type = excluded.transaction_type,
+        transaction_date = excluded.transaction_date,
+        period_month = excluded.period_month,
+        amount = excluded.amount,
+        currency = excluded.currency,
+        category = excluded.category,
+        note = excluded.note,
+        current_billed_amount = excluded.current_billed_amount,
+        current_unbilled_amount = excluded.current_unbilled_amount,
+        previous_unbilled_amount = excluded.previous_unbilled_amount,
+        net_adjustment = excluded.net_adjustment,
+        payload_json = excluded.payload_json,
+        sync_status = case
+          when mobile_sync_inbox.sync_status = 'reviewed' then 'reviewed'
+          else 'received'
+        end,
+        updated_at = current_timestamp
+      ",
+      params![
+        id,
+        device_id,
+        local_id,
+        record_kind,
+        record.transaction_type,
+        record.transaction_date,
+        record.period_month,
+        record.amount,
+        record.currency.unwrap_or_else(|| "CNY".to_string()),
+        record.category,
+        record.note,
+        record.current_billed_amount,
+        record.current_unbilled_amount,
+        record.previous_unbilled_amount,
+        record.net_adjustment,
+        payload_json,
+      ],
+    )?;
+    acknowledgements.push(MobileSyncAck {
+      local_id,
+      server_id: id,
+      sync_status: "synced".to_string(),
+    });
+  }
+  tx.commit()?;
+  Ok(MobileSyncPushResult {
+    accepted_count: acknowledgements.len(),
+    records: acknowledgements,
+  })
+}
+
+fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<MobileSyncSummary, AppError> {
+  ensure_mobile_sync_schema(connection)?;
+  let latest_device = connection
+    .query_row(
+      "
+      select device_id, app_version, pending_count, synced_count, last_seen_at
+      from mobile_sync_devices
+      order by last_seen_at desc
+      limit 1
+      ",
+      [],
+      |row| {
+        Ok((
+          row.get::<_, String>(0)?,
+          row.get::<_, Option<String>>(1)?,
+          row.get::<_, i64>(2)?,
+          row.get::<_, i64>(3)?,
+          row.get::<_, String>(4)?,
+        ))
+      },
+    )
+    .optional()?;
+  let (device_id, app_version, pending_on_phone, synced_on_phone, last_seen_at) = latest_device
+    .map(|item| (Some(item.0), item.1, item.2, item.3, Some(item.4)))
+    .unwrap_or((None, None, 0, 0, None));
+  let received_in_desktop = connection.query_row(
+    "select count(*) from mobile_sync_inbox where sync_status = 'received'",
+    [],
+    |row| row.get(0),
+  )?;
+  let reviewed_in_desktop = connection.query_row(
+    "select count(*) from mobile_sync_inbox where sync_status = 'reviewed'",
+    [],
+    |row| row.get(0),
+  )?;
+  let mut statement = connection.prepare(
+    "
+    select id, device_id, local_id, record_kind, transaction_type, transaction_date,
+      period_month, amount, category, note, net_adjustment, sync_status, received_at
+    from mobile_sync_inbox
+    order by received_at desc
+    limit 8
+    ",
+  )?;
+  let records = statement
+    .query_map([], |row| {
+      Ok(MobileSyncInboxRecord {
+        id: row.get(0)?,
+        device_id: row.get(1)?,
+        local_id: row.get(2)?,
+        record_kind: row.get(3)?,
+        transaction_type: row.get(4)?,
+        transaction_date: row.get(5)?,
+        period_month: row.get(6)?,
+        amount: row.get(7)?,
+        category: row.get(8)?,
+        note: row.get(9)?,
+        net_adjustment: row.get(10)?,
+        sync_status: row.get(11)?,
+        received_at: row.get(12)?,
+      })
+    })?
+    .collect::<Result<Vec<_>, _>>()?;
+  Ok(MobileSyncSummary {
+    enabled,
+    device_id,
+    app_version,
+    pending_on_phone,
+    synced_on_phone,
+    received_in_desktop,
+    reviewed_in_desktop,
+    last_seen_at,
+    records,
+  })
+}
+
+fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashboardSnapshot, AppError> {
+  ensure_runtime_schema(connection)?;
+  let snapshot_month = latest_completed_period_month(connection)?;
+  let asset_gross_value: f64 = connection.query_row(
+    "select coalesce(sum(amount_cny), 0) from monthly_asset_snapshots where period_month = ?1 and version_no = 1 and status = 'held'",
+    params![snapshot_month],
+    |row| row.get(0),
+  )?;
+  let credit_card_net_adjustment: f64 = connection.query_row(
+    "select coalesce(sum(net_adjustment), 0) from monthly_credit_card_entries where period_month = ?1 and confirmed = 1",
+    params![snapshot_month],
+    |row| row.get(0),
+  )?;
+  let asset_allocations = asset_allocation_breakdown(connection, &snapshot_month, None)?
+    .into_iter()
+    .filter(|item| item.amount.abs() > 0.000_001)
+    .map(|item| MobileAssetAllocation {
+      category: item.category,
+      amount: item.amount,
+      percent: item.percent,
+    })
+    .collect();
+  let mut statement = connection.prepare(
+    "
+    select
+      ac.name,
+      pti.target_percent,
+      coalesce(sum(mas.amount_cny), 0) as current_amount
+    from portfolio_target_items pti
+    join portfolio_targets pt on pt.id = pti.target_id and pt.is_active = 1
+    join asset_categories ac on ac.id = pti.main_asset_category_id
+    left join assets a on a.main_asset_category_id = ac.id
+    left join monthly_asset_snapshots mas on mas.asset_id = a.id
+      and mas.period_month = ?1
+      and mas.version_no = 1
+      and mas.status = 'held'
+    group by ac.id, ac.name, pti.target_percent, ac.sort_order
+    having abs(coalesce(sum(mas.amount_cny), 0)) > 0.000001
+      or pti.target_percent is not null
+    order by ac.sort_order
+    ",
+  )?;
+  let mut rows = statement.query(params![snapshot_month])?;
+  let mut portfolio_targets = Vec::new();
+  while let Some(row) = rows.next()? {
+    let category: String = row.get(0)?;
+    let target_percent: f64 = row.get(1)?;
+    let current_amount: f64 = row.get(2)?;
+    let current_percent = if asset_gross_value > 0.0 {
+      current_amount / asset_gross_value
+    } else {
+      0.0
+    };
+    portfolio_targets.push(MobilePortfolioTarget {
+      category,
+      target_percent,
+      current_amount,
+      current_percent,
+      deviation_percent: current_percent - target_percent,
+    });
+  }
+  Ok(MobileDashboardSnapshot {
+    snapshot_month,
+    asset_gross_value,
+    credit_card_net_adjustment,
+    net_worth: asset_gross_value + credit_card_net_adjustment,
+    asset_allocations,
+    portfolio_targets,
+  })
+}
+
+fn http_response(status: &str, content_type: &str, body: &str) -> Vec<u8> {
+  format!(
+    "HTTP/1.1 {status}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Type: {content_type}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+    body.as_bytes().len()
+  )
+  .into_bytes()
+}
+
+fn http_json<T: Serialize>(value: &T) -> Vec<u8> {
+  match serde_json::to_string(value) {
+    Ok(body) => http_response("200 OK", "application/json", &body),
+    Err(err) => http_response("500 Internal Server Error", "text/plain", &format!("json error: {err}")),
+  }
+}
+
+fn http_error(status: &str, message: &str) -> Vec<u8> {
+  http_response(status, "text/plain", message)
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Result<(String, String, String), AppError> {
+  stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+  let mut buffer = Vec::new();
+  let mut temp = [0_u8; 8192];
+  let mut header_end = None;
+  loop {
+    let count = stream.read(&mut temp)?;
+    if count == 0 {
+      break;
+    }
+    buffer.extend_from_slice(&temp[..count]);
+    if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+      header_end = Some(position + 4);
+      break;
+    }
+    if buffer.len() > 1024 * 1024 {
+      return Err(AppError::InvalidCsvValue("手机同步请求过大".to_string()));
+    }
+  }
+  let header_end = header_end.ok_or_else(|| AppError::InvalidCsvValue("手机同步请求格式无效".to_string()))?;
+  let headers = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+  let mut lines = headers.lines();
+  let request_line = lines.next().unwrap_or_default();
+  let mut parts = request_line.split_whitespace();
+  let method = parts.next().unwrap_or_default().to_string();
+  let path = parts.next().unwrap_or_default().to_string();
+  let content_length = headers
+    .lines()
+    .find_map(|line| {
+      let (name, value) = line.split_once(':')?;
+      if name.eq_ignore_ascii_case("content-length") {
+        value.trim().parse::<usize>().ok()
+      } else {
+        None
+      }
+    })
+    .unwrap_or(0);
+  while buffer.len() < header_end + content_length {
+    let count = stream.read(&mut temp)?;
+    if count == 0 {
+      break;
+    }
+    buffer.extend_from_slice(&temp[..count]);
+  }
+  let body_bytes = &buffer[header_end..std::cmp::min(buffer.len(), header_end + content_length)];
+  let body = String::from_utf8_lossy(body_bytes).to_string();
+  Ok((method, path, body))
+}
+
+fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashboard_db_path: PathBuf) {
+  let response = match read_http_request(&mut stream) {
+    Ok((method, path, body)) => {
+      if method == "OPTIONS" {
+        http_response("204 No Content", "text/plain", "")
+      } else if method == "GET" && path == "/mobile-sync/health" {
+        http_response("200 OK", "text/plain", "WorthTrace Test mobile sync is ready")
+      } else if method == "GET" && path == "/mobile-sync/dashboard" {
+        match Connection::open(&dashboard_db_path)
+          .map_err(AppError::from)
+          .and_then(|connection| read_mobile_dashboard_snapshot(&connection)) {
+            Ok(snapshot) => http_json(&snapshot),
+            Err(err) => http_error("500 Internal Server Error", &err.to_string()),
+          }
+      } else if method == "POST" && path == "/mobile-sync/status" {
+        match serde_json::from_str::<MobileSyncStatusInput>(&body) {
+          Ok(input) => match Connection::open(&work_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| {
+              ensure_mobile_sync_schema(&connection)?;
+              let device_id = mobile_sync_device_id(input.device_id);
+              upsert_mobile_device(&connection, &device_id, input.app_version.as_deref(), input.pending_count, input.synced_count)?;
+              read_mobile_sync_summary(&connection, true)
+            }) {
+              Ok(summary) => http_json(&summary),
+              Err(err) => http_error("500 Internal Server Error", &err.to_string()),
+            },
+          Err(err) => http_error("400 Bad Request", &format!("invalid status payload: {err}")),
+        }
+      } else if method == "POST" && path == "/mobile-sync/push" {
+        match serde_json::from_str::<MobileSyncPushInput>(&body) {
+          Ok(input) => match Connection::open(&work_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| {
+              ensure_mobile_sync_schema(&connection)?;
+              store_mobile_sync_records(&connection, input)
+            }) {
+              Ok(result) => http_json(&result),
+              Err(err) => http_error("500 Internal Server Error", &err.to_string()),
+            },
+          Err(err) => http_error("400 Bad Request", &format!("invalid sync payload: {err}")),
+        }
+      } else {
+        http_error("404 Not Found", "not found")
+      }
+    }
+    Err(err) => http_error("400 Bad Request", &err.to_string()),
+  };
+  let _ = stream.write_all(&response);
+}
+
+fn start_mobile_sync_server(work_db_path: PathBuf, dashboard_db_path: PathBuf) {
+  if !is_test_environment() {
+    return;
+  }
+  thread::spawn(move || {
+    let listener = match TcpListener::bind("0.0.0.0:18742") {
+      Ok(listener) => listener,
+      Err(err) => {
+        eprintln!("mobile sync server unavailable: {err}");
+        return;
+      }
+    };
+    for stream in listener.incoming().flatten() {
+      let work_path = work_db_path.clone();
+      let dashboard_path = dashboard_db_path.clone();
+      thread::spawn(move || handle_mobile_sync_stream(stream, work_path, dashboard_path));
+    }
+  });
 }
 
 fn cell_string(row: &[String], index: usize, field: &'static str) -> Result<String, AppError> {
@@ -6956,6 +7515,37 @@ fn get_dashboard_seed_summary(
   })
 }
 
+#[tauri::command]
+fn get_mobile_sync_summary(
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<MobileSyncSummary, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  read_mobile_sync_summary(&connection, is_test_environment())
+}
+
+#[tauri::command]
+fn mark_mobile_sync_records_reviewed(
+  ids: Vec<String>,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<MobileSyncSummary, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  for id in ids.iter().map(|value| value.trim()).filter(|value| !value.is_empty()) {
+    connection.execute(
+      "
+      update mobile_sync_inbox
+      set sync_status = 'reviewed', reviewed_at = current_timestamp, updated_at = current_timestamp
+      where id = ?1
+      ",
+      params![id],
+    )?;
+  }
+  read_mobile_sync_summary(&connection, is_test_environment())
+}
+
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
@@ -6963,8 +7553,9 @@ pub fn run() {
       let work_db_path = work_database_path(app)?;
       let dashboard_db_path = dashboard_database_path(&work_db_path)?;
       let split_databases = work_db_path != dashboard_db_path;
-      let work_connection = open_database(work_db_path)?;
-      let dashboard_connection = open_database(dashboard_db_path)?;
+      let work_connection = open_database(work_db_path.clone())?;
+      let dashboard_connection = open_database(dashboard_db_path.clone())?;
+      start_mobile_sync_server(work_db_path, dashboard_db_path);
       app.manage(Database {
         work_connection: Mutex::new(work_connection),
         dashboard_connection: Mutex::new(dashboard_connection),
@@ -7015,7 +7606,9 @@ pub fn run() {
       get_credit_card_entries,
       save_credit_card_entries,
       generate_monthly_analysis,
-      get_dashboard_seed_summary
+      get_dashboard_seed_summary,
+      get_mobile_sync_summary,
+      mark_mobile_sync_records_reviewed
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

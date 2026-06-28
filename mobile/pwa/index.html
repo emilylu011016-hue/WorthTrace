@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.2.0" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.2.1" />
 </head>
 <body class="theme-champagne privacy-on">
   <main class="mobile-shell">
@@ -189,7 +189,8 @@
         <p>已发布月报资产配置</p>
         <strong class="money" data-value="CNY 244,229.82">••••••</strong>
         <small class="data-stamp">截至 2026 年 5 月月报；6 月资产未更新</small>
-        <div class="ring" aria-hidden="true"></div>
+        <div class="ring" id="assetRing" aria-hidden="true"></div>
+        <div class="allocation-legend" id="allocationLegend"></div>
       </article>
 
       <div id="targetDeviationSection"></div>
@@ -208,12 +209,12 @@
     <div class="sync-dialog-body" id="syncDialogText">当前是原型模式。之后会在同 Wi-Fi 下同步到电脑。</div>
     <div class="dialog-actions">
       <button id="closeDialogButton" type="button">稍后</button>
-      <button id="mockSyncButton" type="button">模拟同步草稿</button>
+      <button id="mockSyncButton" type="button">同步到电脑</button>
     </div>
   </dialog>
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.2.0" type="module"></script>
+  <script src="./app.js?mobileVersion=0.2.1" type="module"></script>
 </body>
 </html>

@@ -921,6 +921,47 @@ button.list-row:active {
   font-weight: 840;
 }
 
+.allocation-legend {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.allocation-legend-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper) 62%, transparent);
+}
+
+.allocation-legend-row i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.allocation-legend-row span,
+.allocation-legend-row b {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.allocation-legend-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allocation-legend-row b {
+  text-align: right;
+}
+
 .asset-insight-card {
   display: grid;
   gap: 12px;

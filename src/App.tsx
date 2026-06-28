@@ -254,6 +254,34 @@ type SecurityStatus = {
   environment_label?: string | null;
 };
 
+type MobileSyncInboxRecord = {
+  id: string;
+  device_id: string;
+  local_id: string;
+  record_kind: string;
+  transaction_type?: string | null;
+  transaction_date?: string | null;
+  period_month?: string | null;
+  amount?: number | null;
+  category?: string | null;
+  note?: string | null;
+  net_adjustment?: number | null;
+  sync_status: string;
+  received_at: string;
+};
+
+type MobileSyncSummary = {
+  enabled: boolean;
+  device_id?: string | null;
+  app_version?: string | null;
+  pending_on_phone: number;
+  synced_on_phone: number;
+  received_in_desktop: number;
+  reviewed_in_desktop: number;
+  last_seen_at?: string | null;
+  records: MobileSyncInboxRecord[];
+};
+
 type ImportResult = {
   batch_id: string;
   duplicate_file: boolean;
@@ -1731,8 +1759,11 @@ export function App() {
   const [templateMessage, setTemplateMessage] = useState<string | null>(null);
   const [reportTemplateId, setReportTemplateId] = useState<string>("");
   const [reportPreview, setReportPreview] = useState<TemplateRenderResult | null>(null);
+  const [mobileSyncSummary, setMobileSyncSummary] = useState<MobileSyncSummary | null>(null);
+  const [mobileSyncMessage, setMobileSyncMessage] = useState<string | null>(null);
   const environmentLabel = security?.environment_label || (browserPreviewSummary ? "Demo" : "");
   const isDemoEnvironment = environmentLabel.toLowerCase() === "demo";
+  const isTestEnvironment = environmentLabel.toLowerCase() === "test";
   const shouldShowInitialPasswordSetup = Boolean(
     security &&
       !security.password_set &&
@@ -1816,6 +1847,18 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem("financial-planning-dashboard-theme", dashboardTheme);
   }, [dashboardTheme]);
+
+  useEffect(() => {
+    if (browserPreviewSummary || !security?.unlocked || !isTestEnvironment) {
+      setMobileSyncSummary(null);
+      return;
+    }
+    void refreshMobileSyncSummary();
+    const timer = window.setInterval(() => {
+      void refreshMobileSyncSummary();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [browserPreviewSummary, security?.unlocked, isTestEnvironment]);
 
   useEffect(() => {
     if (browserPreviewSummary || !onboardingStatus || onboardingDraftHydrated) return;
@@ -5086,6 +5129,93 @@ export function App() {
     );
   }
 
+  async function refreshMobileSyncSummary() {
+    try {
+      const result = await invoke<MobileSyncSummary>("get_mobile_sync_summary");
+      setMobileSyncSummary(result);
+      setMobileSyncMessage(null);
+    } catch (err) {
+      setMobileSyncMessage(String(err));
+    }
+  }
+
+  async function markMobileSyncReviewed(ids: string[]) {
+    if (!ids.length) return;
+    try {
+      const result = await invoke<MobileSyncSummary>("mark_mobile_sync_records_reviewed", { ids });
+      setMobileSyncSummary(result);
+      setMobileSyncMessage("已标记为电脑端已处理。");
+    } catch (err) {
+      setMobileSyncMessage(String(err));
+    }
+  }
+
+  const mobileRecordLabel = (record: MobileSyncInboxRecord) => {
+    if (record.record_kind === "credit_card_adjustment") {
+      return `信用卡调整｜${record.period_month || selectedMonth}`;
+    }
+    return `${record.transaction_type === "income" ? "收入" : "支出"}｜${record.transaction_date || ""}｜${record.category || "未分类"}`;
+  };
+
+  const mobileRecordAmount = (record: MobileSyncInboxRecord) => {
+    if (record.record_kind === "credit_card_adjustment") {
+      return formatCurrency(Number(record.net_adjustment) || 0, privacyMode);
+    }
+    return formatCurrency(Number(record.amount) || 0, privacyMode);
+  };
+
+  const renderMobileSyncNotice = () => {
+    const receivedRecords = mobileSyncSummary?.records.filter((record) => record.sync_status === "received") ?? [];
+    const allReceivedIds = receivedRecords.map((record) => record.id);
+    return (
+      <section className="mobile-sync-panel">
+        <div className="mobile-sync-head">
+          <div>
+            <p className="eyebrow">Test Mobile Sync</p>
+            <h2>手机同步收件箱</h2>
+          </div>
+          <div className="mobile-sync-actions">
+            <button className="secondary-button compact" onClick={() => void refreshMobileSyncSummary()} type="button">
+              刷新
+            </button>
+            <button className="primary-button compact" onClick={() => void openMonthlyUpdate()} type="button">
+              去月更确认
+            </button>
+          </div>
+        </div>
+        <div className="mobile-sync-metrics">
+          <article><span>手机端未同步</span><strong>{mobileSyncSummary?.pending_on_phone ?? 0} 条</strong></article>
+          <article><span>电脑已收到</span><strong>{mobileSyncSummary?.received_in_desktop ?? 0} 条</strong></article>
+          <article><span>已处理</span><strong>{mobileSyncSummary?.reviewed_in_desktop ?? 0} 条</strong></article>
+        </div>
+        <p className="mobile-sync-copy">
+          只连接 Test 数据库。手机记账会先进这里，不直接刷新首页看板，也不写正式数据库。
+          {mobileSyncSummary?.last_seen_at ? ` 最近连接：${mobileSyncSummary.last_seen_at}。` : " 手机还没有连接过。"}
+        </p>
+        {mobileSyncMessage ? <p className="mobile-sync-message">{mobileSyncMessage}</p> : null}
+        {mobileSyncSummary?.records.length ? (
+          <div className="mobile-sync-list">
+            {mobileSyncSummary.records.map((record) => (
+              <div className="mobile-sync-row" key={record.id}>
+                <span>
+                  <b>{mobileRecordLabel(record)}</b>
+                  <small>{record.note || record.local_id}</small>
+                </span>
+                <em>{mobileRecordAmount(record)}</em>
+                <i>{record.sync_status === "reviewed" ? "已处理" : "已收到"}</i>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {allReceivedIds.length ? (
+          <button className="secondary-button compact" onClick={() => void markMobileSyncReviewed(allReceivedIds)} type="button">
+            标记这些已处理
+          </button>
+        ) : null}
+      </section>
+    );
+  };
+
   const renderThemeSwitcher = (label: string) => (
     <div className="dashboard-preferences app-theme-switcher" aria-label={label}>
       <Palette size={15} aria-hidden="true" />
@@ -5161,6 +5291,7 @@ export function App() {
           <span>当前为预览数据。桌面 App 会读取你的本地资料。</span>
         </section>
       ) : null}
+      {isTestEnvironment ? renderMobileSyncNotice() : null}
     </>
   );
 

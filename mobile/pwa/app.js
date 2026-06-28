@@ -1,10 +1,12 @@
-const MOBILE_APP_VERSION = "0.2.0";
+const MOBILE_APP_VERSION = "0.2.1";
 const DB_NAME = "worthtrace_mobile_v2";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
 const SETTINGS_KEY = "worthtrace_mobile_settings_v2";
 const CUSTOM_CATEGORIES_KEY = "worthtrace_mobile_custom_categories_v2";
 const RELEASE_RESET_KEY = "worthtrace_mobile_release_reset_v2";
+const DEVICE_ID_KEY = "worthtrace_mobile_device_id_v2";
+const DEFAULT_SYNC_ENDPOINT = "http://127.0.0.1:18742";
 const LEGACY_DB_NAMES = ["worthtrace_mobile_v1"];
 const LEGACY_STORAGE_KEYS = ["worthtrace_mobile_settings_v1", "worthtrace_mobile_custom_categories_v1"];
 
@@ -17,6 +19,8 @@ await resetLegacyLocalData();
 
 const settings = readSettings();
 const customCategories = readCustomCategories();
+const syncEndpoint = resolveSyncEndpoint();
+const deviceId = resolveDeviceId();
 const icons = {
   eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M9.9 4.4A10.7 10.7 0 0 1 12 4.2c6.3 0 9.9 7 9.9 7a16.2 16.2 0 0 1-3.1 3.9"/><path d="M6.5 6.8A16.1 16.1 0 0 0 2.1 12s3.6 7 9.9 7a10.7 10.7 0 0 0 4.1-.8"/></svg>',
@@ -61,16 +65,28 @@ const infoToast = document.querySelector("#infoToast");
 const mayAnomalyButton = document.querySelector("#mayAnomalyButton");
 const mayAnomalyDetail = document.querySelector("#mayAnomalyDetail");
 const targetDeviationSection = document.querySelector("#targetDeviationSection");
+const assetRing = document.querySelector("#assetRing");
+const allocationLegend = document.querySelector("#allocationLegend");
 let toastTimer = null;
 
-const mobileDashboardSnapshot = {
-  hasAllocationTargets: false,
+let mobileDashboardSnapshot = {
+  snapshotMonth: "2026-05",
+  netWorth: 244229.82,
+  assetAllocations: [
+    { category: "全球资产", amount: 122114.91, percent: 0.5 },
+    { category: "现金", amount: 51288.26, percent: 0.21 },
+    { category: "债券", amount: 34192.17, percent: 0.14 },
+    { category: "黄金", amount: 19538.39, percent: 0.08 },
+    { category: "其他", amount: 17096.09, percent: 0.07 }
+  ],
   allocationTargets: []
 };
 
 dateInput.value = new Date().toISOString().slice(0, 10);
 applyTheme();
 renderCategoryOptions();
+void loadMobileDashboardSnapshot();
+renderAssetDashboard();
 renderTargetDeviation();
 
 document.querySelectorAll("[data-nav]").forEach((button) => {
@@ -148,6 +164,7 @@ bookForm.addEventListener("submit", async (event) => {
   amountInput.value = "";
   noteInput.value = "";
   render();
+  void reportMobileStatus();
   navigate("home");
 });
 
@@ -182,6 +199,7 @@ creditCardForm.addEventListener("submit", async (event) => {
   cardUnbilledInput.value = "";
   cardPreviousUnbilledInput.value = "";
   render();
+  void reportMobileStatus();
   showToast("已保存 6 月信用卡调整草稿");
 });
 
@@ -198,16 +216,7 @@ draftEntryGrid.addEventListener("click", (event) => {
   renderLocalRecords();
 });
 document.querySelector("#mockSyncButton").addEventListener("click", async () => {
-  const pending = pendingRecords();
-  state.records = state.records.map((record) => ({
-    ...record,
-    sync_status: "synced",
-    server_id: record.server_id || `mock_${record.local_id}`
-  }));
-  await replaceRecords(state.records);
-  syncDialog.close();
-  render();
-  showToast(`已模拟同步 ${pending.length} 条月度草稿；5 月看板不会变化。`);
+  await syncPendingToDesktop();
 });
 
 window.addEventListener("online", () => {
@@ -227,6 +236,7 @@ if ("serviceWorker" in navigator) {
 
 state.records = await readRecords();
 render();
+void reportMobileStatus();
 
 function navigate(view) {
   state.view = view;
@@ -342,7 +352,7 @@ function showSyncDialog() {
           <p>电脑端确认 6 月收支、补资产和信用卡，并生成 6 月月报后，才刷新手机看板。</p>
         </section>
       </div>
-      <p class="sync-prototype-note">当前仍是原型模式：按钮只把手机本地记录标记为“已同步”。</p>
+      <p class="sync-prototype-note">当前连接电脑 Test 同步入口：${escapeHtml(syncEndpoint)}。成功后进入电脑端手机收件箱。</p>
     `
     : `
       <div class="sync-empty">
@@ -351,6 +361,77 @@ function showSyncDialog() {
       </div>
     `;
   syncDialog.showModal();
+}
+
+async function reportMobileStatus() {
+  try {
+    const pending = pendingRecords();
+    const synced = state.records.filter((record) => record.sync_status === "synced");
+    await fetch(`${syncEndpoint}/mobile-sync/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_id: deviceId,
+        app_version: MOBILE_APP_VERSION,
+        pending_count: pending.length,
+        synced_count: synced.length
+      })
+    });
+  } catch {
+    // 电脑 test app 未启动时，手机继续保留本地草稿。
+  }
+}
+
+async function syncPendingToDesktop() {
+  const pending = pendingRecords();
+  if (!pending.length) {
+    syncDialog.close();
+    showToast("没有待同步草稿");
+    return;
+  }
+  const syncButton = document.querySelector("#mockSyncButton");
+  syncButton.disabled = true;
+  syncButton.textContent = "同步中";
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/push`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_id: deviceId,
+        app_version: MOBILE_APP_VERSION,
+        records: pending
+      })
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const result = await response.json();
+    const ackByLocalId = new Map((result.records || []).map((record) => [record.local_id, record]));
+    state.records = state.records.map((record) => {
+      const ack = ackByLocalId.get(record.local_id);
+      if (!ack) return record;
+      return {
+        ...record,
+        sync_status: "synced",
+        server_id: ack.server_id,
+        updated_at: new Date().toISOString()
+      };
+    });
+    await replaceRecords(state.records);
+    syncDialog.close();
+    render();
+    void reportMobileStatus();
+    showToast(`已同步 ${result.accepted_count || 0} 条到电脑 Test 收件箱`);
+  } catch (err) {
+    showToast("同步失败：请确认电脑 Test App 已打开");
+    syncDialogText.insertAdjacentHTML(
+      "beforeend",
+      `<p class="sync-prototype-note">同步失败。${escapeHtml(String(err))}</p>`
+    );
+  } finally {
+    syncButton.disabled = false;
+    syncButton.textContent = "同步到电脑";
+  }
 }
 
 function summarizeRecords(records) {
@@ -454,8 +535,70 @@ function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
 }
 
+async function loadMobileDashboardSnapshot() {
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/dashboard`);
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    mobileDashboardSnapshot = {
+      snapshotMonth: data.snapshot_month || mobileDashboardSnapshot.snapshotMonth,
+      netWorth: Number(data.net_worth) || mobileDashboardSnapshot.netWorth,
+      assetAllocations: Array.isArray(data.asset_allocations)
+        ? data.asset_allocations.map((item) => ({
+          category: item.category,
+          amount: Number(item.amount) || 0,
+          percent: Number(item.percent) || 0
+        }))
+        : mobileDashboardSnapshot.assetAllocations,
+      allocationTargets: Array.isArray(data.portfolio_targets)
+        ? data.portfolio_targets.map((item) => ({
+          category: item.category,
+          target: Number(item.target_percent) || 0,
+          current: Number(item.current_percent) || 0,
+          amount: Number(item.current_amount) || 0,
+          deviation: Number(item.deviation_percent) || 0
+        }))
+        : []
+    };
+    renderAssetDashboard();
+    renderTargetDeviation();
+    render();
+  } catch {
+    renderAssetDashboard();
+    renderTargetDeviation();
+  }
+}
+
+function renderAssetDashboard() {
+  const colors = ["#88a998", "#c7a76d", "#9cacbf", "#c47766", "#627d9a", "#b6927a", "#7d927f"];
+  const allocations = mobileDashboardSnapshot.assetAllocations.filter((item) => item.percent > 0.0001);
+  let cursor = 0;
+  const segments = allocations.map((item, index) => {
+    const start = cursor;
+    const end = Math.min(100, cursor + item.percent * 100);
+    cursor = end;
+    return `${colors[index % colors.length]} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+  });
+  assetRing.style.background = segments.length ? `conic-gradient(${segments.join(", ")})` : "";
+  const assetValue = document.querySelector("[data-view='allocation'] .wallet-hero .money");
+  if (assetValue) {
+    assetValue.dataset.value = formatPlainMoney(mobileDashboardSnapshot.netWorth);
+  }
+  const stamp = document.querySelector("[data-view='allocation'] .data-stamp");
+  if (stamp) {
+    stamp.textContent = `截至 ${formatMonthLabel(mobileDashboardSnapshot.snapshotMonth)}月报；本月手机草稿未计入`;
+  }
+  allocationLegend.innerHTML = allocations.map((item, index) => `
+    <div class="allocation-legend-row">
+      <i style="background:${colors[index % colors.length]}"></i>
+      <span>${escapeHtml(item.category)}</span>
+      <b>${formatPercent(item.percent)}</b>
+    </div>
+  `).join("");
+}
+
 function renderTargetDeviation() {
-  if (!mobileDashboardSnapshot.hasAllocationTargets || !mobileDashboardSnapshot.allocationTargets.length) {
+  if (!mobileDashboardSnapshot.allocationTargets.length) {
     targetDeviationSection.innerHTML = "";
     return;
   }
@@ -466,12 +609,12 @@ function renderTargetDeviation() {
         <div class="target-row target-head"><span>类别</span><span>当前 / 目标</span><span>偏离</span></div>
         ${mobileDashboardSnapshot.allocationTargets.map((item) => `
           <div class="target-row">
-            <span>${escapeHtml(item.name)}</span>
+            <span>${escapeHtml(item.category)}</span>
             <span>
-              <i style="--current: ${Math.max(0, Math.min(100, item.current))}%; --target: ${Math.max(0, Math.min(100, item.target))}%"></i>
-              <small>${item.current}% / ${item.target}%</small>
+              <i style="--current: ${Math.max(0, Math.min(100, item.current * 100))}%; --target: ${Math.max(0, Math.min(100, item.target * 100))}%"></i>
+              <small>${formatPercent(item.current)} / ${formatPercent(item.target)}</small>
             </span>
-            <b class="${item.deviation > 0 ? "positive" : item.deviation < 0 ? "negative" : ""}">${item.deviation > 0 ? "+" : ""}${item.deviation}%</b>
+            <b class="${item.deviation > 0 ? "positive" : item.deviation < 0 ? "negative" : ""}">${item.deviation > 0 ? "+" : ""}${formatPercent(item.deviation)}</b>
           </div>
         `).join("")}
       </div>
@@ -486,13 +629,40 @@ function formatPlainMoney(value) {
   })}`;
 }
 
+function formatPercent(value) {
+  return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function formatMonthLabel(value) {
+  if (!value || value.length < 7) return "已发布";
+  return `${value.slice(0, 4)} 年 ${Number(value.slice(5, 7))} 月`;
+}
+
 function readSettings() {
   try {
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-    return { theme: "champagne", ...stored };
+    return { theme: "champagne", syncEndpoint: DEFAULT_SYNC_ENDPOINT, ...stored };
   } catch {
-    return { theme: "champagne" };
+    return { theme: "champagne", syncEndpoint: DEFAULT_SYNC_ENDPOINT };
   }
+}
+
+function resolveSyncEndpoint() {
+  const params = new URLSearchParams(window.location.search);
+  const urlValue = params.get("syncUrl")?.trim();
+  if (urlValue) {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, syncEndpoint: urlValue.replace(/\/$/, "") }));
+    return urlValue.replace(/\/$/, "");
+  }
+  return String(settings.syncEndpoint || DEFAULT_SYNC_ENDPOINT).replace(/\/$/, "");
+}
+
+function resolveDeviceId() {
+  const stored = localStorage.getItem(DEVICE_ID_KEY);
+  if (stored) return stored;
+  const value = `mobile_${crypto.randomUUID()}`;
+  localStorage.setItem(DEVICE_ID_KEY, value);
+  return value;
 }
 
 async function resetLegacyLocalData() {
@@ -512,7 +682,7 @@ function deleteDatabase(name) {
 }
 
 function writeSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme: state.theme }));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme: state.theme, syncEndpoint }));
 }
 
 function readCustomCategories() {
