@@ -6,6 +6,7 @@ const SETTINGS_KEY = "worthtrace_mobile_settings_v2";
 const CUSTOM_CATEGORIES_KEY = "worthtrace_mobile_custom_categories_v2";
 const RELEASE_RESET_KEY = "worthtrace_mobile_release_reset_v3";
 const DEVICE_ID_KEY = "worthtrace_mobile_device_id_v2";
+const ACCOUNT_ID_KEY = "worthtrace_mobile_account_id_v2";
 const DEFAULT_SYNC_ENDPOINT = "http://127.0.0.1:18742";
 const LEGACY_DB_NAMES = ["worthtrace_mobile_v1", "worthtrace_mobile_v2"];
 const LEGACY_STORAGE_KEYS = ["worthtrace_mobile_settings_v1", "worthtrace_mobile_custom_categories_v1"];
@@ -21,6 +22,7 @@ const settings = readSettings();
 const customCategories = readCustomCategories();
 const syncEndpoint = resolveSyncEndpoint();
 const deviceId = resolveDeviceId();
+let accountId = localStorage.getItem(ACCOUNT_ID_KEY) || "";
 const icons = {
   eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M9.9 4.4A10.7 10.7 0 0 1 12 4.2c6.3 0 9.9 7 9.9 7a16.2 16.2 0 0 1-3.1 3.9"/><path d="M6.5 6.8A16.1 16.1 0 0 0 2.1 12s3.6 7 9.9 7a10.7 10.7 0 0 0 4.1-.8"/></svg>',
@@ -236,6 +238,7 @@ if ("serviceWorker" in navigator) {
 
 state.records = await readRecords();
 render();
+await pairFromUrlIfNeeded();
 void reportMobileStatus();
 
 function navigate(view) {
@@ -372,6 +375,7 @@ async function reportMobileStatus() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         device_id: deviceId,
+        account_id: accountId,
         app_version: MOBILE_APP_VERSION,
         pending_count: pending.length,
         synced_count: synced.length
@@ -384,6 +388,14 @@ async function reportMobileStatus() {
 
 async function syncPendingToDesktop() {
   const pending = pendingRecords();
+  if (!accountId) {
+    showToast("请先用电脑端绑定码绑定手机");
+    syncDialogText.insertAdjacentHTML(
+      "beforeend",
+      `<p class="sync-prototype-note">未绑定电脑账户。请在电脑端打开手机绑定，再用手机打开绑定链接。</p>`
+    );
+    return;
+  }
   if (!pending.length) {
     syncDialog.close();
     showToast("没有待同步草稿");
@@ -398,6 +410,7 @@ async function syncPendingToDesktop() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         device_id: deviceId,
+        account_id: accountId,
         app_version: MOBILE_APP_VERSION,
         records: pending
       })
@@ -431,6 +444,34 @@ async function syncPendingToDesktop() {
   } finally {
     syncButton.disabled = false;
     syncButton.textContent = "同步到电脑";
+  }
+}
+
+async function pairFromUrlIfNeeded() {
+  const params = new URLSearchParams(window.location.search);
+  const pairCode = params.get("pairCode")?.trim();
+  if (!pairCode) return;
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/pair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_id: deviceId,
+        device_name: navigator.userAgent.includes("iPhone") ? "iPhone" : navigator.userAgent.includes("Android") ? "Android" : "Mobile Browser",
+        pairing_code: pairCode,
+        app_version: MOBILE_APP_VERSION
+      })
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const result = await response.json();
+    accountId = result.account_id || "";
+    if (accountId) {
+      localStorage.setItem(ACCOUNT_ID_KEY, accountId);
+      showToast("已绑定电脑账户");
+    }
+  } catch (err) {
+    showToast("绑定失败：请检查电脑端绑定码");
+    console.warn(err);
   }
 }
 

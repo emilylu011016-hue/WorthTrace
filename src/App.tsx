@@ -272,6 +272,7 @@ type MobileSyncInboxRecord = {
 
 type MobileSyncSummary = {
   enabled: boolean;
+  account_id?: string | null;
   device_id?: string | null;
   app_version?: string | null;
   pending_on_phone: number;
@@ -280,6 +281,14 @@ type MobileSyncSummary = {
   reviewed_in_desktop: number;
   last_seen_at?: string | null;
   records: MobileSyncInboxRecord[];
+};
+
+type MobilePairingInfo = {
+  enabled: boolean;
+  account_id: string;
+  pairing_code: string;
+  pairing_url_path: string;
+  paired_device_count: number;
 };
 
 type ImportResult = {
@@ -1760,6 +1769,7 @@ export function App() {
   const [reportTemplateId, setReportTemplateId] = useState<string>("");
   const [reportPreview, setReportPreview] = useState<TemplateRenderResult | null>(null);
   const [mobileSyncSummary, setMobileSyncSummary] = useState<MobileSyncSummary | null>(null);
+  const [mobilePairingInfo, setMobilePairingInfo] = useState<MobilePairingInfo | null>(null);
   const [mobileSyncMessage, setMobileSyncMessage] = useState<string | null>(null);
   const [mobileSyncExpanded, setMobileSyncExpanded] = useState(false);
   const environmentLabel = security?.environment_label || (browserPreviewSummary ? "Demo" : "");
@@ -1852,11 +1862,14 @@ export function App() {
   useEffect(() => {
     if (browserPreviewSummary || !security?.unlocked || !isTestEnvironment) {
       setMobileSyncSummary(null);
+      setMobilePairingInfo(null);
       return;
     }
     void refreshMobileSyncSummary();
+    void refreshMobilePairingInfo();
     const timer = window.setInterval(() => {
       void refreshMobileSyncSummary();
+      void refreshMobilePairingInfo();
     }, 5000);
     return () => window.clearInterval(timer);
   }, [browserPreviewSummary, security?.unlocked, isTestEnvironment]);
@@ -5140,6 +5153,15 @@ export function App() {
     }
   }
 
+  async function refreshMobilePairingInfo() {
+    try {
+      const result = await invoke<MobilePairingInfo>("get_mobile_pairing_info");
+      setMobilePairingInfo(result);
+    } catch {
+      setMobilePairingInfo(null);
+    }
+  }
+
   async function markMobileSyncReviewed(ids: string[]) {
     if (!ids.length) return;
     try {
@@ -5189,6 +5211,17 @@ export function App() {
           <article><span>电脑已收到</span><strong>{mobileSyncSummary?.received_in_desktop ?? 0} 条</strong></article>
           <article><span>已处理</span><strong>{mobileSyncSummary?.reviewed_in_desktop ?? 0} 条</strong></article>
         </div>
+        {mobilePairingInfo?.enabled ? (
+          <div className="mobile-pairing-card">
+            <span>
+              <b>绑定手机</b>
+              <small>绑定后，手机记账会带上同一个账户 ID。</small>
+            </span>
+            <strong>{mobilePairingInfo.pairing_code}</strong>
+            <code>{mobilePairingInfo.pairing_url_path}</code>
+            <em>{mobilePairingInfo.paired_device_count} 台已绑定</em>
+          </div>
+        ) : null}
         <p className="mobile-sync-copy">
           {mobileSyncSummary?.last_seen_at ? `最近连接：${mobileSyncSummary.last_seen_at}。` : "手机还没有连接过。"}
         </p>

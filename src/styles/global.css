@@ -1456,6 +1456,55 @@ h2 {
   font-size: 20px;
 }
 
+.mobile-pairing-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.mobile-pairing-card span {
+  display: grid;
+  gap: 3px;
+}
+
+.mobile-pairing-card b {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.mobile-pairing-card small,
+.mobile-pairing-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.mobile-pairing-card strong {
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.mobile-pairing-card code {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mobile-sync-copy,
 .mobile-sync-message {
   margin: 0;

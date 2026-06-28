@@ -54,6 +54,7 @@ struct MobileSyncRecordInput {
 #[derive(Deserialize)]
 struct MobileSyncPushInput {
   device_id: Option<String>,
+  account_id: Option<String>,
   app_version: Option<String>,
   records: Vec<MobileSyncRecordInput>,
 }
@@ -61,9 +62,34 @@ struct MobileSyncPushInput {
 #[derive(Deserialize)]
 struct MobileSyncStatusInput {
   device_id: Option<String>,
+  account_id: Option<String>,
   app_version: Option<String>,
   pending_count: i64,
   synced_count: i64,
+}
+
+#[derive(Deserialize)]
+struct MobilePairInput {
+  device_id: Option<String>,
+  device_name: Option<String>,
+  pairing_code: String,
+  app_version: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MobilePairingInfo {
+  enabled: bool,
+  account_id: String,
+  pairing_code: String,
+  pairing_url_path: String,
+  paired_device_count: i64,
+}
+
+#[derive(Serialize)]
+struct MobilePairResult {
+  account_id: String,
+  device_id: String,
+  paired: bool,
 }
 
 #[derive(Serialize)]
@@ -82,6 +108,7 @@ struct MobileSyncPushResult {
 #[derive(Serialize)]
 struct MobileSyncInboxRecord {
   id: String,
+  account_id: Option<String>,
   device_id: String,
   local_id: String,
   record_kind: String,
@@ -99,6 +126,7 @@ struct MobileSyncInboxRecord {
 #[derive(Serialize)]
 struct MobileSyncSummary {
   enabled: bool,
+  account_id: Option<String>,
   device_id: Option<String>,
   app_version: Option<String>,
   pending_on_phone: i64,
@@ -849,9 +877,12 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
     "
     create table if not exists mobile_sync_devices (
       device_id text primary key,
+      account_id text,
+      device_name text,
       app_version text,
       pending_count integer not null default 0,
       synced_count integer not null default 0,
+      paired_at text,
       last_seen_at text not null default current_timestamp
     )
     ",
@@ -861,6 +892,7 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
     "
     create table if not exists mobile_sync_inbox (
       id text primary key,
+      account_id text,
       device_id text not null,
       local_id text not null,
       record_kind text not null,
@@ -889,6 +921,10 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
     "create index if not exists idx_mobile_sync_inbox_status on mobile_sync_inbox(sync_status, received_at)",
     [],
   )?;
+  add_column_if_missing(connection, "mobile_sync_devices", "account_id", "account_id text")?;
+  add_column_if_missing(connection, "mobile_sync_devices", "device_name", "device_name text")?;
+  add_column_if_missing(connection, "mobile_sync_devices", "paired_at", "paired_at text")?;
+  add_column_if_missing(connection, "mobile_sync_inbox", "account_id", "account_id text")?;
   connection.execute(
     "
     create table if not exists credit_cards (
@@ -1308,6 +1344,23 @@ fn mobile_sync_device_id(input: Option<String>) -> String {
     .unwrap_or_else(|| "worthtrace-mobile-local".to_string())
 }
 
+fn mobile_account_id(connection: &Connection) -> Result<String, AppError> {
+  let existing = setting_string(connection, "mobile_sync_account_id", "")?;
+  if !existing.trim().is_empty() {
+    return Ok(existing);
+  }
+  let account_id = make_unique_id("acct", "worthtrace-mobile-account");
+  upsert_setting(connection, "mobile_sync_account_id", &serde_json::to_string(&account_id).unwrap())?;
+  Ok(account_id)
+}
+
+fn mobile_pairing_code(connection: &Connection) -> Result<String, AppError> {
+  let account_id = mobile_account_id(connection)?;
+  let code = make_id("pair", &account_id).chars().rev().take(8).collect::<String>().to_uppercase();
+  upsert_setting(connection, "mobile_sync_pairing_code", &serde_json::to_string(&code).unwrap())?;
+  Ok(code)
+}
+
 fn ensure_mobile_sync_schema(connection: &Connection) -> Result<(), AppError> {
   ensure_runtime_schema(connection)
 }
@@ -1315,23 +1368,54 @@ fn ensure_mobile_sync_schema(connection: &Connection) -> Result<(), AppError> {
 fn upsert_mobile_device(
   connection: &Connection,
   device_id: &str,
+  account_id: Option<&str>,
+  device_name: Option<&str>,
   app_version: Option<&str>,
   pending_count: i64,
   synced_count: i64,
 ) -> Result<(), AppError> {
   connection.execute(
     "
-    insert into mobile_sync_devices (device_id, app_version, pending_count, synced_count, last_seen_at)
-    values (?1, ?2, ?3, ?4, current_timestamp)
+    insert into mobile_sync_devices (device_id, account_id, device_name, app_version, pending_count, synced_count, paired_at, last_seen_at)
+    values (?1, ?2, ?3, ?4, ?5, ?6, case when ?2 is null then null else current_timestamp end, current_timestamp)
     on conflict(device_id) do update set
-      app_version = excluded.app_version,
+      account_id = coalesce(excluded.account_id, mobile_sync_devices.account_id),
+      device_name = coalesce(excluded.device_name, mobile_sync_devices.device_name),
+      app_version = coalesce(excluded.app_version, mobile_sync_devices.app_version),
       pending_count = excluded.pending_count,
       synced_count = excluded.synced_count,
+      paired_at = case
+        when mobile_sync_devices.paired_at is null and excluded.account_id is not null then current_timestamp
+        else mobile_sync_devices.paired_at
+      end,
       last_seen_at = current_timestamp
     ",
-    params![device_id, app_version, pending_count, synced_count],
+    params![device_id, account_id, device_name, app_version, pending_count, synced_count],
   )?;
   Ok(())
+}
+
+fn bind_mobile_device(connection: &Connection, input: MobilePairInput) -> Result<MobilePairResult, AppError> {
+  let expected_code = mobile_pairing_code(connection)?;
+  if input.pairing_code.trim().to_uppercase() != expected_code {
+    return Err(AppError::InvalidCsvValue("绑定码不正确，请在电脑端重新查看绑定码。".to_string()));
+  }
+  let account_id = mobile_account_id(connection)?;
+  let device_id = mobile_sync_device_id(input.device_id);
+  upsert_mobile_device(
+    connection,
+    &device_id,
+    Some(&account_id),
+    input.device_name.as_deref(),
+    input.app_version.as_deref(),
+    0,
+    0,
+  )?;
+  Ok(MobilePairResult {
+    account_id,
+    device_id,
+    paired: true,
+  })
 }
 
 fn store_mobile_sync_records(
@@ -1339,7 +1423,12 @@ fn store_mobile_sync_records(
   input: MobileSyncPushInput,
 ) -> Result<MobileSyncPushResult, AppError> {
   let device_id = mobile_sync_device_id(input.device_id);
-  upsert_mobile_device(connection, &device_id, input.app_version.as_deref(), 0, input.records.len() as i64)?;
+  let account_id = input.account_id.unwrap_or_default();
+  let expected_account_id = mobile_account_id(connection)?;
+  if account_id.trim() != expected_account_id {
+    return Err(AppError::InvalidCsvValue("手机尚未绑定当前电脑账户，请先扫码绑定。".to_string()));
+  }
+  upsert_mobile_device(connection, &device_id, Some(&expected_account_id), None, input.app_version.as_deref(), 0, input.records.len() as i64)?;
   let tx = connection.unchecked_transaction()?;
   let mut acknowledgements = Vec::new();
   for record in input.records {
@@ -1359,12 +1448,13 @@ fn store_mobile_sync_records(
     tx.execute(
       "
       insert into mobile_sync_inbox (
-        id, device_id, local_id, record_kind, transaction_type, transaction_date,
+        id, account_id, device_id, local_id, record_kind, transaction_type, transaction_date,
         period_month, amount, currency, category, note, current_billed_amount,
         current_unbilled_amount, previous_unbilled_amount, net_adjustment, payload_json, sync_status
       )
-      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 'received')
+      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 'received')
       on conflict(device_id, local_id) do update set
+        account_id = excluded.account_id,
         record_kind = excluded.record_kind,
         transaction_type = excluded.transaction_type,
         transaction_date = excluded.transaction_date,
@@ -1386,6 +1476,7 @@ fn store_mobile_sync_records(
       ",
       params![
         id,
+        expected_account_id,
         device_id,
         local_id,
         record_kind,
@@ -1418,15 +1509,21 @@ fn store_mobile_sync_records(
 
 fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<MobileSyncSummary, AppError> {
   ensure_mobile_sync_schema(connection)?;
+  let account_id = if enabled {
+    Some(mobile_account_id(connection)?)
+  } else {
+    None
+  };
   let latest_device = connection
     .query_row(
       "
       select device_id, app_version, pending_count, synced_count, last_seen_at
       from mobile_sync_devices
+      where (?1 is null or account_id = ?1)
       order by last_seen_at desc
       limit 1
       ",
-      [],
+      params![account_id],
       |row| {
         Ok((
           row.get::<_, String>(0)?,
@@ -1442,45 +1539,48 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
     .map(|item| (Some(item.0), item.1, item.2, item.3, Some(item.4)))
     .unwrap_or((None, None, 0, 0, None));
   let received_in_desktop = connection.query_row(
-    "select count(*) from mobile_sync_inbox where sync_status = 'received'",
-    [],
+    "select count(*) from mobile_sync_inbox where sync_status = 'received' and (?1 is null or account_id = ?1)",
+    params![account_id],
     |row| row.get(0),
   )?;
   let reviewed_in_desktop = connection.query_row(
-    "select count(*) from mobile_sync_inbox where sync_status = 'reviewed'",
-    [],
+    "select count(*) from mobile_sync_inbox where sync_status = 'reviewed' and (?1 is null or account_id = ?1)",
+    params![account_id],
     |row| row.get(0),
   )?;
   let mut statement = connection.prepare(
     "
-    select id, device_id, local_id, record_kind, transaction_type, transaction_date,
+    select id, account_id, device_id, local_id, record_kind, transaction_type, transaction_date,
       period_month, amount, category, note, net_adjustment, sync_status, received_at
     from mobile_sync_inbox
+    where (?1 is null or account_id = ?1)
     order by received_at desc
     limit 8
     ",
   )?;
   let records = statement
-    .query_map([], |row| {
+    .query_map(params![account_id], |row| {
       Ok(MobileSyncInboxRecord {
         id: row.get(0)?,
-        device_id: row.get(1)?,
-        local_id: row.get(2)?,
-        record_kind: row.get(3)?,
-        transaction_type: row.get(4)?,
-        transaction_date: row.get(5)?,
-        period_month: row.get(6)?,
-        amount: row.get(7)?,
-        category: row.get(8)?,
-        note: row.get(9)?,
-        net_adjustment: row.get(10)?,
-        sync_status: row.get(11)?,
-        received_at: row.get(12)?,
+        account_id: row.get(1)?,
+        device_id: row.get(2)?,
+        local_id: row.get(3)?,
+        record_kind: row.get(4)?,
+        transaction_type: row.get(5)?,
+        transaction_date: row.get(6)?,
+        period_month: row.get(7)?,
+        amount: row.get(8)?,
+        category: row.get(9)?,
+        note: row.get(10)?,
+        net_adjustment: row.get(11)?,
+        sync_status: row.get(12)?,
+        received_at: row.get(13)?,
       })
     })?
     .collect::<Result<Vec<_>, _>>()?;
   Ok(MobileSyncSummary {
     enabled,
+    account_id,
     device_id,
     app_version,
     pending_on_phone,
@@ -1638,6 +1738,42 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
         http_response("204 No Content", "text/plain", "")
       } else if method == "GET" && path == "/mobile-sync/health" {
         http_response("200 OK", "text/plain", "WorthTrace Test mobile sync is ready")
+      } else if method == "GET" && path == "/mobile-sync/pairing" {
+        match Connection::open(&work_db_path)
+          .map_err(AppError::from)
+          .and_then(|connection| {
+            ensure_mobile_sync_schema(&connection)?;
+            let account_id = mobile_account_id(&connection)?;
+            let pairing_code = mobile_pairing_code(&connection)?;
+            let paired_device_count = connection.query_row(
+              "select count(*) from mobile_sync_devices where account_id = ?1",
+              params![account_id],
+              |row| row.get(0),
+            )?;
+            Ok(MobilePairingInfo {
+              enabled: true,
+              account_id,
+              pairing_url_path: format!("/index.html?mobileVersion=0.2.2&pairCode={pairing_code}"),
+              pairing_code,
+              paired_device_count,
+            })
+          }) {
+            Ok(info) => http_json(&info),
+            Err(err) => http_error("500 Internal Server Error", &err.to_string()),
+          }
+      } else if method == "POST" && path == "/mobile-sync/pair" {
+        match serde_json::from_str::<MobilePairInput>(&body) {
+          Ok(input) => match Connection::open(&work_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| {
+              ensure_mobile_sync_schema(&connection)?;
+              bind_mobile_device(&connection, input)
+            }) {
+              Ok(result) => http_json(&result),
+              Err(err) => http_error("400 Bad Request", &err.to_string()),
+            },
+          Err(err) => http_error("400 Bad Request", &format!("invalid pair payload: {err}")),
+        }
       } else if method == "GET" && path == "/mobile-sync/dashboard" {
         match Connection::open(&dashboard_db_path)
           .map_err(AppError::from)
@@ -1652,7 +1788,7 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
             .and_then(|connection| {
               ensure_mobile_sync_schema(&connection)?;
               let device_id = mobile_sync_device_id(input.device_id);
-              upsert_mobile_device(&connection, &device_id, input.app_version.as_deref(), input.pending_count, input.synced_count)?;
+              upsert_mobile_device(&connection, &device_id, input.account_id.as_deref(), None, input.app_version.as_deref(), input.pending_count, input.synced_count)?;
               read_mobile_sync_summary(&connection, true)
             }) {
               Ok(summary) => http_json(&summary),
@@ -7526,6 +7662,38 @@ fn get_mobile_sync_summary(
 }
 
 #[tauri::command]
+fn get_mobile_pairing_info(
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<MobilePairingInfo, AppError> {
+  if !is_test_environment() {
+    return Ok(MobilePairingInfo {
+      enabled: false,
+      account_id: String::new(),
+      pairing_code: String::new(),
+      pairing_url_path: String::new(),
+      paired_device_count: 0,
+    });
+  }
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  let account_id = mobile_account_id(&connection)?;
+  let pairing_code = mobile_pairing_code(&connection)?;
+  let paired_device_count = connection.query_row(
+    "select count(*) from mobile_sync_devices where account_id = ?1",
+    params![account_id],
+    |row| row.get(0),
+  )?;
+  Ok(MobilePairingInfo {
+    enabled: true,
+    account_id,
+    pairing_url_path: format!("/index.html?mobileVersion=0.2.2&pairCode={pairing_code}"),
+    pairing_code,
+    paired_device_count,
+  })
+}
+
+#[tauri::command]
 fn mark_mobile_sync_records_reviewed(
   ids: Vec<String>,
   db: State<'_, Database>,
@@ -7608,6 +7776,7 @@ pub fn run() {
       generate_monthly_analysis,
       get_dashboard_seed_summary,
       get_mobile_sync_summary,
+      get_mobile_pairing_info,
       mark_mobile_sync_records_reviewed
     ])
     .run(tauri::generate_context!())
