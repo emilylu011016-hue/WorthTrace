@@ -6,7 +6,7 @@ const SETTINGS_KEY = "worthtrace_mobile_settings_v2";
 const CUSTOM_CATEGORIES_KEY = "worthtrace_mobile_custom_categories_v2";
 const RELEASE_RESET_KEY = "worthtrace_mobile_release_reset_v3";
 const DEVICE_ID_KEY = "worthtrace_mobile_device_id_v2";
-const ACCOUNT_ID_KEY = "worthtrace_mobile_account_id_v2";
+const ACCOUNT_ID_KEY = "worthtrace_mobile_account_id_v3";
 const DEFAULT_SYNC_ENDPOINT = "http://127.0.0.1:18742";
 const LEGACY_DB_NAMES = ["worthtrace_mobile_v1", "worthtrace_mobile_v2"];
 const LEGACY_STORAGE_KEYS = ["worthtrace_mobile_settings_v1", "worthtrace_mobile_custom_categories_v1"];
@@ -46,6 +46,10 @@ const syncCardTitle = document.querySelector("#syncCardTitle");
 const syncCardText = document.querySelector("#syncCardText");
 const syncCount = document.querySelector("#syncCount");
 const syncDot = document.querySelector("#syncDot");
+const pairCard = document.querySelector("#pairCard");
+const pairCardTitle = document.querySelector("#pairCardTitle");
+const pairCardText = document.querySelector("#pairCardText");
+const pairButton = document.querySelector("#pairButton");
 const draftEntryGrid = document.querySelector("#draftEntryGrid");
 const localRecords = document.querySelector("#localRecords");
 const bookForm = document.querySelector("#bookForm");
@@ -208,6 +212,11 @@ creditCardForm.addEventListener("submit", async (event) => {
 document.querySelector("#syncButton").addEventListener("click", showSyncDialog);
 document.querySelector("#confirmSyncButton").addEventListener("click", showSyncDialog);
 document.querySelector("#closeDialogButton").addEventListener("click", () => syncDialog.close());
+pairButton.addEventListener("click", () => {
+  const code = window.prompt("输入电脑端显示的绑定码");
+  if (!code?.trim()) return;
+  void pairWithDesktop(code.trim());
+});
 mayAnomalyButton.addEventListener("click", () => {
   mayAnomalyDetail.hidden = !mayAnomalyDetail.hidden;
 });
@@ -296,6 +305,7 @@ function render() {
   privacyButton.setAttribute("title", state.privacy ? "显示金额" : "隐藏金额");
   privacyButton.dataset.tooltip = state.privacy ? "显示金额" : "隐藏金额";
   themeButton.innerHTML = icons.palette;
+  renderPairCard();
   document.body.classList.toggle("privacy-on", state.privacy);
   document.querySelectorAll(".money").forEach((node) => {
     node.textContent = state.privacy ? "••••••" : node.dataset.value;
@@ -386,6 +396,16 @@ async function reportMobileStatus() {
   }
 }
 
+function renderPairCard() {
+  const bound = Boolean(accountId);
+  pairCard.classList.toggle("bound", bound);
+  pairCardTitle.textContent = bound ? "已绑定电脑" : "绑定电脑";
+  pairCardText.textContent = bound
+    ? "手机记账会同步到已绑定的电脑账户。"
+    : "输入电脑端显示的绑定码，让手机和电脑识别为同一个账户。";
+  pairButton.textContent = bound ? "重新绑定" : "绑定";
+}
+
 async function syncPendingToDesktop() {
   const pending = pendingRecords();
   if (!accountId) {
@@ -451,6 +471,10 @@ async function pairFromUrlIfNeeded() {
   const params = new URLSearchParams(window.location.search);
   const pairCode = params.get("pairCode")?.trim();
   if (!pairCode) return;
+  await pairWithDesktop(pairCode);
+}
+
+async function pairWithDesktop(pairCode) {
   try {
     const response = await fetch(`${syncEndpoint}/mobile-sync/pair`, {
       method: "POST",
@@ -467,6 +491,8 @@ async function pairFromUrlIfNeeded() {
     accountId = result.account_id || "";
     if (accountId) {
       localStorage.setItem(ACCOUNT_ID_KEY, accountId);
+      renderPairCard();
+      void reportMobileStatus();
       showToast("已绑定电脑账户");
     }
   } catch (err) {
