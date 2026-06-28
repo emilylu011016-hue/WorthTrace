@@ -4,11 +4,11 @@
 
 ## 当前版本
 
-- 手机 PWA 原型版本：0.2.1。
-- 所属项目版本：2.6.1。
-- 当前手机端仍不连接正式 / 测试 / Demo SQLite 数据库。
-- 手机端本地草稿使用浏览器 IndexedDB：`worthtrace_mobile_v2`。
-- 0.2.1 首次打开会清理旧 `worthtrace_mobile_v1` 测试草稿和旧自定义分类，让手机端回到干净初始状态。
+- 手机 PWA 原型版本：0.2.2。
+- 所属项目版本：2.6.2。
+- 当前手机端通过电脑 Test App 的本地同步服务读取测试看板和提交草稿，不直接打开 SQLite 文件。
+- 手机端本地草稿使用浏览器 IndexedDB：`worthtrace_mobile_v3`。
+- 0.2.2 首次打开会清理旧 `worthtrace_mobile_v1` / `worthtrace_mobile_v2` 测试草稿，让手机端回到干净初始状态。
 
 ## 这个文件夹放什么
 

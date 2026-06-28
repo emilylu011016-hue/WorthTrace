@@ -1,13 +1,13 @@
-const MOBILE_APP_VERSION = "0.2.1";
-const DB_NAME = "worthtrace_mobile_v2";
+const MOBILE_APP_VERSION = "0.2.2";
+const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
 const SETTINGS_KEY = "worthtrace_mobile_settings_v2";
 const CUSTOM_CATEGORIES_KEY = "worthtrace_mobile_custom_categories_v2";
-const RELEASE_RESET_KEY = "worthtrace_mobile_release_reset_v2";
+const RELEASE_RESET_KEY = "worthtrace_mobile_release_reset_v3";
 const DEVICE_ID_KEY = "worthtrace_mobile_device_id_v2";
 const DEFAULT_SYNC_ENDPOINT = "http://127.0.0.1:18742";
-const LEGACY_DB_NAMES = ["worthtrace_mobile_v1"];
+const LEGACY_DB_NAMES = ["worthtrace_mobile_v1", "worthtrace_mobile_v2"];
 const LEGACY_STORAGE_KEYS = ["worthtrace_mobile_settings_v1", "worthtrace_mobile_custom_categories_v1"];
 
 const baseCategories = {

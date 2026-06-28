@@ -1,9 +1,9 @@
 {
   "name": "钱迹WorthTrace Mobile",
   "short_name": "钱迹",
-  "description": "钱迹WorthTrace 手机端 PWA 0.2.1",
-  "id": "./index.html?mobileVersion=0.2.1",
-  "start_url": "./index.html?mobileVersion=0.2.1",
+  "description": "钱迹WorthTrace 手机端 PWA 0.2.2",
+  "id": "./index.html?mobileVersion=0.2.2",
+  "start_url": "./index.html?mobileVersion=0.2.2",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f8f0e2",
