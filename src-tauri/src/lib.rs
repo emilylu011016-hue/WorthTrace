@@ -1503,12 +1503,6 @@ fn parse_amount(value: &str) -> Result<f64, AppError> {
     .map_err(|_| AppError::InvalidCsvValue(format!("金额 {value}")))
 }
 
-fn is_test_environment() -> bool {
-  env::var("FINANCIAL_PLANNING_ENV_LABEL")
-    .unwrap_or_default()
-    .eq_ignore_ascii_case("test")
-}
-
 fn mobile_sync_device_id(input: Option<String>) -> String {
   input
     .map(|value| value.trim().to_string())
@@ -2038,7 +2032,7 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
         if let Some(response) = mobile_pwa_response(&path) {
           response
         } else if path == "/mobile-sync/health" {
-          http_response("200 OK", "text/plain", "WorthTrace Test mobile sync is ready")
+          http_response("200 OK", "text/plain", "WorthTrace mobile sync is ready")
         } else if path == "/mobile-sync/pairing" {
           match Connection::open(&work_db_path)
             .map_err(AppError::from)
@@ -2175,9 +2169,6 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
 }
 
 fn start_mobile_sync_server(work_db_path: PathBuf, dashboard_db_path: PathBuf) {
-  if !is_test_environment() {
-    return;
-  }
   thread::spawn(move || {
     let listener = match TcpListener::bind("0.0.0.0:18742") {
       Ok(listener) => listener,
@@ -8027,7 +8018,7 @@ fn get_mobile_sync_summary(
 ) -> Result<MobileSyncSummary, AppError> {
   let connection = db.work_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
-  read_mobile_sync_summary(&connection, is_test_environment())
+  read_mobile_sync_summary(&connection, true)
 }
 
 #[tauri::command]
@@ -8035,17 +8026,6 @@ fn get_mobile_pairing_info(
   db: State<'_, Database>,
   security: State<'_, SecuritySession>,
 ) -> Result<MobilePairingInfo, AppError> {
-  if !is_test_environment() {
-    return Ok(MobilePairingInfo {
-      enabled: false,
-      account_id: String::new(),
-      pairing_code: String::new(),
-      pairing_url_path: String::new(),
-      pairing_url: String::new(),
-      paired_device_count: 0,
-      devices: Vec::new(),
-    });
-  }
   let connection = db.work_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
   let account_id = mobile_account_id(&connection)?;
@@ -8073,17 +8053,6 @@ fn reset_mobile_pairing_devices(
   db: State<'_, Database>,
   security: State<'_, SecuritySession>,
 ) -> Result<MobilePairingInfo, AppError> {
-  if !is_test_environment() {
-    return Ok(MobilePairingInfo {
-      enabled: false,
-      account_id: String::new(),
-      pairing_code: String::new(),
-      pairing_url_path: String::new(),
-      pairing_url: String::new(),
-      paired_device_count: 0,
-      devices: Vec::new(),
-    });
-  }
   let connection = db.work_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
   reset_mobile_pairing(&connection)
@@ -8107,7 +8076,7 @@ fn mark_mobile_sync_records_reviewed(
       params![id],
     )?;
   }
-  read_mobile_sync_summary(&connection, is_test_environment())
+  read_mobile_sync_summary(&connection, true)
 }
 
 pub fn run() {

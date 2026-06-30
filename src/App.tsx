@@ -1875,7 +1875,7 @@ export function App() {
   }, [dashboardTheme]);
 
   useEffect(() => {
-    if (browserPreviewSummary || !security?.unlocked || !isTestEnvironment) {
+    if (browserPreviewSummary || !security?.unlocked) {
       setMobileSyncSummary(null);
       setMobilePairingInfo(null);
       return;
@@ -1887,7 +1887,7 @@ export function App() {
       void refreshMobilePairingInfo();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [browserPreviewSummary, security?.unlocked, isTestEnvironment]);
+  }, [browserPreviewSummary, security?.unlocked]);
 
   useEffect(() => {
     if (browserPreviewSummary || !onboardingStatus || onboardingDraftHydrated) return;
@@ -5386,7 +5386,7 @@ export function App() {
         </div>
         <div className="security-actions">
           {renderThemeSwitcher("全局主题")}
-          {isTestEnvironment && mobilePairingInfo?.enabled ? (
+          {mobilePairingInfo?.enabled ? (
             <button className="icon-button" onClick={() => setMobilePairingDialogOpen(true)} type="button">
               <Smartphone size={17} />
               <span>手机绑定</span>
@@ -5423,7 +5423,7 @@ export function App() {
           <span>当前为预览数据。桌面 App 会读取你的本地资料。</span>
         </section>
       ) : null}
-      {isTestEnvironment ? renderMobileSyncNotice() : null}
+      {renderMobileSyncNotice()}
     </>
   );
 
