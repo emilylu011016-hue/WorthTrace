@@ -289,6 +289,7 @@ type MobilePairingInfo = {
   account_id: string;
   pairing_code: string;
   pairing_url_path: string;
+  pairing_url: string;
   paired_device_count: number;
   devices: Array<{
     device_id: string;
@@ -919,7 +920,7 @@ function assetMonthAmountIssue(asset: Pick<AssetEntryItem, "name" | "month_statu
   if (status === "excluded") return null;
   const { rawValue, amount } = assetMonthEndAmount(asset);
   if (status === "cleared") {
-    if (rawValue === "") return null;
+    if (rawValue === "") return `${asset.name} 已清仓，月末市值需要填 0。`;
     if (!Number.isFinite(amount) || amount !== 0) return `${asset.name} 已清仓，月末市值需要为 0。`;
     return null;
   }
@@ -1371,7 +1372,7 @@ function normalizeAssetEntryItems(assets: AssetEntryItem[]) {
     currency: (asset.currency || "CNY") as CurrencyCode,
     month_status: asset.month_status ?? "held",
     cashflows: asset.cashflows ?? [],
-    confirmed: asset.confirmed ?? true
+    confirmed: asset.confirmed ?? false
   }));
 }
 
@@ -2755,7 +2756,7 @@ export function App() {
       const selected = await openDialog({
         multiple: false,
         filters: [
-          { name: "账单文件", extensions: ["csv", "xlsx", "xls"] }
+          { name: "账单文件", extensions: ["csv", "xlsx"] }
         ]
       });
       if (!selected || Array.isArray(selected)) return null;
@@ -5099,8 +5100,8 @@ export function App() {
             <section className="mobile-pairing-detail-card">
               <span>添加设备</span>
               <strong>{mobilePairingInfo.pairing_code}</strong>
-              <code>{mobilePairingInfo.pairing_url_path}</code>
-              <small>手机和电脑需要能互相访问同一局域网地址。手机开热点、电脑连接该热点时，只要手机详情里显示“已连到电脑”，即可同步。</small>
+              <code>{mobilePairingInfo.pairing_url || mobilePairingInfo.pairing_url_path}</code>
+              <small>手机打开上面的链接即可，不需要再下载或双击 .command。手机和电脑需要能互相访问同一局域网地址；手机开热点、电脑连接该热点也可以。</small>
             </section>
             <section className="mobile-device-list">
               <div className="mobile-device-list-head">
@@ -7146,6 +7147,7 @@ export function App() {
     const topSell = assetSummaryExpanded.sell ? topFlows("sell") : topFlows("sell").slice(0, 4);
     const previousSnapshotAssets = assetItems.filter((asset) => Number(asset.previous_month_amount) > 0);
     const dcaAssetCount = assetItems.filter((asset) => asset.is_dca).length;
+    const savedAssetCards = assetItems.filter((asset) => asset.confirmed).length;
     const previousSnapshotMonth = previousPeriodMonth(selectedMonth);
     const hasInheritedAssets = previousSnapshotAssets.length > 0;
     return (
@@ -7204,6 +7206,7 @@ export function App() {
           <div><span>本月分红</span><strong>{formatCurrency(totalDividend, privacyMode, displayCurrency)}</strong></div>
           <div><span>月末资产原值</span><strong>{formatCurrency(assetGrossValue, privacyMode, displayCurrency)}</strong></div>
           <div><span>未填月末市值</span><strong>{missingMonthEnd}</strong></div>
+          <div><span>已保存资产卡</span><strong>{savedAssetCards}/{assetItems.length}</strong></div>
         </div>
         <div className="summary-grid">
           {topBuy.map(([name, amount]) => (
@@ -7411,7 +7414,7 @@ export function App() {
             const clearedWithoutSellIssue = assetClearedWithoutSellIssue(asset, Boolean(clearedWithoutSellOverrides[asset.id]));
             const clearedWithDcaOn = assetMonthStatus(asset) === "cleared" && Boolean(asset.is_dca);
             return (
-            <div className={`asset-row ${completedSteps.assets ? "done" : ""} ${assetExpanded ? "" : "collapsed"}`} data-asset-id={asset.id} key={asset.id}>
+            <div className={`asset-row ${asset.confirmed ? "done" : ""} ${assetExpanded ? "" : "collapsed"}`} data-asset-id={asset.id} key={asset.id}>
               <div>
                 <div className="asset-compact-header">
                   <div className="asset-title-stack">
@@ -7423,10 +7426,13 @@ export function App() {
                     <span>
                       {assetClassificationText(asset, assetCategoryTree)} · {assetMonthStatusLabel(asset)} · {asset.tags || "无标签"} · {asset.currency}
                       {asset.platform ? <em className="muted-note"> · 平台：{asset.platform}</em> : null}
+                      <em className={asset.confirmed ? "asset-save-state saved" : "asset-save-state unsaved"}>
+                        · {asset.confirmed ? "已保存本卡" : "未保存本卡"}
+                      </em>
                     </span>
                   </div>
-                  <button className="secondary-button compact" onClick={() => saveAssetDetail(asset)} type="button">
-                    保存该资产明细
+                  <button className={asset.confirmed ? "secondary-button compact done-button" : "secondary-button compact"} onClick={() => saveAssetDetail(asset)} type="button">
+                    {asset.confirmed ? "已保存，可修改" : "保存该资产明细"}
                   </button>
                   <button
                     className="secondary-button compact"
@@ -7521,7 +7527,7 @@ export function App() {
                     <strong>{Number(asset.previous_month_amount) > 0 ? "沿用上次月报资产明细" : "本月新增资产"}</strong>
                     <span>
                       {Number(asset.previous_month_amount) > 0
-                        ? `${asset.previous_snapshot_month ?? previousSnapshotMonth} · 上次月报月末 ${formatCurrency(Number(asset.previous_month_amount) || 0, privacyMode, asset.currency)}，已作为本月默认值`
+                        ? `${asset.previous_snapshot_month ?? previousSnapshotMonth} · 上次月报月末 ${formatCurrency(Number(asset.previous_month_amount) || 0, privacyMode, asset.currency)}，本月需重新填写`
                         : "没有上次月报资产快照，需手动填写本月月末市值"}
                     </span>
                   </div>

@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::{env, fs};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,6 +19,12 @@ use thiserror::Error;
 
 const INITIAL_SCHEMA: &str = include_str!("../migrations/001_initial_schema.sql");
 const INITIAL_SEED: &str = include_str!("../migrations/002_initial_seed.sql");
+const MOBILE_PWA_INDEX: &str = include_str!("../../mobile/pwa/index.html");
+const MOBILE_PWA_APP_JS: &str = include_str!("../../mobile/pwa/app.js");
+const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
+const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
+const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
+const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -82,6 +88,7 @@ struct MobilePairingInfo {
   account_id: String,
   pairing_code: String,
   pairing_url_path: String,
+  pairing_url: String,
   paired_device_count: i64,
   devices: Vec<MobileSyncDeviceInfo>,
 }
@@ -529,6 +536,7 @@ struct AssetEntryItem {
   previous_snapshot_month: String,
   previous_month_amount: f64,
   previous_month_status: String,
+  confirmed: bool,
   dca_plans: Vec<DcaPlanItem>,
 }
 
@@ -1314,8 +1322,139 @@ fn decode_utf16le(bytes: &[u8]) -> Result<String, AppError> {
   String::from_utf16(&units).map_err(|_| AppError::UnsupportedCsvEncoding)
 }
 
+fn decode_utf16be(bytes: &[u8]) -> Result<String, AppError> {
+  let data = if bytes.starts_with(&[0xfe, 0xff]) {
+    &bytes[2..]
+  } else {
+    bytes
+  };
+  if data.len() % 2 != 0 {
+    return Err(AppError::UnsupportedCsvEncoding);
+  }
+  let units: Vec<u16> = data
+    .chunks_exact(2)
+    .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+    .collect();
+  String::from_utf16(&units).map_err(|_| AppError::UnsupportedCsvEncoding)
+}
+
+fn decode_with_iconv(bytes: &[u8], encoding: &str) -> Result<String, AppError> {
+  let mut child = Command::new("/usr/bin/iconv")
+    .args(["-f", encoding, "-t", "UTF-8"])
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .spawn()?;
+  if let Some(stdin) = child.stdin.as_mut() {
+    stdin.write_all(bytes)?;
+  }
+  let output = child.wait_with_output()?;
+  if !output.status.success() {
+    return Err(AppError::UnsupportedCsvEncoding);
+  }
+  String::from_utf8(output.stdout).map_err(|_| AppError::UnsupportedCsvEncoding)
+}
+
+fn decode_csv_text(bytes: &[u8]) -> Result<String, AppError> {
+  if bytes.starts_with(&[0xff, 0xfe]) {
+    return decode_utf16le(bytes);
+  }
+  if bytes.starts_with(&[0xfe, 0xff]) {
+    return decode_utf16be(bytes);
+  }
+  if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+    return String::from_utf8(bytes[3..].to_vec()).map_err(|_| AppError::UnsupportedCsvEncoding);
+  }
+  if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+    return Ok(text);
+  }
+  decode_utf16le(bytes)
+    .or_else(|_| decode_utf16be(bytes))
+    .or_else(|_| decode_with_iconv(bytes, "GB18030"))
+    .map_err(|_| AppError::InvalidCsvValue("上传失败：账单文件编码无法识别，请导出为 UTF-8 / UTF-16 / GB18030 CSV，或 XLSX。".to_string()))
+}
+
 fn normalize_header(value: &str) -> String {
   value.trim().trim_start_matches('\u{feff}').to_string()
+}
+
+fn percent_decode_path(value: &str) -> String {
+  let bytes = value.as_bytes();
+  let mut result = Vec::with_capacity(bytes.len());
+  let mut index = 0;
+  while index < bytes.len() {
+    if bytes[index] == b'%' && index + 2 < bytes.len() {
+      if let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
+        result.push(hex);
+        index += 3;
+        continue;
+      }
+    }
+    result.push(bytes[index]);
+    index += 1;
+  }
+  String::from_utf8_lossy(&result).to_string()
+}
+
+fn unescape_copied_path(value: &str) -> String {
+  let mut output = String::with_capacity(value.len());
+  let mut chars = value.chars();
+  while let Some(ch) = chars.next() {
+    if ch == '\\' {
+      if let Some(next) = chars.next() {
+        output.push(next);
+      }
+    } else {
+      output.push(ch);
+    }
+  }
+  output
+}
+
+fn normalize_import_file_path(file_path: &str) -> String {
+  let mut value = file_path.trim().trim_matches('\u{feff}').to_string();
+  if (value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\'')) {
+    value = value[1..value.len().saturating_sub(1)].to_string();
+  }
+  if let Some(stripped) = value.strip_prefix("file://") {
+    value = percent_decode_path(stripped);
+  }
+  value = unescape_copied_path(&value);
+  if value == "~" {
+    if let Some(home) = env::var_os("HOME") {
+      return PathBuf::from(home).to_string_lossy().to_string();
+    }
+  }
+  if let Some(rest) = value.strip_prefix("~/") {
+    if let Some(home) = env::var_os("HOME") {
+      return PathBuf::from(home).join(rest).to_string_lossy().to_string();
+    }
+  }
+  value
+}
+
+fn parse_delimited_line(line: &str, delimiter: char) -> Vec<String> {
+  let mut values = Vec::new();
+  let mut current = String::new();
+  let mut chars = line.chars().peekable();
+  let mut in_quotes = false;
+  while let Some(ch) = chars.next() {
+    if ch == '"' {
+      if in_quotes && chars.peek() == Some(&'"') {
+        current.push('"');
+        chars.next();
+      } else {
+        in_quotes = !in_quotes;
+      }
+    } else if ch == delimiter && !in_quotes {
+      values.push(current.trim().to_string());
+      current.clear();
+    } else {
+      current.push(ch);
+    }
+  }
+  values.push(current.trim().to_string());
+  values
 }
 
 fn normalize_transaction_type(raw_type: &str) -> Option<&'static str> {
@@ -1489,10 +1628,12 @@ fn reset_mobile_pairing(connection: &Connection) -> Result<MobilePairingInfo, Ap
   upsert_setting(connection, "mobile_sync_account_id", &serde_json::to_string(&account_id).unwrap())?;
   let pairing_code = make_id("pair", &account_id).chars().rev().take(8).collect::<String>().to_uppercase();
   upsert_setting(connection, "mobile_sync_pairing_code", &serde_json::to_string(&pairing_code).unwrap())?;
+  let pairing_url_path = mobile_pairing_path(&pairing_code);
   Ok(MobilePairingInfo {
     enabled: true,
     account_id,
-    pairing_url_path: format!("/index.html?mobileVersion=0.3.4&pairCode={pairing_code}"),
+    pairing_url_path,
+    pairing_url: mobile_pairing_url(&pairing_code),
     pairing_code,
     paired_device_count: 0,
     devices: Vec::new(),
@@ -1774,6 +1915,16 @@ fn http_response(status: &str, content_type: &str, body: &str) -> Vec<u8> {
   .into_bytes()
 }
 
+fn http_bytes(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
+  let mut response = format!(
+    "HTTP/1.1 {status}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+    body.len()
+  )
+  .into_bytes();
+  response.extend_from_slice(body);
+  response
+}
+
 fn http_json<T: Serialize>(value: &T) -> Vec<u8> {
   match serde_json::to_string(value) {
     Ok(body) => http_response("200 OK", "application/json", &body),
@@ -1783,6 +1934,50 @@ fn http_json<T: Serialize>(value: &T) -> Vec<u8> {
 
 fn http_error(status: &str, message: &str) -> Vec<u8> {
   http_response(status, "text/plain", message)
+}
+
+fn request_path_without_query(path: &str) -> &str {
+  path.split('?').next().unwrap_or(path)
+}
+
+fn mobile_sync_lan_ip() -> String {
+  for interface in ["en0", "en1", "en2"] {
+    if let Ok(output) = Command::new("/usr/sbin/ipconfig").args(["getifaddr", interface]).output() {
+      if output.status.success() {
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !value.is_empty() {
+          return value;
+        }
+      }
+    }
+  }
+  UdpSocket::bind("0.0.0.0:0")
+    .and_then(|socket| {
+      let _ = socket.connect("8.8.8.8:80");
+      socket.local_addr()
+    })
+    .map(|addr| addr.ip().to_string())
+    .unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
+fn mobile_pairing_path(pairing_code: &str) -> String {
+  format!("/index.html?mobileVersion=0.3.4&pairCode={pairing_code}")
+}
+
+fn mobile_pairing_url(pairing_code: &str) -> String {
+  format!("http://{}:18742{}", mobile_sync_lan_ip(), mobile_pairing_path(pairing_code))
+}
+
+fn mobile_pwa_response(path: &str) -> Option<Vec<u8>> {
+  match request_path_without_query(path) {
+    "/" | "/index.html" => Some(http_response("200 OK", "text/html", MOBILE_PWA_INDEX)),
+    "/app.js" => Some(http_response("200 OK", "application/javascript", MOBILE_PWA_APP_JS)),
+    "/styles.css" => Some(http_response("200 OK", "text/css", MOBILE_PWA_STYLES)),
+    "/sw.js" => Some(http_response("200 OK", "application/javascript", MOBILE_PWA_SW)),
+    "/manifest.webmanifest" => Some(http_response("200 OK", "application/manifest+json", MOBILE_PWA_MANIFEST)),
+    "/assets/logo-qianji-a.svg" => Some(http_bytes("200 OK", "image/svg+xml", MOBILE_PWA_LOGO.as_bytes())),
+    _ => None,
+  }
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Result<(String, String, String), AppError> {
@@ -1839,33 +2034,48 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
     Ok((method, path, body)) => {
       if method == "OPTIONS" {
         http_response("204 No Content", "text/plain", "")
-      } else if method == "GET" && path == "/mobile-sync/health" {
-        http_response("200 OK", "text/plain", "WorthTrace Test mobile sync is ready")
-      } else if method == "GET" && path == "/mobile-sync/pairing" {
-        match Connection::open(&work_db_path)
-          .map_err(AppError::from)
-          .and_then(|connection| {
-            ensure_mobile_sync_schema(&connection)?;
-            let account_id = mobile_account_id(&connection)?;
-            let pairing_code = mobile_pairing_code(&connection)?;
-            let paired_device_count = connection.query_row(
-              "select count(*) from mobile_sync_devices where account_id = ?1",
-              params![account_id],
-              |row| row.get(0),
-            )?;
-            let devices = list_mobile_devices(&connection, &account_id)?;
-            Ok(MobilePairingInfo {
-              enabled: true,
-              account_id,
-              pairing_url_path: format!("/index.html?mobileVersion=0.3.4&pairCode={pairing_code}"),
-              pairing_code,
-              paired_device_count,
-              devices,
-            })
-          }) {
-            Ok(info) => http_json(&info),
-            Err(err) => http_error("500 Internal Server Error", &err.to_string()),
-          }
+      } else if method == "GET" {
+        if let Some(response) = mobile_pwa_response(&path) {
+          response
+        } else if path == "/mobile-sync/health" {
+          http_response("200 OK", "text/plain", "WorthTrace Test mobile sync is ready")
+        } else if path == "/mobile-sync/pairing" {
+          match Connection::open(&work_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| {
+              ensure_mobile_sync_schema(&connection)?;
+              let account_id = mobile_account_id(&connection)?;
+              let pairing_code = mobile_pairing_code(&connection)?;
+              let paired_device_count = connection.query_row(
+                "select count(*) from mobile_sync_devices where account_id = ?1",
+                params![account_id],
+                |row| row.get(0),
+              )?;
+              let devices = list_mobile_devices(&connection, &account_id)?;
+              let pairing_url_path = mobile_pairing_path(&pairing_code);
+              Ok(MobilePairingInfo {
+                enabled: true,
+                account_id,
+                pairing_url_path,
+                pairing_url: mobile_pairing_url(&pairing_code),
+                pairing_code,
+                paired_device_count,
+                devices,
+              })
+            }) {
+              Ok(info) => http_json(&info),
+              Err(err) => http_error("500 Internal Server Error", &err.to_string()),
+            }
+        } else if path == "/mobile-sync/dashboard" {
+          match Connection::open(&dashboard_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| read_mobile_dashboard_snapshot(&connection)) {
+              Ok(snapshot) => http_json(&snapshot),
+              Err(err) => http_error("500 Internal Server Error", &err.to_string()),
+            }
+        } else {
+          http_error("404 Not Found", "not found")
+        }
       } else if method == "POST" && path == "/mobile-sync/pair" {
         match serde_json::from_str::<MobilePairInput>(&body) {
           Ok(input) => match Connection::open(&work_db_path)
@@ -1927,13 +2137,6 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
             },
           Err(err) => http_error("400 Bad Request", &format!("invalid password payload: {err}")),
         }
-      } else if method == "GET" && path == "/mobile-sync/dashboard" {
-        match Connection::open(&dashboard_db_path)
-          .map_err(AppError::from)
-          .and_then(|connection| read_mobile_dashboard_snapshot(&connection)) {
-            Ok(snapshot) => http_json(&snapshot),
-            Err(err) => http_error("500 Internal Server Error", &err.to_string()),
-          }
       } else if method == "POST" && path == "/mobile-sync/status" {
         match serde_json::from_str::<MobileSyncStatusInput>(&body) {
           Ok(input) => match Connection::open(&work_db_path)
@@ -2237,11 +2440,16 @@ fn parse_shark_rows_from_file(path: &Path, bytes: &[u8]) -> Result<(Vec<ParsedSh
     return parse_shark_rows_from_table(parse_xlsx_rows(path)?);
   }
 
-  let csv_text = decode_utf16le(bytes)?;
+  let csv_text = decode_csv_text(bytes)?;
+  let delimiter = csv_text
+    .lines()
+    .find(|line| !line.trim().is_empty())
+    .map(|line| if line.matches('\t').count() >= line.matches(',').count() { '\t' } else { ',' })
+    .unwrap_or('\t');
   let rows = csv_text
     .lines()
     .filter(|line| !line.trim().is_empty())
-    .map(|line| line.split('\t').map(|value| value.to_string()).collect::<Vec<_>>())
+    .map(|line| parse_delimited_line(line, delimiter))
     .collect::<Vec<_>>();
   parse_shark_rows_from_table(rows)
 }
@@ -5318,7 +5526,7 @@ fn save_shark_csv_path(
 ) -> Result<String, AppError> {
   let connection = db.work_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
-  let normalized = file_path.trim().to_string();
+  let normalized = normalize_import_file_path(&file_path);
   upsert_setting(&connection, "shark_csv_path", &serde_json::to_string(&normalized).unwrap_or_else(|_| "\"\"".to_string()))?;
   Ok(normalized)
 }
@@ -5338,12 +5546,17 @@ fn import_shark_csv(
   if expected_period_month.len() != 7 {
     return Err(AppError::InvalidCsvValue("上传失败：当前更新月份无效，请先选择月份".to_string()));
   }
-  if file_path.trim().is_empty() {
+  let normalized_file_path = normalize_import_file_path(&file_path);
+  if normalized_file_path.trim().is_empty() {
     return Err(AppError::InvalidCsvValue("上传失败：请先选择或填写账单文件路径".to_string()));
   }
-  let path = Path::new(&file_path);
-  let bytes = fs::read(path)?;
-  upsert_setting(&connection, "shark_csv_path", &serde_json::to_string(&file_path).unwrap_or_else(|_| "\"\"".to_string()))?;
+  let path = Path::new(&normalized_file_path);
+  if !path.exists() {
+    return Err(AppError::InvalidCsvValue(format!("上传失败：找不到账单文件，请检查路径：{}", normalized_file_path)));
+  }
+  let bytes = fs::read(path)
+    .map_err(|err| AppError::InvalidCsvValue(format!("上传失败：无法读取账单文件：{err}")))?;
+  upsert_setting(&connection, "shark_csv_path", &serde_json::to_string(&normalized_file_path).unwrap_or_else(|_| "\"\"".to_string()))?;
   let file_hash = sha256_hex(&bytes);
   let overwrite_existing = overwrite_existing.unwrap_or(false);
   let existing_batch_id: Option<String> = connection
@@ -5464,7 +5677,7 @@ fn import_shark_csv(
     insert into import_batches (id, source_type, file_name, file_path, file_hash, note)
     values (?1, 'shark_csv', ?2, ?3, ?4, ?5)
     ",
-    params![batch_id, file_name, file_path, file_hash, source_note],
+    params![batch_id, file_name, normalized_file_path, file_hash, source_note],
   )?;
 
   let mut imported_count = 0_i64;
@@ -6557,11 +6770,12 @@ fn get_asset_entry_items(
       end as effective_is_dca,
       a.status,
       a.note,
-      coalesce(mas.original_amount, prev_mas.original_amount, 0),
-      coalesce(mas.status, prev_mas.status, 'held'),
+      coalesce(mas.original_amount, 0),
+      coalesce(mas.status, 'held'),
       ?2,
       coalesce(prev_mas.original_amount, 0),
-      coalesce(prev_mas.status, 'missing')
+      coalesce(prev_mas.status, 'missing'),
+      case when mas.id is null then 0 else 1 end
     from assets a
     join asset_categories main on main.id = a.main_asset_category_id
     left join asset_categories sub on sub.id = a.sub_asset_category_id
@@ -6600,6 +6814,7 @@ fn get_asset_entry_items(
         previous_snapshot_month: row.get(15)?,
         previous_month_amount: row.get(16)?,
         previous_month_status: row.get(17)?,
+        confirmed: row.get::<_, i64>(18)? == 1,
         dca_plans: Vec::new(),
       })
     })?
@@ -6833,6 +7048,7 @@ fn create_asset(
         previous_snapshot_month: row.get(15)?,
         previous_month_amount: row.get(16)?,
         previous_month_status: row.get(17)?,
+        confirmed: false,
         dca_plans: Vec::new(),
       })
     },
@@ -7825,6 +8041,7 @@ fn get_mobile_pairing_info(
       account_id: String::new(),
       pairing_code: String::new(),
       pairing_url_path: String::new(),
+      pairing_url: String::new(),
       paired_device_count: 0,
       devices: Vec::new(),
     });
@@ -7839,10 +8056,12 @@ fn get_mobile_pairing_info(
     |row| row.get(0),
   )?;
   let devices = list_mobile_devices(&connection, &account_id)?;
+  let pairing_url_path = mobile_pairing_path(&pairing_code);
   Ok(MobilePairingInfo {
     enabled: true,
     account_id,
-    pairing_url_path: format!("/index.html?mobileVersion=0.3.4&pairCode={pairing_code}"),
+    pairing_url_path,
+    pairing_url: mobile_pairing_url(&pairing_code),
     pairing_code,
     paired_device_count,
     devices,
@@ -7860,6 +8079,7 @@ fn reset_mobile_pairing_devices(
       account_id: String::new(),
       pairing_code: String::new(),
       pairing_url_path: String::new(),
+      pairing_url: String::new(),
       paired_device_count: 0,
       devices: Vec::new(),
     });

@@ -5,7 +5,7 @@
 ## 当前版本
 
 - 手机 PWA 原型版本：0.3.4。
-- 所属项目版本：2.7.1。
+- 所属项目版本：2.7.2。
 - 当前手机端通过已绑定的电脑 App 本地同步服务读取看板和提交草稿，不直接打开 SQLite 文件。
 - 手机端本地草稿使用浏览器 IndexedDB：`worthtrace_mobile_v3`。
 - 0.3.4 首次打开会清理旧 `worthtrace_mobile_v1` / `worthtrace_mobile_v2` 测试草稿，让手机端回到干净初始状态。
@@ -51,9 +51,13 @@
 
 手机 PWA 原型。用于逐步落地手机页面、离线队列、同步提示。
 
+手机打开方式
+
+新版推荐从电脑 App 右上角“手机绑定”里复制手机链接。电脑 App 会直接提供手机网页和同步服务，手机打开该链接即可，不需要双击 `.command`。
+
 `start-mobile-link.command` / `启动手机链接.command`
 
-用户下载并解压手机包后，双击 `start-mobile-link.command`，会自动显示可发送到手机的局域网链接，并启动手机端 PWA 服务。中文文件名用于中文环境备用。
+仅作为旧版备用启动方式。GitHub 下载的 `.command` 可能会被 macOS 提示“Apple could not verify”，这是苹果对未公证脚本的拦截，不代表脚本内容损坏。正式使用优先走电脑 App 里的手机链接。
 
 `docs/`
 

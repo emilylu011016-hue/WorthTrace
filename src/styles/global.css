@@ -4667,6 +4667,19 @@ svg .negative {
   white-space: nowrap;
 }
 
+.asset-save-state {
+  font-style: normal;
+  font-weight: 700;
+}
+
+.asset-save-state.saved {
+  color: #146c43;
+}
+
+.asset-save-state.unsaved {
+  color: #9a5a00;
+}
+
 .asset-classification-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
