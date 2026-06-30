@@ -83,6 +83,35 @@ struct MobilePairingInfo {
   pairing_code: String,
   pairing_url_path: String,
   paired_device_count: i64,
+  devices: Vec<MobileSyncDeviceInfo>,
+}
+
+#[derive(Serialize)]
+struct MobileSyncDeviceInfo {
+  device_id: String,
+  device_name: Option<String>,
+  app_version: Option<String>,
+  pending_count: i64,
+  synced_count: i64,
+  paired_at: Option<String>,
+  last_seen_at: String,
+}
+
+#[derive(Deserialize)]
+struct MobileUnpairInput {
+  device_id: Option<String>,
+  account_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MobilePasswordInput {
+  password: String,
+}
+
+#[derive(Deserialize)]
+struct MobilePasswordChangeInput {
+  current_password: String,
+  new_password: String,
 }
 
 #[derive(Serialize)]
@@ -156,11 +185,15 @@ struct MobilePortfolioTarget {
 #[derive(Serialize)]
 struct MobileDashboardSnapshot {
   snapshot_month: String,
+  target_saving_rate: f64,
   asset_gross_value: f64,
   credit_card_net_adjustment: f64,
   net_worth: f64,
+  monthly_trends: Vec<MonthlyTrend>,
+  expense_categories: Vec<CategoryBreakdown>,
   asset_allocations: Vec<MobileAssetAllocation>,
   portfolio_targets: Vec<MobilePortfolioTarget>,
+  spending_anomalies: Vec<SpendingAnomaly>,
 }
 
 #[derive(Debug, Error)]
@@ -1402,6 +1435,10 @@ fn bind_mobile_device(connection: &Connection, input: MobilePairInput) -> Result
   }
   let account_id = mobile_account_id(connection)?;
   let device_id = mobile_sync_device_id(input.device_id);
+  connection.execute(
+    "delete from mobile_sync_devices where account_id = ?1 and device_id <> ?2",
+    params![account_id, device_id],
+  )?;
   upsert_mobile_device(
     connection,
     &device_id,
@@ -1416,6 +1453,64 @@ fn bind_mobile_device(connection: &Connection, input: MobilePairInput) -> Result
     device_id,
     paired: true,
   })
+}
+
+fn list_mobile_devices(connection: &Connection, account_id: &str) -> Result<Vec<MobileSyncDeviceInfo>, AppError> {
+  let mut statement = connection.prepare(
+    "
+    select device_id, device_name, app_version, pending_count, synced_count, paired_at, last_seen_at
+    from mobile_sync_devices
+    where account_id = ?1
+    order by last_seen_at desc
+    ",
+  )?;
+  let rows = statement.query_map(params![account_id], |row| {
+    Ok(MobileSyncDeviceInfo {
+      device_id: row.get(0)?,
+      device_name: row.get(1)?,
+      app_version: row.get(2)?,
+      pending_count: row.get(3)?,
+      synced_count: row.get(4)?,
+      paired_at: row.get(5)?,
+      last_seen_at: row.get(6)?,
+    })
+  })?;
+  let mut devices = Vec::new();
+  for row in rows {
+    devices.push(row?);
+  }
+  Ok(devices)
+}
+
+fn reset_mobile_pairing(connection: &Connection) -> Result<MobilePairingInfo, AppError> {
+  ensure_mobile_sync_schema(connection)?;
+  connection.execute("delete from mobile_sync_devices", [])?;
+  let account_id = make_unique_id("acct", "worthtrace-mobile-account");
+  upsert_setting(connection, "mobile_sync_account_id", &serde_json::to_string(&account_id).unwrap())?;
+  let pairing_code = make_id("pair", &account_id).chars().rev().take(8).collect::<String>().to_uppercase();
+  upsert_setting(connection, "mobile_sync_pairing_code", &serde_json::to_string(&pairing_code).unwrap())?;
+  Ok(MobilePairingInfo {
+    enabled: true,
+    account_id,
+    pairing_url_path: format!("/index.html?mobileVersion=0.3.4&pairCode={pairing_code}"),
+    pairing_code,
+    paired_device_count: 0,
+    devices: Vec::new(),
+  })
+}
+
+fn unpair_mobile_device(connection: &Connection, input: MobileUnpairInput) -> Result<(), AppError> {
+  ensure_mobile_sync_schema(connection)?;
+  let expected_account_id = mobile_account_id(connection)?;
+  if input.account_id.as_deref().unwrap_or_default() != expected_account_id {
+    return Err(AppError::InvalidCsvValue("手机账户不匹配，请重新绑定。".to_string()));
+  }
+  let device_id = mobile_sync_device_id(input.device_id);
+  connection.execute(
+    "delete from mobile_sync_devices where account_id = ?1 and device_id = ?2",
+    params![expected_account_id, device_id],
+  )?;
+  Ok(())
 }
 
 fn store_mobile_sync_records(
@@ -1595,6 +1690,7 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
 fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashboardSnapshot, AppError> {
   ensure_runtime_schema(connection)?;
   let snapshot_month = latest_completed_period_month(connection)?;
+  let target_saving_rate = setting_number(connection, "target_saving_rate", 0.3)?;
   let asset_gross_value: f64 = connection.query_row(
     "select coalesce(sum(amount_cny), 0) from monthly_asset_snapshots where period_month = ?1 and version_no = 1 and status = 'held'",
     params![snapshot_month],
@@ -1614,6 +1710,9 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
       percent: item.percent,
     })
     .collect();
+  let monthly_trends = dashboard_monthly_trends(connection)?;
+  let spending_anomalies = spending_anomalies(connection, &snapshot_month)?;
+  let expense_categories = category_breakdown(connection, &snapshot_month, "expense")?;
   let mut statement = connection.prepare(
     "
     select
@@ -1655,11 +1754,15 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
   }
   Ok(MobileDashboardSnapshot {
     snapshot_month,
+    target_saving_rate,
     asset_gross_value,
     credit_card_net_adjustment,
     net_worth: asset_gross_value + credit_card_net_adjustment,
+    monthly_trends,
+    expense_categories,
     asset_allocations,
     portfolio_targets,
+    spending_anomalies,
   })
 }
 
@@ -1750,12 +1853,14 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
               params![account_id],
               |row| row.get(0),
             )?;
+            let devices = list_mobile_devices(&connection, &account_id)?;
             Ok(MobilePairingInfo {
               enabled: true,
               account_id,
-              pairing_url_path: format!("/index.html?mobileVersion=0.2.2&pairCode={pairing_code}"),
+              pairing_url_path: format!("/index.html?mobileVersion=0.3.4&pairCode={pairing_code}"),
               pairing_code,
               paired_device_count,
+              devices,
             })
           }) {
             Ok(info) => http_json(&info),
@@ -1773,6 +1878,54 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
               Err(err) => http_error("400 Bad Request", &err.to_string()),
             },
           Err(err) => http_error("400 Bad Request", &format!("invalid pair payload: {err}")),
+        }
+      } else if method == "POST" && path == "/mobile-sync/unpair" {
+        match serde_json::from_str::<MobileUnpairInput>(&body) {
+          Ok(input) => match Connection::open(&work_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| unpair_mobile_device(&connection, input)) {
+              Ok(()) => http_json(&serde_json::json!({ "unpaired": true })),
+              Err(err) => http_error("400 Bad Request", &err.to_string()),
+            },
+          Err(err) => http_error("400 Bad Request", &format!("invalid unpair payload: {err}")),
+        }
+      } else if method == "POST" && path == "/mobile-sync/auth" {
+        match serde_json::from_str::<MobilePasswordInput>(&body) {
+          Ok(input) => match Connection::open(&work_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| {
+              if verify_password(&connection, &input.password)? {
+                Ok(serde_json::json!({ "unlocked": true }))
+              } else {
+                Err(AppError::InvalidPassword)
+              }
+            }) {
+              Ok(result) => http_json(&result),
+              Err(err) => http_error("401 Unauthorized", &err.to_string()),
+            },
+          Err(err) => http_error("400 Bad Request", &format!("invalid auth payload: {err}")),
+        }
+      } else if method == "POST" && path == "/mobile-sync/password" {
+        match serde_json::from_str::<MobilePasswordChangeInput>(&body) {
+          Ok(input) => match Connection::open(&work_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| {
+              if input.new_password.chars().count() < 6 {
+                return Err(AppError::WeakPassword);
+              }
+              if !verify_password(&connection, &input.current_password)? {
+                return Err(AppError::InvalidPassword);
+              }
+              let salt = generate_salt();
+              let hash = hash_password(&input.new_password, &salt);
+              upsert_setting(&connection, "security_password_salt", &serde_json::to_string(&salt).unwrap())?;
+              upsert_setting(&connection, "security_password_hash", &serde_json::to_string(&hash).unwrap())?;
+              Ok(serde_json::json!({ "changed": true }))
+            }) {
+              Ok(result) => http_json(&result),
+              Err(err) => http_error("400 Bad Request", &err.to_string()),
+            },
+          Err(err) => http_error("400 Bad Request", &format!("invalid password payload: {err}")),
         }
       } else if method == "GET" && path == "/mobile-sync/dashboard" {
         match Connection::open(&dashboard_db_path)
@@ -7673,6 +7826,7 @@ fn get_mobile_pairing_info(
       pairing_code: String::new(),
       pairing_url_path: String::new(),
       paired_device_count: 0,
+      devices: Vec::new(),
     });
   }
   let connection = db.work_connection.lock().expect("database mutex poisoned");
@@ -7684,13 +7838,35 @@ fn get_mobile_pairing_info(
     params![account_id],
     |row| row.get(0),
   )?;
+  let devices = list_mobile_devices(&connection, &account_id)?;
   Ok(MobilePairingInfo {
     enabled: true,
     account_id,
-    pairing_url_path: format!("/index.html?mobileVersion=0.2.2&pairCode={pairing_code}"),
+    pairing_url_path: format!("/index.html?mobileVersion=0.3.4&pairCode={pairing_code}"),
     pairing_code,
     paired_device_count,
+    devices,
   })
+}
+
+#[tauri::command]
+fn reset_mobile_pairing_devices(
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<MobilePairingInfo, AppError> {
+  if !is_test_environment() {
+    return Ok(MobilePairingInfo {
+      enabled: false,
+      account_id: String::new(),
+      pairing_code: String::new(),
+      pairing_url_path: String::new(),
+      paired_device_count: 0,
+      devices: Vec::new(),
+    });
+  }
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  reset_mobile_pairing(&connection)
 }
 
 #[tauri::command]
@@ -7777,6 +7953,7 @@ pub fn run() {
       get_dashboard_seed_summary,
       get_mobile_sync_summary,
       get_mobile_pairing_info,
+      reset_mobile_pairing_devices,
       mark_mobile_sync_records_reviewed
     ])
     .run(tauri::generate_context!())

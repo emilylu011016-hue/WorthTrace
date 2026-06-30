@@ -19,6 +19,7 @@ import {
   Plus,
   RefreshCcw,
   Save,
+  Smartphone,
   Settings,
   Shield,
   Target,
@@ -289,6 +290,15 @@ type MobilePairingInfo = {
   pairing_code: string;
   pairing_url_path: string;
   paired_device_count: number;
+  devices: Array<{
+    device_id: string;
+    device_name?: string | null;
+    app_version?: string | null;
+    pending_count: number;
+    synced_count: number;
+    paired_at?: string | null;
+    last_seen_at: string;
+  }>;
 };
 
 type ImportResult = {
@@ -1415,7 +1425,10 @@ function formatCurrency(value: number, privacyMode: boolean, currency: CurrencyC
   return `${currency} ${formatMoney(value, false)}`;
 }
 
+let percentPrivacyMode = false;
+
 function formatPercent(value: number): string {
+  if (percentPrivacyMode) return "••••••";
   return new Intl.NumberFormat("zh-CN", {
     style: "percent",
     maximumFractionDigits: 1,
@@ -1772,6 +1785,7 @@ export function App() {
   const [mobilePairingInfo, setMobilePairingInfo] = useState<MobilePairingInfo | null>(null);
   const [mobileSyncMessage, setMobileSyncMessage] = useState<string | null>(null);
   const [mobileSyncExpanded, setMobileSyncExpanded] = useState(false);
+  const [mobilePairingDialogOpen, setMobilePairingDialogOpen] = useState(false);
   const environmentLabel = security?.environment_label || (browserPreviewSummary ? "Demo" : "");
   const isDemoEnvironment = environmentLabel.toLowerCase() === "demo";
   const isTestEnvironment = environmentLabel.toLowerCase() === "test";
@@ -1958,6 +1972,7 @@ export function App() {
   }, [expenseReview, incomeReview, assetItems, dcaCashflows, displayCurrency, selectedMonth]);
 
   const privacyMode = Boolean(security?.privacy_mode);
+  percentPrivacyMode = privacyMode;
   const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dashboard_enabled_items?.length
     ? onboardingStatus.dashboard_enabled_items
     : defaultDashboardItemIds);
@@ -5066,6 +5081,75 @@ export function App() {
     );
   };
 
+  const renderMobilePairingDialog = () => {
+    if (!mobilePairingDialogOpen || !mobilePairingInfo?.enabled) return null;
+    return (
+      <div className="settings-dialog-backdrop" role="presentation">
+        <section aria-modal="true" className="settings-dialog mobile-pairing-dialog" role="dialog">
+          <div className="settings-dialog-header">
+            <div>
+              <p className="eyebrow">Mobile Pairing</p>
+              <h2>手机绑定</h2>
+            </div>
+            <button className="icon-only-button" onClick={() => setMobilePairingDialogOpen(false)} type="button" aria-label="关闭手机绑定">
+              ×
+            </button>
+          </div>
+          <div className="mobile-pairing-dialog-body">
+            <section className="mobile-pairing-detail-card">
+              <span>添加设备</span>
+              <strong>{mobilePairingInfo.pairing_code}</strong>
+              <code>{mobilePairingInfo.pairing_url_path}</code>
+              <small>手机和电脑需要能互相访问同一局域网地址。手机开热点、电脑连接该热点时，只要手机详情里显示“已连到电脑”，即可同步。</small>
+            </section>
+            <section className="mobile-device-list">
+              <div className="mobile-device-list-head">
+                <b>已绑定设备</b>
+                <em>{mobilePairingInfo.paired_device_count} 台</em>
+              </div>
+              {mobilePairingInfo.devices.length ? (
+                mobilePairingInfo.devices.map((device) => (
+                  <article key={device.device_id}>
+                    <span>
+                      <b>{device.device_name || "手机浏览器"}</b>
+                      <small>{device.app_version || "未知版本"} · 最近连接 {device.last_seen_at}</small>
+                    </span>
+                    <em>{device.pending_count} 条待同步</em>
+                  </article>
+                ))
+              ) : (
+                <p className="mobile-sync-copy">还没有手机完成绑定。</p>
+              )}
+            </section>
+            <div className="row-actions">
+              <button className="secondary-button compact" onClick={() => void refreshMobilePairingInfo()} type="button">
+                刷新
+              </button>
+              <button
+                className="primary-button compact danger-action"
+                onClick={() => {
+                  setConfirmDialog({
+                    title: "解除手机绑定？",
+                    message: "解除后，旧手机需要重新输入新的绑定码才能继续同步。已进入电脑收件箱或已入库的数据不会删除。",
+                    confirmLabel: "解除绑定",
+                    danger: true,
+                    onConfirm: async () => {
+                      await resetMobilePairingDevices();
+                      setMobilePairingDialogOpen(false);
+                    }
+                  });
+                }}
+                type="button"
+              >
+                解除绑定
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  };
+
   if (shouldShowInitialPasswordSetup) {
     return (
       <main className="auth-shell">
@@ -5162,6 +5246,17 @@ export function App() {
     }
   }
 
+  async function resetMobilePairingDevices() {
+    try {
+      const result = await invoke<MobilePairingInfo>("reset_mobile_pairing_devices");
+      setMobilePairingInfo(result);
+      setMobileSyncMessage("已解除手机绑定。旧手机需要重新绑定后才能同步。");
+      await refreshMobileSyncSummary();
+    } catch (err) {
+      setMobileSyncMessage(String(err));
+    }
+  }
+
   async function markMobileSyncReviewed(ids: string[]) {
     if (!ids.length) return;
     try {
@@ -5211,17 +5306,6 @@ export function App() {
           <article><span>电脑已收到</span><strong>{mobileSyncSummary?.received_in_desktop ?? 0} 条</strong></article>
           <article><span>已处理</span><strong>{mobileSyncSummary?.reviewed_in_desktop ?? 0} 条</strong></article>
         </div>
-        {mobilePairingInfo?.enabled ? (
-          <div className="mobile-pairing-card">
-            <span>
-              <b>绑定手机</b>
-              <small>绑定后，手机记账会带上同一个账户 ID。</small>
-            </span>
-            <strong>{mobilePairingInfo.pairing_code}</strong>
-            <code>{mobilePairingInfo.pairing_url_path}</code>
-            <em>{mobilePairingInfo.paired_device_count} 台已绑定</em>
-          </div>
-        ) : null}
         <p className="mobile-sync-copy">
           {mobileSyncSummary?.last_seen_at ? `最近连接：${mobileSyncSummary.last_seen_at}。` : "手机还没有连接过。"}
         </p>
@@ -5301,6 +5385,12 @@ export function App() {
         </div>
         <div className="security-actions">
           {renderThemeSwitcher("全局主题")}
+          {isTestEnvironment && mobilePairingInfo?.enabled ? (
+            <button className="icon-button" onClick={() => setMobilePairingDialogOpen(true)} type="button">
+              <Smartphone size={17} />
+              <span>手机绑定</span>
+            </button>
+          ) : null}
           <button className="icon-button" onClick={() => openSettings("password")} type="button">
             <Settings size={17} />
             <span>设置</span>
@@ -9664,6 +9754,7 @@ export function App() {
       {view === "contentTemplates" ? renderContentTemplateSettings() : null}
       {renderConfirmDialog()}
       {renderSettingsDialog()}
+      {renderMobilePairingDialog()}
     </main>
   );
 }

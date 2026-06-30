@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.2.2";
+const MOBILE_APP_VERSION = "0.3.4";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -7,6 +7,8 @@ const CUSTOM_CATEGORIES_KEY = "worthtrace_mobile_custom_categories_v2";
 const RELEASE_RESET_KEY = "worthtrace_mobile_release_reset_v3";
 const DEVICE_ID_KEY = "worthtrace_mobile_device_id_v2";
 const ACCOUNT_ID_KEY = "worthtrace_mobile_account_id_v3";
+const BINDING_INFO_KEY = "worthtrace_mobile_binding_info_v1";
+const MOBILE_SESSION_UNLOCK_KEY = "worthtrace_mobile_unlocked_session_v1";
 const DEFAULT_SYNC_ENDPOINT = "http://127.0.0.1:18742";
 const LEGACY_DB_NAMES = ["worthtrace_mobile_v1", "worthtrace_mobile_v2"];
 const LEGACY_STORAGE_KEYS = ["worthtrace_mobile_settings_v1", "worthtrace_mobile_custom_categories_v1"];
@@ -17,6 +19,7 @@ const baseCategories = {
 };
 
 await resetLegacyLocalData();
+resetBindingFromUrlIfNeeded();
 
 const settings = readSettings();
 const customCategories = readCustomCategories();
@@ -26,7 +29,9 @@ let accountId = localStorage.getItem(ACCOUNT_ID_KEY) || "";
 const icons = {
   eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M9.9 4.4A10.7 10.7 0 0 1 12 4.2c6.3 0 9.9 7 9.9 7a16.2 16.2 0 0 1-3.1 3.9"/><path d="M6.5 6.8A16.1 16.1 0 0 0 2.1 12s3.6 7 9.9 7a10.7 10.7 0 0 0 4.1-.8"/></svg>',
-  palette: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 1.2-3.6 1.2 1.2 0 0 1 .8-2.1H17a4 4 0 0 0 0-8h-1.2A4.9 4.9 0 0 1 12 3Z"/><circle cx="7.8" cy="10" r=".8"/><circle cx="10.4" cy="7.7" r=".8"/><circle cx="14" cy="7.8" r=".8"/></svg>'
+  palette: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 1.2-3.6 1.2 1.2 0 0 1 .8-2.1H17a4 4 0 0 0 0-8h-1.2A4.9 4.9 0 0 1 12 3Z"/><circle cx="7.8" cy="10" r=".8"/><circle cx="10.4" cy="7.7" r=".8"/><circle cx="14" cy="7.8" r=".8"/></svg>',
+  desktop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/><path d="M9 10h6"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><path d="M12 15v2"/></svg>'
 };
 
 const state = {
@@ -36,7 +41,8 @@ const state = {
   records: [],
   online: navigator.onLine,
   privacy: true,
-  theme: settings.theme
+  theme: settings.theme,
+  assetRange: "ytd"
 };
 
 const pageTitle = document.querySelector("#pageTitle");
@@ -63,8 +69,33 @@ const cardUnbilledInput = document.querySelector("#cardUnbilledInput");
 const cardPreviousUnbilledInput = document.querySelector("#cardPreviousUnbilledInput");
 const syncDialog = document.querySelector("#syncDialog");
 const syncDialogText = document.querySelector("#syncDialogText");
+const pairDialog = document.querySelector("#pairDialog");
+const pairForm = document.querySelector("#pairForm");
+const pairDialogIntro = document.querySelector("#pairDialogIntro");
+const bindingDetail = document.querySelector("#bindingDetail");
+const pairCodeInput = document.querySelector("#pairCodeInput");
+const pairSubmitButton = document.querySelector("#pairSubmitButton");
+const unpairButton = document.querySelector("#unpairButton");
+const categoryDialog = document.querySelector("#categoryDialog");
+const categoryForm = document.querySelector("#categoryForm");
+const categoryDialogTitle = document.querySelector("#categoryDialogTitle");
+const categoryNameInput = document.querySelector("#categoryNameInput");
+const passwordDialog = document.querySelector("#passwordDialog");
+const passwordForm = document.querySelector("#passwordForm");
+const passwordInput = document.querySelector("#passwordInput");
+const passwordHint = document.querySelector("#passwordHint");
+const passwordSubmitButton = document.querySelector("#passwordSubmitButton");
+const clearBindingButton = document.querySelector("#clearBindingButton");
+const passwordChangeDialog = document.querySelector("#passwordChangeDialog");
+const passwordChangeForm = document.querySelector("#passwordChangeForm");
+const currentPasswordInput = document.querySelector("#currentPasswordInput");
+const newPasswordInput = document.querySelector("#newPasswordInput");
+const passwordChangeHint = document.querySelector("#passwordChangeHint");
+const passwordChangeSubmitButton = document.querySelector("#passwordChangeSubmitButton");
 const privacyButton = document.querySelector("#privacyButton");
 const themeButton = document.querySelector("#themeButton");
+const securityButton = document.querySelector("#securityButton");
+const bindingInfoButton = document.querySelector("#bindingInfoButton");
 const themePanel = document.querySelector("#themePanel");
 const homePendingCount = document.querySelector("#homePendingCount");
 const infoToast = document.querySelector("#infoToast");
@@ -73,27 +104,28 @@ const mayAnomalyDetail = document.querySelector("#mayAnomalyDetail");
 const targetDeviationSection = document.querySelector("#targetDeviationSection");
 const assetRing = document.querySelector("#assetRing");
 const allocationLegend = document.querySelector("#allocationLegend");
+const assetRangeTabs = document.querySelector("#assetRangeTabs");
+const assetRangeSummary = document.querySelector("#assetRangeSummary");
 let toastTimer = null;
+let pendingCategoryType = "expense";
 
-let mobileDashboardSnapshot = {
-  snapshotMonth: "2026-05",
-  netWorth: 244229.82,
-  assetAllocations: [
-    { category: "全球资产", amount: 122114.91, percent: 0.5 },
-    { category: "现金", amount: 51288.26, percent: 0.21 },
-    { category: "债券", amount: 34192.17, percent: 0.14 },
-    { category: "黄金", amount: 19538.39, percent: 0.08 },
-    { category: "其他", amount: 17096.09, percent: 0.07 }
-  ],
-  allocationTargets: []
-};
+let mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
+
+const assetRanges = [
+  { key: "1m", label: "1月", months: 1 },
+  { key: "3m", label: "3月", months: 3 },
+  { key: "6m", label: "半年", months: 6 },
+  { key: "ytd", label: "今年", months: null },
+  { key: "1y", label: "一年", months: 12 }
+];
 
 dateInput.value = new Date().toISOString().slice(0, 10);
 applyTheme();
 renderCategoryOptions();
-void loadMobileDashboardSnapshot();
+if (canUseDesktopData()) void loadMobileDashboardSnapshot();
 renderAssetDashboard();
 renderTargetDeviation();
+showPasswordGateIfNeeded();
 
 document.querySelectorAll("[data-nav]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -116,10 +148,19 @@ document.querySelectorAll(".theme-choice").forEach((button) => {
     showToast(`已切换为${button.textContent.trim()}风格`);
   });
 });
+assetRangeTabs.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-asset-range]");
+  if (!button) return;
+  state.assetRange = button.dataset.assetRange;
+  renderAssetDashboard();
+  render();
+});
 
 privacyButton.addEventListener("click", () => {
   state.privacy = !state.privacy;
   writeSettings();
+  renderAssetDashboard();
+  renderTargetDeviation();
   render();
   showToast(state.privacy ? "金额已隐藏" : "金额已显示");
 });
@@ -131,15 +172,48 @@ themeButton.addEventListener("click", () => {
 });
 
 document.querySelector("#addCategoryButton").addEventListener("click", () => {
-  const value = window.prompt(`新增${state.type === "income" ? "收入" : "支出"}分类名称`);
-  const name = value?.trim();
+  pendingCategoryType = state.type;
+  categoryDialogTitle.textContent = `新增${state.type === "income" ? "收入" : "支出"}分类`;
+  categoryNameInput.value = "";
+  openModal(categoryDialog);
+  categoryNameInput.focus();
+});
+document.querySelector("#closeCategoryDialogButton").addEventListener("click", () => closeModal(categoryDialog));
+categoryForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = categoryNameInput.value.trim();
   if (!name) return;
-  const list = categoriesForType(state.type);
+  const list = categoriesForType(pendingCategoryType);
   if (!list.includes(name)) {
-    customCategories[state.type].push(name);
+    customCategories[pendingCategoryType].push(name);
     writeCustomCategories();
   }
   renderCategoryOptions(name);
+  closeModal(categoryDialog);
+});
+passwordForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void unlockMobileApp();
+});
+clearBindingButton.addEventListener("click", () => {
+  clearLocalBinding();
+  closeModal(passwordDialog);
+  renderAssetDashboard();
+  renderTargetDeviation();
+  render();
+  showToast("已清除本机绑定");
+});
+securityButton.addEventListener("click", () => {
+  currentPasswordInput.value = "";
+  newPasswordInput.value = "";
+  passwordChangeHint.textContent = "新密码至少 6 位。当前局域网测试版建议只在可信网络中修改。";
+  openModal(passwordChangeDialog);
+  currentPasswordInput.focus();
+});
+document.querySelector("#closePasswordChangeButton").addEventListener("click", () => closeModal(passwordChangeDialog));
+passwordChangeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void changeMobilePassword();
 });
 
 bookForm.addEventListener("submit", async (event) => {
@@ -151,7 +225,7 @@ bookForm.addEventListener("submit", async (event) => {
   }
   const now = new Date().toISOString();
   const record = {
-    local_id: crypto.randomUUID(),
+    local_id: createLocalId("txn"),
     server_id: null,
     record_kind: "transaction",
     operation: "create",
@@ -186,7 +260,7 @@ creditCardForm.addEventListener("submit", async (event) => {
   const now = new Date().toISOString();
   const periodMonth = currentMonthKey();
   const record = {
-    local_id: crypto.randomUUID(),
+    local_id: createLocalId("card"),
     server_id: null,
     record_kind: "credit_card_adjustment",
     operation: "create",
@@ -211,11 +285,24 @@ creditCardForm.addEventListener("submit", async (event) => {
 
 document.querySelector("#syncButton").addEventListener("click", showSyncDialog);
 document.querySelector("#confirmSyncButton").addEventListener("click", showSyncDialog);
-document.querySelector("#closeDialogButton").addEventListener("click", () => syncDialog.close());
+document.querySelector("#closeDialogButton").addEventListener("click", () => closeModal(syncDialog));
 pairButton.addEventListener("click", () => {
-  const code = window.prompt("输入电脑端显示的绑定码");
-  if (!code?.trim()) return;
-  void pairWithDesktop(code.trim());
+  showPairDialog();
+});
+bindingInfoButton.addEventListener("click", () => showPairDialog({ showDetail: true }));
+document.querySelector("#closePairDialogButton").addEventListener("click", () => closeModal(pairDialog));
+unpairButton.addEventListener("click", () => {
+  void unpairThisDevice();
+});
+pairForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const code = pairCodeInput.value.trim();
+  if (!code) {
+    pairCodeInput.focus();
+    return;
+  }
+  closeModal(pairDialog);
+  void pairWithDesktop(code);
 });
 mayAnomalyButton.addEventListener("click", () => {
   mayAnomalyDetail.hidden = !mayAnomalyDetail.hidden;
@@ -291,6 +378,7 @@ function pendingRecords() {
 function render() {
   const pending = pendingRecords();
   const pendingSummary = summarizeRecords(pending);
+  updateAccessState();
   syncCount.textContent = String(pending.length);
   homePendingCount.textContent = `${pending.length} 条`;
   syncDot.classList.toggle("offline", !state.online);
@@ -305,9 +393,16 @@ function render() {
   privacyButton.setAttribute("title", state.privacy ? "显示金额" : "隐藏金额");
   privacyButton.dataset.tooltip = state.privacy ? "显示金额" : "隐藏金额";
   themeButton.innerHTML = icons.palette;
+  securityButton.innerHTML = icons.lock;
+  securityButton.hidden = !accountId;
   renderPairCard();
   document.body.classList.toggle("privacy-on", state.privacy);
+  renderSyncedDashboard();
+  renderMayAnomalies();
   document.querySelectorAll(".money").forEach((node) => {
+    node.textContent = state.privacy ? "••••••" : node.dataset.value;
+  });
+  document.querySelectorAll(".percent").forEach((node) => {
     node.textContent = state.privacy ? "••••••" : node.dataset.value;
   });
   renderLocalRecords();
@@ -365,7 +460,6 @@ function showSyncDialog() {
           <p>电脑端确认 6 月收支、补资产和信用卡，并生成 6 月月报后，才刷新手机看板。</p>
         </section>
       </div>
-      <p class="sync-prototype-note">当前连接电脑 Test 同步入口：${escapeHtml(syncEndpoint)}。成功后进入电脑端手机收件箱。</p>
     `
     : `
       <div class="sync-empty">
@@ -373,10 +467,27 @@ function showSyncDialog() {
         <span>新增收入、支出或信用卡调整后，这里会显示本次同步内容。</span>
       </div>
     `;
-  syncDialog.showModal();
+  openModal(syncDialog);
+}
+
+function openModal(dialog) {
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+    return;
+  }
+  dialog.setAttribute("open", "");
+}
+
+function closeModal(dialog) {
+  if (typeof dialog.close === "function") {
+    dialog.close();
+    return;
+  }
+  dialog.removeAttribute("open");
 }
 
 async function reportMobileStatus() {
+  if (!accountId) return;
   try {
     const pending = pendingRecords();
     const synced = state.records.filter((record) => record.sync_status === "synced");
@@ -398,12 +509,144 @@ async function reportMobileStatus() {
 
 function renderPairCard() {
   const bound = Boolean(accountId);
+  pairCard.hidden = bound;
+  bindingInfoButton.hidden = !bound;
+  bindingInfoButton.innerHTML = icons.desktop;
   pairCard.classList.toggle("bound", bound);
   pairCardTitle.textContent = bound ? "已绑定电脑" : "绑定电脑";
   pairCardText.textContent = bound
     ? "手机记账会同步到已绑定的电脑账户。"
     : "输入电脑端显示的绑定码，让手机和电脑识别为同一个账户。";
   pairButton.textContent = bound ? "重新绑定" : "绑定";
+}
+
+function showPairDialog(options = {}) {
+  const showDetail = Boolean(options.showDetail && accountId);
+  const bindingInfo = readBindingInfo();
+  pairDialog.querySelector("h2").textContent = showDetail ? "电脑绑定" : "绑定电脑";
+  pairDialogIntro.textContent = showDetail
+    ? "当前手机已经和电脑 Test 同步入口绑定。重新绑定只会更换手机连接的电脑账户。"
+    : "输入电脑端显示的绑定码。绑定后，手机草稿会进入电脑端手机收件箱。";
+  bindingDetail.hidden = !showDetail;
+  if (showDetail) {
+    bindingDetail.innerHTML = `
+      <section><b>电脑地址</b><span>${escapeHtml(bindingInfo.syncEndpoint || syncEndpoint)}</span></section>
+      <section><b>绑定码</b><span>${escapeHtml(bindingInfo.pairingCode || "请以电脑端当前显示为准")}</span></section>
+      <section><b>绑定时间</b><span>${escapeHtml(bindingInfo.pairedAt || "本机已绑定")}</span></section>
+      <section><b>连接状态</b><span id="bindingConnectionStatus">检查中</span></section>
+      <p>未同步草稿仍保存在这台手机；重新绑定后会同步到新的电脑收件箱。已进入电脑收件箱或已入库的数据不会因为手机重新绑定而删除。</p>
+    `;
+  } else {
+    bindingDetail.innerHTML = "";
+  }
+  pairCodeInput.value = "";
+  pairSubmitButton.textContent = accountId ? "重新绑定" : "绑定";
+  unpairButton.hidden = !showDetail;
+  openModal(pairDialog);
+  pairCodeInput.focus();
+  if (showDetail) void checkBindingConnection();
+}
+
+async function unpairThisDevice() {
+  try {
+    await fetch(`${syncEndpoint}/mobile-sync/unpair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId, account_id: accountId })
+    });
+  } catch {
+    // 即使电脑暂时不在线，本机也先退出绑定。
+  }
+  clearLocalBinding();
+  closeModal(pairDialog);
+  renderAssetDashboard();
+  renderTargetDeviation();
+  render();
+  renderPairCard();
+  showToast("已解除本机绑定");
+}
+
+function clearLocalBinding() {
+  accountId = "";
+  localStorage.removeItem(ACCOUNT_ID_KEY);
+  localStorage.removeItem(BINDING_INFO_KEY);
+  sessionStorage.removeItem(MOBILE_SESSION_UNLOCK_KEY);
+  mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
+}
+
+async function checkBindingConnection() {
+  const status = document.querySelector("#bindingConnectionStatus");
+  if (!status) return;
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/health`);
+    status.textContent = response.ok ? "已连到电脑，同步可用" : "电脑同步服务未响应";
+  } catch {
+    status.textContent = "未连到电脑，请确认同一 Wi-Fi/热点且电脑允许局域网访问";
+  }
+}
+
+function showPasswordGateIfNeeded() {
+  if (!accountId || sessionStorage.getItem(MOBILE_SESSION_UNLOCK_KEY) === "true") return;
+  openModal(passwordDialog);
+  passwordInput.focus();
+}
+
+async function unlockMobileApp() {
+  const password = passwordInput.value;
+  if (!password) {
+    passwordInput.focus();
+    return;
+  }
+  passwordSubmitButton.disabled = true;
+  passwordSubmitButton.textContent = "验证中";
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/auth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+    if (!response.ok) throw new Error(await response.text());
+    sessionStorage.setItem(MOBILE_SESSION_UNLOCK_KEY, "true");
+    passwordInput.value = "";
+    closeModal(passwordDialog);
+    await loadMobileDashboardSnapshot();
+    showToast("已解锁");
+  } catch {
+    passwordHint.textContent = "密码不正确，或电脑端不在同一网络。请确认电脑 App 已打开。";
+    passwordInput.focus();
+  } finally {
+    passwordSubmitButton.disabled = false;
+    passwordSubmitButton.textContent = "解锁";
+  }
+}
+
+async function changeMobilePassword() {
+  const currentPassword = currentPasswordInput.value;
+  const newPassword = newPasswordInput.value;
+  if (newPassword.length < 6) {
+    passwordChangeHint.textContent = "新密码至少 6 位。";
+    newPasswordInput.focus();
+    return;
+  }
+  passwordChangeSubmitButton.disabled = true;
+  passwordChangeSubmitButton.textContent = "保存中";
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+    });
+    if (!response.ok) throw new Error(await response.text());
+    closeModal(passwordChangeDialog);
+    currentPasswordInput.value = "";
+    newPasswordInput.value = "";
+    showToast("密码已修改");
+  } catch {
+    passwordChangeHint.textContent = "修改失败：请确认当前密码正确，且电脑 App 已打开。";
+  } finally {
+    passwordChangeSubmitButton.disabled = false;
+    passwordChangeSubmitButton.textContent = "保存";
+  }
 }
 
 async function syncPendingToDesktop() {
@@ -417,7 +660,7 @@ async function syncPendingToDesktop() {
     return;
   }
   if (!pending.length) {
-    syncDialog.close();
+    closeModal(syncDialog);
     showToast("没有待同步草稿");
     return;
   }
@@ -451,7 +694,7 @@ async function syncPendingToDesktop() {
       };
     });
     await replaceRecords(state.records);
-    syncDialog.close();
+    closeModal(syncDialog);
     render();
     void reportMobileStatus();
     showToast(`已同步 ${result.accepted_count || 0} 条到电脑 Test 收件箱`);
@@ -491,13 +734,29 @@ async function pairWithDesktop(pairCode) {
     accountId = result.account_id || "";
     if (accountId) {
       localStorage.setItem(ACCOUNT_ID_KEY, accountId);
+      localStorage.setItem(BINDING_INFO_KEY, JSON.stringify({
+        syncEndpoint,
+        pairingCode: pairCode.trim().toUpperCase(),
+        pairedAt: new Date().toLocaleString("zh-CN", { hour12: false })
+      }));
+      mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
       renderPairCard();
+      render();
+      showPasswordGateIfNeeded();
       void reportMobileStatus();
       showToast("已绑定电脑账户");
     }
   } catch (err) {
     showToast("绑定失败：请检查电脑端绑定码");
     console.warn(err);
+  }
+}
+
+function readBindingInfo() {
+  try {
+    return JSON.parse(localStorage.getItem(BINDING_INFO_KEY) || "{}");
+  } catch {
+    return {};
   }
 }
 
@@ -603,12 +862,20 @@ function currentMonthKey() {
 }
 
 async function loadMobileDashboardSnapshot() {
+  if (!canUseDesktopData()) {
+    mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
+    renderAssetDashboard();
+    renderTargetDeviation();
+    render();
+    return;
+  }
   try {
     const response = await fetch(`${syncEndpoint}/mobile-sync/dashboard`);
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     mobileDashboardSnapshot = {
       snapshotMonth: data.snapshot_month || mobileDashboardSnapshot.snapshotMonth,
+      targetSavingRate: Number(data.target_saving_rate) || 0,
       netWorth: Number(data.net_worth) || mobileDashboardSnapshot.netWorth,
       assetAllocations: Array.isArray(data.asset_allocations)
         ? data.asset_allocations.map((item) => ({
@@ -625,18 +892,75 @@ async function loadMobileDashboardSnapshot() {
           amount: Number(item.current_amount) || 0,
           deviation: Number(item.deviation_percent) || 0
         }))
+        : [],
+      monthlyTrends: Array.isArray(data.monthly_trends)
+        ? data.monthly_trends.map((item) => ({
+          periodMonth: item.period_month,
+          income: Number(item.income) || 0,
+          expense: Number(item.expense) || 0,
+          savingAmount: Number(item.saving_amount) || 0,
+          netWorth: Number(item.net_worth) || 0,
+          savingRate: Number(item.saving_rate) || 0,
+          investmentGain: Number(item.investment_gain) || 0,
+          monthlyXirr: item.monthly_xirr === null || item.monthly_xirr === undefined ? null : Number(item.monthly_xirr)
+        }))
+        : [],
+      expenseCategories: Array.isArray(data.expense_categories)
+        ? data.expense_categories.map((item) => ({
+          category: item.category || "未分类",
+          amount: Number(item.amount) || 0,
+          percent: Number(item.percent) || 0
+        }))
+        : [],
+      spendingAnomalies: Array.isArray(data.spending_anomalies)
+        ? data.spending_anomalies.map((item) => ({
+          transactionDate: item.transaction_date || "",
+          category: item.category || "未分类",
+          amount: Number(item.amount) || 0,
+          note: item.note || "",
+          reason: item.reason || ""
+        }))
         : []
     };
     renderAssetDashboard();
     renderTargetDeviation();
     render();
   } catch {
+    mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
     renderAssetDashboard();
     renderTargetDeviation();
+    render();
   }
 }
 
+function makeEmptyDashboardSnapshot() {
+  return {
+    snapshotMonth: "",
+    targetSavingRate: 0,
+    netWorth: 0,
+    assetAllocations: [],
+    allocationTargets: [],
+    monthlyTrends: [],
+    expenseCategories: [],
+    spendingAnomalies: []
+  };
+}
+
+function hasUnlockedSession() {
+  return sessionStorage.getItem(MOBILE_SESSION_UNLOCK_KEY) === "true";
+}
+
+function canUseDesktopData() {
+  return Boolean(accountId) && hasUnlockedSession();
+}
+
+function updateAccessState() {
+  document.body.classList.toggle("needs-binding", !accountId);
+  document.body.classList.toggle("needs-unlock", Boolean(accountId) && !hasUnlockedSession());
+}
+
 function renderAssetDashboard() {
+  renderAssetRangeTabs();
   const colors = ["#88a998", "#c7a76d", "#9cacbf", "#c47766", "#627d9a", "#b6927a", "#7d927f"];
   const allocations = mobileDashboardSnapshot.assetAllocations.filter((item) => item.percent > 0.0001);
   let cursor = 0;
@@ -659,9 +983,45 @@ function renderAssetDashboard() {
     <div class="allocation-legend-row">
       <i style="background:${colors[index % colors.length]}"></i>
       <span>${escapeHtml(item.category)}</span>
-      <b>${formatPercent(item.percent)}</b>
+      <b class="percent" data-value="${formatPercentRaw(item.percent)}">${formatPercent(item.percent)}</b>
     </div>
   `).join("");
+  renderAssetRangeSummary();
+}
+
+function renderAssetRangeTabs() {
+  assetRangeTabs.innerHTML = assetRanges.map((range) => `
+    <button class="${state.assetRange === range.key ? "active" : ""}" data-asset-range="${range.key}" type="button">${range.label}</button>
+  `).join("");
+}
+
+function rangeTrendRows() {
+  const rows = [...mobileDashboardSnapshot.monthlyTrends].sort((a, b) => a.periodMonth.localeCompare(b.periodMonth));
+  if (!rows.length) return [];
+  const active = assetRanges.find((item) => item.key === state.assetRange) || assetRanges[3];
+  if (active.key === "ytd") {
+    const year = rows[rows.length - 1].periodMonth.slice(0, 4);
+    return rows.filter((item) => item.periodMonth.startsWith(year));
+  }
+  return rows.slice(-active.months);
+}
+
+function renderAssetRangeSummary() {
+  const rows = rangeTrendRows();
+  if (!rows.length) {
+    assetRangeSummary.innerHTML = "";
+    return;
+  }
+  const first = rows[0];
+  const latest = rows[rows.length - 1];
+  const active = assetRanges.find((item) => item.key === state.assetRange) || assetRanges[3];
+  const netWorthChange = latest.netWorth - first.netWorth;
+  const investmentGain = rows.reduce((sum, item) => sum + item.investmentGain, 0);
+  assetRangeSummary.innerHTML = `
+    <article><span>${active.label}净资产变化</span><b class="money" data-value="${formatPlainMoney(netWorthChange)}">${state.privacy ? "••••••" : formatPlainMoney(netWorthChange)}</b></article>
+    <article><span>${formatMonthShortLabel(latest.periodMonth)}储蓄率</span><b class="percent" data-value="${formatPercentRaw(latest.savingRate)}">${formatPercent(latest.savingRate)}</b></article>
+    <article><span>${active.label}投资收益</span><b class="money" data-value="${formatPlainMoney(investmentGain)}">${state.privacy ? "••••••" : formatPlainMoney(investmentGain)}</b></article>
+  `;
 }
 
 function renderTargetDeviation() {
@@ -679,14 +1039,123 @@ function renderTargetDeviation() {
             <span>${escapeHtml(item.category)}</span>
             <span>
               <i style="--current: ${Math.max(0, Math.min(100, item.current * 100))}%; --target: ${Math.max(0, Math.min(100, item.target * 100))}%"></i>
-              <small>${formatPercent(item.current)} / ${formatPercent(item.target)}</small>
+              <small><span class="percent" data-value="${formatPercentRaw(item.current)}">${formatPercent(item.current)}</span> / <span class="percent" data-value="${formatPercentRaw(item.target)}">${formatPercent(item.target)}</span></small>
             </span>
-            <b class="${item.deviation > 0 ? "positive" : item.deviation < 0 ? "negative" : ""}">${item.deviation > 0 ? "+" : ""}${formatPercent(item.deviation)}</b>
+            <b class="${item.deviation > 0 ? "positive" : item.deviation < 0 ? "negative" : ""}"><span class="percent" data-value="${formatSignedPercentRaw(item.deviation)}">${formatSignedPercent(item.deviation)}</span></b>
           </div>
         `).join("")}
       </div>
     </div>
   `;
+}
+
+function latestMonthlyTrend() {
+  return [...mobileDashboardSnapshot.monthlyTrends]
+    .filter((item) => !mobileDashboardSnapshot.snapshotMonth || item.periodMonth <= mobileDashboardSnapshot.snapshotMonth)
+    .sort((a, b) => a.periodMonth.localeCompare(b.periodMonth))
+    .pop() || null;
+}
+
+function setText(selector, value) {
+  const node = document.querySelector(selector);
+  if (node) node.textContent = value;
+}
+
+function setMoney(selector, value) {
+  const node = document.querySelector(selector);
+  if (!node) return;
+  node.dataset.value = formatPlainMoney(value);
+  node.textContent = state.privacy ? "••••••" : node.dataset.value;
+}
+
+function setPercent(selector, value) {
+  const node = document.querySelector(selector);
+  if (!node) return;
+  node.dataset.value = formatPercentRaw(value);
+  node.textContent = formatPercent(value);
+}
+
+function renderSyncedDashboard() {
+  const latest = latestMonthlyTrend();
+  const monthLabel = formatMonthShortLabel(mobileDashboardSnapshot.snapshotMonth);
+  const fullMonthLabel = formatMonthLabel(mobileDashboardSnapshot.snapshotMonth);
+  setMoney("#homeNetWorth", mobileDashboardSnapshot.netWorth);
+  setMoney("#homeExpense", latest?.expense || 0);
+  setPercent("#homeSavingRate", latest?.savingRate || 0);
+  setPercent("#homeYieldRate", latest?.monthlyXirr || 0);
+  setMoney("#homeIncome", latest?.income || 0);
+  setMoney("#homeSaving", latest?.savingAmount || 0);
+  setText("#homeExpenseLabel", `${monthLabel}支出`);
+  setText("#homeSavingRateLabel", `${monthLabel}储蓄率`);
+  setText("#homeYieldRateLabel", `${monthLabel}收益率`);
+  setText("#homeIncomeLabel", `${monthLabel}收入`);
+  setText("#homeSavingLabel", `${monthLabel}储蓄`);
+  setText("#homeDeviationCount", `${mobileDashboardSnapshot.allocationTargets.filter((item) => Math.abs(item.deviation) >= 0.01).length} 项`);
+  setText("#homeDataStamp", mobileDashboardSnapshot.snapshotMonth ? `截至 ${fullMonthLabel}月报；本月手机草稿未计入` : "绑定电脑后同步已发布月报。");
+  setText("#homeStatusTitle", mobileDashboardSnapshot.snapshotMonth ? `看板数据截至 ${fullMonthLabel}` : "看板数据待同步");
+  setText("#homeStatusText", mobileDashboardSnapshot.snapshotMonth ? "首页金额、收益率、收入支出来自电脑端已发布月报，不包含手机草稿。" : "绑定电脑后显示已发布月报，不包含手机草稿。");
+  setText("#homeCashflowTitle", mobileDashboardSnapshot.snapshotMonth ? `收支摘要显示 ${fullMonthLabel}` : "收支摘要待同步");
+
+  setText("#cashflowHeroTitle", `${monthLabel}已发布月报储蓄率`);
+  setPercent("#cashflowSavingRate", latest?.savingRate || 0);
+  setText("#cashflowDataStamp", mobileDashboardSnapshot.snapshotMonth ? `${fullMonthLabel}；本月手机记账未计入` : "绑定电脑后同步已发布月报。");
+  setMoney("#cashflowIncome", latest?.income || 0);
+  setMoney("#cashflowExpense", latest?.expense || 0);
+  setMoney("#cashflowSaving", latest?.savingAmount || 0);
+  setText("#cashflowIncomeLabel", `${monthLabel}收入`);
+  setText("#cashflowExpenseLabel", `${monthLabel}支出`);
+  setText("#cashflowSavingLabel", `${monthLabel}储蓄`);
+
+  const targetRate = mobileDashboardSnapshot.targetSavingRate || 0;
+  const hitTarget = Boolean(latest) && latest.savingRate >= targetRate;
+  setText("#savingGoalTitle", latest ? `${monthLabel}储蓄目标${hitTarget ? "达成" : "未达成"}` : "储蓄目标待同步");
+  const savingGoalText = document.querySelector("#savingGoalText");
+  if (savingGoalText) {
+    savingGoalText.innerHTML = latest
+      ? `目标储蓄率 <span class="percent" data-value="${formatPercentRaw(targetRate)}">${formatPercent(targetRate)}</span>，${monthLabel}月报储蓄率 <span class="percent" data-value="${formatPercentRaw(latest.savingRate)}">${formatPercent(latest.savingRate)}</span>。`
+      : "绑定电脑后同步目标和当前储蓄率。";
+  }
+  setText("#savingGoalStatus", latest ? (hitTarget ? "达成" : "未达成") : "待同步");
+
+  const categories = mobileDashboardSnapshot.expenseCategories.slice(0, 4);
+  const categoryChart = document.querySelector("#cashflowCategoryChart");
+  if (categoryChart) {
+    categoryChart.innerHTML = categories.length
+      ? categories.map((item) => `
+        <div class="bar-row"><span>${escapeHtml(item.category)}</span><i style="--w: ${Math.max(4, Math.min(100, item.percent * 100))}%"></i><b class="money" data-value="${formatPlainMoney(item.amount)}">${state.privacy ? "••••••" : formatPlainMoney(item.amount)}</b></div>
+      `).join("")
+      : `<div class="draft-empty-card">绑定电脑并生成月报后显示支出分类。</div>`;
+  }
+}
+
+function renderMayAnomalies() {
+  const anomalies = mobileDashboardSnapshot.spendingAnomalies || [];
+  const monthLabel = formatMonthShortLabel(mobileDashboardSnapshot.snapshotMonth);
+  mayAnomalyButton.innerHTML = `
+    <i class="tile gold"></i>
+    <span>
+      <b>${monthLabel}异常支出</b>
+      <small>${anomalies.length ? `${anomalies.length} 条，来自电脑端已发布月报。` : "电脑端已发布月报未发现异常支出。"}</small>
+    </span>
+    <em>${anomalies.length ? "查看" : "暂无"}</em>
+  `;
+  if (!anomalies.length) {
+    mayAnomalyDetail.innerHTML = `
+      <strong>暂无 ${monthLabel} 异常支出明细</strong>
+      <span>已和电脑端 Test 数据库的已发布月报同步。</span>
+    `;
+    return;
+  }
+  mayAnomalyDetail.innerHTML = anomalies.map((item) => `
+    <div class="list-row static">
+      <i class="tile gold"></i>
+      <span>
+        <b>${escapeHtml(item.transactionDate || monthLabel)} · ${escapeHtml(item.category)}</b>
+        <small>${escapeHtml(item.note || item.reason || "电脑端标记为异常支出")}</small>
+      </span>
+      <em class="money" data-value="${formatPlainMoney(item.amount)}">${state.privacy ? "••••••" : formatPlainMoney(item.amount)}</em>
+    </div>
+  `).join("");
 }
 
 function formatPlainMoney(value) {
@@ -697,12 +1166,31 @@ function formatPlainMoney(value) {
 }
 
 function formatPercent(value) {
+  if (state.privacy) return "••••••";
+  return formatPercentRaw(value);
+}
+
+function formatPercentRaw(value) {
   return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function formatSignedPercent(value) {
+  if (state.privacy) return "••••••";
+  return formatSignedPercentRaw(value);
+}
+
+function formatSignedPercentRaw(value) {
+  return `${Number(value || 0) > 0 ? "+" : ""}${formatPercentRaw(value)}`;
 }
 
 function formatMonthLabel(value) {
   if (!value || value.length < 7) return "已发布";
   return `${value.slice(0, 4)} 年 ${Number(value.slice(5, 7))} 月`;
+}
+
+function formatMonthShortLabel(value) {
+  if (!value || value.length < 7) return "已发布";
+  return `${Number(value.slice(5, 7))} 月`;
 }
 
 function readSettings() {
@@ -721,15 +1209,40 @@ function resolveSyncEndpoint() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, syncEndpoint: urlValue.replace(/\/$/, "") }));
     return urlValue.replace(/\/$/, "");
   }
-  return String(settings.syncEndpoint || DEFAULT_SYNC_ENDPOINT).replace(/\/$/, "");
+  const storedEndpoint = String(settings.syncEndpoint || "").replace(/\/$/, "");
+  if (storedEndpoint && storedEndpoint !== DEFAULT_SYNC_ENDPOINT) return storedEndpoint;
+  const host = window.location.hostname;
+  if (host && !["localhost", "127.0.0.1", "::1"].includes(host)) {
+    const inferredEndpoint = `http://${host}:18742`;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, syncEndpoint: inferredEndpoint }));
+    return inferredEndpoint;
+  }
+  return DEFAULT_SYNC_ENDPOINT;
+}
+
+function resetBindingFromUrlIfNeeded() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("resetBinding") !== "1") return;
+  localStorage.removeItem(ACCOUNT_ID_KEY);
+  localStorage.removeItem(BINDING_INFO_KEY);
+  sessionStorage.removeItem(MOBILE_SESSION_UNLOCK_KEY);
 }
 
 function resolveDeviceId() {
   const stored = localStorage.getItem(DEVICE_ID_KEY);
   if (stored) return stored;
-  const value = `mobile_${crypto.randomUUID()}`;
+  const value = createLocalId("mobile");
   localStorage.setItem(DEVICE_ID_KEY, value);
   return value;
+}
+
+function createLocalId(prefix) {
+  if (globalThis.crypto?.randomUUID) {
+    return `${prefix}_${globalThis.crypto.randomUUID()}`;
+  }
+  const randomPart = Math.random().toString(36).slice(2, 12);
+  const timePart = Date.now().toString(36);
+  return `${prefix}_${timePart}_${randomPart}`;
 }
 
 async function resetLegacyLocalData() {

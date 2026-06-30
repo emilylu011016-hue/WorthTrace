@@ -1505,6 +1505,75 @@ h2 {
   white-space: nowrap;
 }
 
+.mobile-pairing-dialog {
+  max-width: 520px;
+}
+
+.mobile-pairing-dialog-body,
+.mobile-pairing-detail-card,
+.mobile-device-list {
+  display: grid;
+  gap: 12px;
+}
+
+.mobile-pairing-detail-card,
+.mobile-device-list {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.mobile-pairing-detail-card span,
+.mobile-device-list small,
+.mobile-device-list em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.mobile-pairing-detail-card strong {
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.mobile-pairing-detail-card code {
+  overflow-wrap: anywhere;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.mobile-pairing-detail-card small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.mobile-device-list-head,
+.mobile-device-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-device-list article {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.mobile-device-list article span {
+  display: grid;
+  gap: 4px;
+}
+
 .mobile-sync-copy,
 .mobile-sync-message {
   margin: 0;

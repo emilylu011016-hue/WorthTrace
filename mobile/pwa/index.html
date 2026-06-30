@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.2.2" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.4" />
 </head>
-<body class="theme-champagne privacy-on">
+<body class="theme-champagne privacy-on needs-binding">
   <main class="mobile-shell">
     <header class="topbar">
       <div>
@@ -18,6 +18,8 @@
       <div class="top-actions" aria-label="全局操作">
         <button class="round-button" id="privacyButton" type="button" aria-label="显示金额" title="显示金额" data-tooltip="显示金额"></button>
         <button class="round-button" id="themeButton" type="button" aria-label="切换风格" title="切换风格" data-tooltip="切换风格"></button>
+        <button class="round-button" id="securityButton" type="button" aria-label="安全设置" title="安全设置" data-tooltip="安全设置"></button>
+        <button class="round-button" id="bindingInfoButton" type="button" aria-label="电脑绑定" title="电脑绑定" data-tooltip="电脑绑定" hidden></button>
         <button class="sync-button" id="syncButton" type="button" aria-label="同步状态">
           <span id="syncDot"></span>
           <b id="syncCount">0</b>
@@ -54,20 +56,20 @@
 
     <section class="view active" data-view="home">
       <article class="hero-card">
-        <p>已发布月报净资产</p>
-        <strong class="money" data-value="CNY 244,229.82">••••••</strong>
-        <small class="data-stamp">截至 2026 年 5 月月报；6 月草稿未计入</small>
+        <p id="homeHeroTitle">已发布月报净资产</p>
+        <strong id="homeNetWorth" class="money" data-value="CNY 0.00">••••••</strong>
+        <small class="data-stamp" id="homeDataStamp">绑定电脑后同步已发布月报。</small>
         <div class="metric-grid">
-          <span><b class="money" data-value="14,325">••••••</b>5 月支出</span>
-          <span><b>31.4%</b>5 月储蓄率</span>
-          <span><b>7.6%</b>5 月收益率</span>
+          <span><b id="homeExpense" class="money" data-value="CNY 0.00">••••••</b><small id="homeExpenseLabel">支出</small></span>
+          <span><b id="homeSavingRate" class="percent" data-value="0.0%">••••••</b><small id="homeSavingRateLabel">储蓄率</small></span>
+          <span><b id="homeYieldRate" class="percent" data-value="0.0%">••••••</b><small id="homeYieldRateLabel">收益率</small></span>
         </div>
       </article>
 
-      <div class="overview-grid">
-        <article><span>5 月收入</span><b class="money" data-value="22,376">••••••</b></article>
-        <article><span>5 月储蓄</span><b class="money" data-value="8,051">••••••</b></article>
-        <article><span>资产偏离</span><b>2 项</b></article>
+      <div class="overview-grid" id="homeOverviewGrid">
+        <article><span id="homeIncomeLabel">收入</span><b id="homeIncome" class="money" data-value="CNY 0.00">••••••</b></article>
+        <article><span id="homeSavingLabel">储蓄</span><b id="homeSaving" class="money" data-value="CNY 0.00">••••••</b></article>
+        <article><span>资产偏离</span><b id="homeDeviationCount">0 项</b></article>
         <article><span>6 月草稿待同步</span><b id="homePendingCount">0 条</b></article>
       </div>
 
@@ -83,12 +85,12 @@
       <div class="list">
         <div class="list-row static">
           <i class="tile gold"></i>
-          <span><b>看板数据截至 2026 年 5 月</b><small>首页金额、收益率、收入支出来自已发布月报，不包含 6 月手机草稿。</small></span>
+          <span><b id="homeStatusTitle">看板数据待同步</b><small id="homeStatusText">绑定电脑后显示已发布月报，不包含手机草稿。</small></span>
           <em>状态</em>
         </div>
         <button class="list-row" data-nav="cashflow" type="button">
           <i class="tile green"></i>
-          <span><b>收支摘要显示 2026 年 5 月</b><small>6 月记录先作为手机草稿；电脑确认并生成 6 月月报后才更新这里。</small></span>
+          <span><b id="homeCashflowTitle">收支摘要待同步</b><small>本月记录先作为手机草稿；电脑确认并生成月报后才更新这里。</small></span>
           <em>查看</em>
         </button>
         <button class="list-row" data-nav="allocation" type="button">
@@ -158,22 +160,17 @@
 
     <section class="view" data-view="cashflow">
       <article class="hero-card compact">
-        <p>5 月已发布月报储蓄率</p>
-        <strong>31.4%</strong>
-        <small class="data-stamp">2026 年 5 月；6 月手机记账未计入</small>
+        <p id="cashflowHeroTitle">已发布月报储蓄率</p>
+        <strong id="cashflowSavingRate" class="percent" data-value="0.0%">••••••</strong>
+        <small class="data-stamp" id="cashflowDataStamp">绑定电脑后同步已发布月报。</small>
         <div class="metric-grid">
-          <span><b class="money" data-value="22,376">••••••</b>5 月收入</span>
-          <span><b class="money" data-value="14,325">••••••</b>5 月支出</span>
-          <span><b class="money" data-value="8,051">••••••</b>5 月储蓄</span>
+          <span><b id="cashflowIncome" class="money" data-value="CNY 0.00">••••••</b><small id="cashflowIncomeLabel">收入</small></span>
+          <span><b id="cashflowExpense" class="money" data-value="CNY 0.00">••••••</b><small id="cashflowExpenseLabel">支出</small></span>
+          <span><b id="cashflowSaving" class="money" data-value="CNY 0.00">••••••</b><small id="cashflowSavingLabel">储蓄</small></span>
         </div>
       </article>
 
-      <div class="chart-card">
-        <div class="bar-row"><span>餐饮</span><i style="--w: 74%"></i><b class="money" data-value="3,260">••••••</b></div>
-        <div class="bar-row"><span>旅游</span><i style="--w: 62%"></i><b class="money" data-value="2,730">••••••</b></div>
-        <div class="bar-row"><span>居住</span><i style="--w: 46%"></i><b class="money" data-value="2,040">••••••</b></div>
-        <div class="bar-row"><span>交通</span><i style="--w: 28%"></i><b class="money" data-value="1,220">••••••</b></div>
-      </div>
+      <div class="chart-card" id="cashflowCategoryChart"></div>
 
       <div class="section-title">
         <h2>6 月记账记录</h2>
@@ -183,7 +180,7 @@
       <div class="monthly-draft-list" id="localRecords"></div>
 
       <div class="list">
-        <div class="list-row static"><i class="tile green"></i><span><b>5 月储蓄目标达成</b><small>目标储蓄率 30%，5 月月报储蓄率 31.4%。</small></span><em>达成</em></div>
+        <div class="list-row static" id="savingGoalRow"><i class="tile green"></i><span><b id="savingGoalTitle">储蓄目标待同步</b><small id="savingGoalText">绑定电脑后同步目标和当前储蓄率。</small></span><em id="savingGoalStatus">待同步</em></div>
         <button class="list-row" id="mayAnomalyButton" type="button"><i class="tile gold"></i><span><b>5 月异常支出</b><small>查看 5 月已发布月报里的异常明细。</small></span><em>查看</em></button>
         <div class="anomaly-detail" id="mayAnomalyDetail" hidden>
           <strong>暂无 5 月异常支出明细</strong>
@@ -193,6 +190,7 @@
     </section>
 
     <section class="view" data-view="allocation">
+      <div class="mobile-range-tabs" id="assetRangeTabs" aria-label="资产周期"></div>
       <article class="wallet-hero">
         <p>已发布月报资产配置</p>
         <strong class="money" data-value="CNY 244,229.82">••••••</strong>
@@ -201,6 +199,7 @@
         <div class="allocation-legend" id="allocationLegend"></div>
       </article>
 
+      <div class="asset-range-summary" id="assetRangeSummary"></div>
       <div id="targetDeviationSection"></div>
     </section>
 
@@ -221,8 +220,76 @@
     </div>
   </dialog>
 
+  <dialog id="pairDialog">
+    <form id="pairForm">
+      <h2>绑定电脑</h2>
+      <p id="pairDialogIntro">输入电脑端显示的绑定码。绑定后，手机草稿会进入电脑端手机收件箱。</p>
+      <div class="binding-detail" id="bindingDetail" hidden></div>
+      <label class="pair-code-field">
+        <span>绑定码</span>
+        <input id="pairCodeInput" autocomplete="one-time-code" inputmode="text" maxlength="12" placeholder="例如 D79457ED" />
+      </label>
+      <div class="dialog-actions">
+        <button id="closePairDialogButton" type="button">取消</button>
+        <button id="unpairButton" type="button" hidden>解除本机绑定</button>
+        <button id="pairSubmitButton" type="submit">绑定</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="categoryDialog">
+    <form id="categoryForm">
+      <h2 id="categoryDialogTitle">新增分类</h2>
+      <p>新增后只保存在手机端分类列表里。</p>
+      <label class="pair-code-field">
+        <span>分类名称</span>
+        <input id="categoryNameInput" maxlength="18" placeholder="例如 咖啡" />
+      </label>
+      <div class="dialog-actions">
+        <button id="closeCategoryDialogButton" type="button">取消</button>
+        <button type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="passwordDialog">
+    <form id="passwordForm">
+      <h2>解锁钱迹</h2>
+      <p>请输入电脑端相同密码。手机端不会保存密码。</p>
+      <label class="pair-code-field">
+        <span>密码</span>
+        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="输入密码" />
+      </label>
+      <p class="password-hint" id="passwordHint">人脸识别需要正式 HTTPS 或原生 App 支持；当前局域网测试版使用密码解锁。</p>
+      <div class="dialog-actions">
+        <button id="clearBindingButton" type="button">清除本机绑定</button>
+        <button id="passwordSubmitButton" type="submit">解锁</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="passwordChangeDialog">
+    <form id="passwordChangeForm">
+      <h2>修改密码</h2>
+      <p>手机端和电脑端使用同一个密码。</p>
+      <label class="pair-code-field">
+        <span>当前密码</span>
+        <input id="currentPasswordInput" type="password" autocomplete="current-password" />
+      </label>
+      <label class="pair-code-field">
+        <span>新密码</span>
+        <input id="newPasswordInput" type="password" autocomplete="new-password" />
+      </label>
+      <p class="password-hint" id="passwordChangeHint">新密码至少 6 位。当前局域网测试版建议只在可信网络中修改。</p>
+      <div class="dialog-actions">
+        <button id="closePasswordChangeButton" type="button">取消</button>
+        <button id="passwordChangeSubmitButton" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.2.2" type="module"></script>
+  <script src="./app.js?mobileVersion=0.3.4" type="module"></script>
 </body>
 </html>
