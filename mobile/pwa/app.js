@@ -204,11 +204,7 @@ clearBindingButton.addEventListener("click", () => {
   showToast("已清除本机绑定");
 });
 securityButton.addEventListener("click", () => {
-  currentPasswordInput.value = "";
-  newPasswordInput.value = "";
-  passwordChangeHint.textContent = "新密码至少 6 位。当前局域网测试版建议只在可信网络中修改。";
-  openModal(passwordChangeDialog);
-  currentPasswordInput.focus();
+  void openPasswordChangeIfConnected();
 });
 document.querySelector("#closePasswordChangeButton").addEventListener("click", () => closeModal(passwordChangeDialog));
 passwordChangeForm.addEventListener("submit", (event) => {
@@ -585,6 +581,33 @@ async function checkBindingConnection() {
   }
 }
 
+async function canReachBoundDesktop() {
+  if (!accountId) return false;
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/health`, { cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function openPasswordChangeIfConnected() {
+  if (!accountId) {
+    showToast("请先绑定电脑");
+    return;
+  }
+  const connected = await canReachBoundDesktop();
+  if (!connected) {
+    showToast("连接电脑后才能修改密码");
+    return;
+  }
+  currentPasswordInput.value = "";
+  newPasswordInput.value = "";
+  passwordChangeHint.textContent = "新密码至少 6 位。只有连接到已绑定电脑时才能修改。";
+  openModal(passwordChangeDialog);
+  currentPasswordInput.focus();
+}
+
 function showPasswordGateIfNeeded() {
   if (!accountId || sessionStorage.getItem(MOBILE_SESSION_UNLOCK_KEY) === "true") return;
   openModal(passwordDialog);
@@ -623,6 +646,10 @@ async function unlockMobileApp() {
 async function changeMobilePassword() {
   const currentPassword = currentPasswordInput.value;
   const newPassword = newPasswordInput.value;
+  if (!(await canReachBoundDesktop())) {
+    passwordChangeHint.textContent = "当前没有连到已绑定电脑，不能修改密码。";
+    return;
+  }
   if (newPassword.length < 6) {
     passwordChangeHint.textContent = "新密码至少 6 位。";
     newPasswordInput.focus();

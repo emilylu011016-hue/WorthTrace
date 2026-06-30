@@ -260,7 +260,7 @@
         <span>密码</span>
         <input id="passwordInput" type="password" autocomplete="current-password" placeholder="输入密码" />
       </label>
-      <p class="password-hint" id="passwordHint">人脸识别需要正式 HTTPS 或原生 App 支持；当前局域网测试版使用密码解锁。</p>
+      <p class="password-hint" id="passwordHint">手机端使用电脑端同一个密码；未连接电脑时不能解锁或修改密码。</p>
       <div class="dialog-actions">
         <button id="clearBindingButton" type="button">清除本机绑定</button>
         <button id="passwordSubmitButton" type="submit">解锁</button>
@@ -280,7 +280,7 @@
         <span>新密码</span>
         <input id="newPasswordInput" type="password" autocomplete="new-password" />
       </label>
-      <p class="password-hint" id="passwordChangeHint">新密码至少 6 位。当前局域网测试版建议只在可信网络中修改。</p>
+      <p class="password-hint" id="passwordChangeHint">新密码至少 6 位。只有连接到已绑定电脑时才能修改。</p>
       <div class="dialog-actions">
         <button id="closePasswordChangeButton" type="button">取消</button>
         <button id="passwordChangeSubmitButton" type="submit">保存</button>
