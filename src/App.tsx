@@ -6,6 +6,7 @@ import {
   cloudSyncConfigured,
   listPendingCloudDrafts,
   markCloudDraftsPulled,
+  upsertCloudDashboardSnapshot,
   type CloudDraft,
   type CloudSession
 } from "./cloudSync";
@@ -2940,6 +2941,37 @@ export function App() {
     }
   }
 
+  function cloudDashboardPayload(): Record<string, unknown> {
+    return {
+      snapshot_month: summary.snapshot_month,
+      target_saving_rate: summary.target_saving_rate,
+      asset_gross_value: summary.asset_gross_value,
+      credit_card_net_adjustment: summary.credit_card_net_adjustment,
+      net_worth: summary.net_worth,
+      monthly_trends: summary.monthly_trends,
+      expense_categories: summary.expense_categories,
+      asset_allocations: summary.asset_allocations,
+      portfolio_targets: summary.portfolio_targets,
+      spending_anomalies: summary.spending_anomalies
+    };
+  }
+
+  async function pushDashboardSnapshotToCloud() {
+    if (!cloudSession) {
+      setCloudMessage("请先登录账号。");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      await upsertCloudDashboardSnapshot(cloudSession, summary.snapshot_month, cloudDashboardPayload());
+      setCloudMessage(`已同步 ${summary.snapshot_month} 已发布月报看板到云端。手机端登录同一账号后会显示。`);
+    } catch (err) {
+      setCloudMessage(`看板同步失败：${String(err)}`);
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
   async function handleChangePassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSettingsMessage(null);
@@ -5116,7 +5148,7 @@ export function App() {
           {settingsTab === "sync" ? (
             <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
               <p className="settings-copy">
-                同步后，手机草稿会进入云端草稿箱。电脑打开后再拉取到本地收件箱，由你确认后入库。
+                同步后，手机草稿会进入云端草稿箱；电脑可把已发布月报看板同步到手机。
               </p>
               {!cloudSyncConfigured() ? (
                 <div className="settings-warning">
@@ -5131,6 +5163,7 @@ export function App() {
                   <div className="mobile-sync-metrics">
                     <article><span>云端待处理</span><strong>{cloudDrafts.length} 条</strong></article>
                     <article><span>本地收件箱</span><strong>{mobileSyncSummary?.received_in_desktop ?? 0} 条</strong></article>
+                    <article><span>看板月份</span><strong>{summary.snapshot_month || "待同步"}</strong></article>
                   </div>
                   {cloudMessage ? <p className="settings-message">{cloudMessage}</p> : null}
                   <div className="row-actions">
@@ -5139,6 +5172,9 @@ export function App() {
                     </button>
                     <button className="primary-button compact" disabled={cloudBusy} onClick={() => void pullCloudDraftsToInbox()} type="button">
                       拉取到电脑收件箱
+                    </button>
+                    <button className="secondary-button compact" disabled={cloudBusy} onClick={() => void pushDashboardSnapshotToCloud()} type="button">
+                      同步看板到手机
                     </button>
                     <button className="secondary-button compact" disabled={cloudBusy} onClick={() => rememberCloudSession(null)} type="button">
                       退出账号

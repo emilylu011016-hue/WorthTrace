@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.4";
+const MOBILE_APP_VERSION = "0.3.8";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -141,7 +141,7 @@ const assetRanges = [
 dateInput.value = new Date().toISOString().slice(0, 10);
 applyTheme();
 renderCategoryOptions();
-if (canUseDesktopData()) void loadMobileDashboardSnapshot();
+void loadMobileDashboardSnapshot();
 renderAssetDashboard();
 renderTargetDeviation();
 showPasswordGateIfNeeded();
@@ -740,6 +740,7 @@ function rememberCloudSession(session) {
   } else {
     localStorage.removeItem(CLOUD_SESSION_KEY);
   }
+  void loadMobileDashboardSnapshot();
   render();
 }
 
@@ -1165,6 +1166,34 @@ function currentMonthKey() {
 }
 
 async function loadMobileDashboardSnapshot() {
+  if (cloudSession?.access_token) {
+    try {
+      const response = await fetch(
+        `${CLOUD_SYNC_URL}/rest/v1/mobile_dashboard_snapshots?select=snapshot_month,payload_json&order=updated_at.desc&limit=1`,
+        {
+          headers: {
+            ...cloudHeaders(),
+            Accept: "application/json"
+          }
+        }
+      );
+      if (!response.ok) throw new Error(await response.text());
+      const rows = await response.json();
+      if (Array.isArray(rows) && rows[0]?.payload_json) {
+        mobileDashboardSnapshot = normalizeDashboardSnapshot(rows[0].payload_json);
+        renderAssetDashboard();
+        renderTargetDeviation();
+        render();
+        return;
+      }
+    } catch {
+      mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
+      renderAssetDashboard();
+      renderTargetDeviation();
+      render();
+      return;
+    }
+  }
   if (!canUseDesktopData()) {
     mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
     renderAssetDashboard();
@@ -1176,55 +1205,7 @@ async function loadMobileDashboardSnapshot() {
     const response = await fetch(`${syncEndpoint}/mobile-sync/dashboard`);
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
-    mobileDashboardSnapshot = {
-      snapshotMonth: data.snapshot_month || mobileDashboardSnapshot.snapshotMonth,
-      targetSavingRate: Number(data.target_saving_rate) || 0,
-      netWorth: Number(data.net_worth) || mobileDashboardSnapshot.netWorth,
-      assetAllocations: Array.isArray(data.asset_allocations)
-        ? data.asset_allocations.map((item) => ({
-          category: item.category,
-          amount: Number(item.amount) || 0,
-          percent: Number(item.percent) || 0
-        }))
-        : mobileDashboardSnapshot.assetAllocations,
-      allocationTargets: Array.isArray(data.portfolio_targets)
-        ? data.portfolio_targets.map((item) => ({
-          category: item.category,
-          target: Number(item.target_percent) || 0,
-          current: Number(item.current_percent) || 0,
-          amount: Number(item.current_amount) || 0,
-          deviation: Number(item.deviation_percent) || 0
-        }))
-        : [],
-      monthlyTrends: Array.isArray(data.monthly_trends)
-        ? data.monthly_trends.map((item) => ({
-          periodMonth: item.period_month,
-          income: Number(item.income) || 0,
-          expense: Number(item.expense) || 0,
-          savingAmount: Number(item.saving_amount) || 0,
-          netWorth: Number(item.net_worth) || 0,
-          savingRate: Number(item.saving_rate) || 0,
-          investmentGain: Number(item.investment_gain) || 0,
-          monthlyXirr: item.monthly_xirr === null || item.monthly_xirr === undefined ? null : Number(item.monthly_xirr)
-        }))
-        : [],
-      expenseCategories: Array.isArray(data.expense_categories)
-        ? data.expense_categories.map((item) => ({
-          category: item.category || "未分类",
-          amount: Number(item.amount) || 0,
-          percent: Number(item.percent) || 0
-        }))
-        : [],
-      spendingAnomalies: Array.isArray(data.spending_anomalies)
-        ? data.spending_anomalies.map((item) => ({
-          transactionDate: item.transaction_date || "",
-          category: item.category || "未分类",
-          amount: Number(item.amount) || 0,
-          note: item.note || "",
-          reason: item.reason || ""
-        }))
-        : []
-    };
+    mobileDashboardSnapshot = normalizeDashboardSnapshot(data);
     renderAssetDashboard();
     renderTargetDeviation();
     render();
@@ -1234,6 +1215,58 @@ async function loadMobileDashboardSnapshot() {
     renderTargetDeviation();
     render();
   }
+}
+
+function normalizeDashboardSnapshot(data) {
+  return {
+    snapshotMonth: data.snapshot_month || "",
+    targetSavingRate: Number(data.target_saving_rate) || 0,
+    netWorth: Number(data.net_worth) || 0,
+    assetAllocations: Array.isArray(data.asset_allocations)
+      ? data.asset_allocations.map((item) => ({
+        category: item.category,
+        amount: Number(item.amount) || 0,
+        percent: Number(item.percent) || 0
+      }))
+      : [],
+    allocationTargets: Array.isArray(data.portfolio_targets)
+      ? data.portfolio_targets.map((item) => ({
+        category: item.category,
+        target: Number(item.target_percent) || 0,
+        current: Number(item.current_percent) || 0,
+        amount: Number(item.current_amount) || 0,
+        deviation: Number(item.deviation_percent) || 0
+      }))
+      : [],
+    monthlyTrends: Array.isArray(data.monthly_trends)
+      ? data.monthly_trends.map((item) => ({
+        periodMonth: item.period_month,
+        income: Number(item.income) || 0,
+        expense: Number(item.expense) || 0,
+        savingAmount: Number(item.saving_amount) || 0,
+        netWorth: Number(item.net_worth) || 0,
+        savingRate: Number(item.saving_rate) || 0,
+        investmentGain: Number(item.investment_gain) || 0,
+        monthlyXirr: item.monthly_xirr === null || item.monthly_xirr === undefined ? null : Number(item.monthly_xirr)
+      }))
+      : [],
+    expenseCategories: Array.isArray(data.expense_categories)
+      ? data.expense_categories.map((item) => ({
+        category: item.category || "未分类",
+        amount: Number(item.amount) || 0,
+        percent: Number(item.percent) || 0
+      }))
+      : [],
+    spendingAnomalies: Array.isArray(data.spending_anomalies)
+      ? data.spending_anomalies.map((item) => ({
+        transactionDate: item.transaction_date || "",
+        category: item.category || "未分类",
+        amount: Number(item.amount) || 0,
+        note: item.note || "",
+        reason: item.reason || ""
+      }))
+      : []
+  };
 }
 
 function makeEmptyDashboardSnapshot() {

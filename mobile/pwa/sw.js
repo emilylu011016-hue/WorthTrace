@@ -1,9 +1,9 @@
-const CACHE_NAME = "worthtrace-mobile-pwa-0.3.7";
+const CACHE_NAME = "worthtrace-mobile-pwa-0.3.8";
 const ASSETS = [
   "./",
-  "./index.html?mobileVersion=0.3.7",
-  "./styles.css?mobileVersion=0.3.7",
-  "./app.js?mobileVersion=0.3.7",
+  "./index.html?mobileVersion=0.3.8",
+  "./styles.css?mobileVersion=0.3.8",
+  "./app.js?mobileVersion=0.3.8",
   "./manifest.webmanifest",
   "./logo-qianji-a.svg"
 ];

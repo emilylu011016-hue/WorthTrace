@@ -29,6 +29,14 @@ export type CloudDraft = {
   updated_at?: string;
 };
 
+export type CloudDashboardSnapshot = {
+  id?: string;
+  user_id: string;
+  snapshot_month: string;
+  payload_json: Record<string, unknown>;
+  updated_at?: string;
+};
+
 export function cloudSyncConfigured() {
   return Boolean(
     CLOUD_SYNC_URL &&
@@ -102,6 +110,35 @@ export async function markCloudDraftsPulled(session: CloudSession, ids: string[]
     },
     body: JSON.stringify({ sync_status: "pulled", updated_at: new Date().toISOString() })
   });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+}
+
+export async function upsertCloudDashboardSnapshot(
+  session: CloudSession,
+  snapshotMonth: string,
+  payload: Record<string, unknown>
+) {
+  if (!snapshotMonth) {
+    throw new Error("当前没有可同步的已发布月报。");
+  }
+  const response = await fetch(
+    `${CLOUD_SYNC_URL}/rest/v1/mobile_dashboard_snapshots?on_conflict=user_id,snapshot_month`,
+    {
+      method: "POST",
+      headers: {
+        ...cloudHeaders(session),
+        Prefer: "resolution=merge-duplicates,return=minimal"
+      },
+      body: JSON.stringify({
+        user_id: session.user.id,
+        snapshot_month: snapshotMonth,
+        payload_json: payload,
+        updated_at: new Date().toISOString()
+      })
+    }
+  );
   if (!response.ok) {
     throw new Error(await response.text());
   }
