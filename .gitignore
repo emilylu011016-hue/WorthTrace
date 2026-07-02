@@ -17,6 +17,7 @@ __pycache__/
 .playwright-cli/
 .codex-runtime/
 output/
+releases/
 
 # Databases and private data exports
 *.sqlite3
@@ -31,3 +32,4 @@ demo/edit/
 *.mp4
 *.mov
 *.gif
+worthtrace_video*/

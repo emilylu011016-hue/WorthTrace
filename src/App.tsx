@@ -5120,7 +5120,7 @@ export function App() {
               </p>
               {!cloudSyncConfigured() ? (
                 <div className="settings-warning">
-                  当前安装包还没有启用账号同步。请先使用同一网络下的手机绑定。
+                  当前安装包还没有启用账号同步。请更新到最新版本，或检查云同步配置。
                 </div>
               ) : null}
               {cloudSession ? (
@@ -5296,14 +5296,15 @@ export function App() {
         <section aria-modal="true" className="settings-dialog mobile-pairing-dialog" role="dialog">
           <div className="settings-dialog-header">
             <div>
-              <p className="eyebrow">Mobile Pairing</p>
-              <h2>手机绑定</h2>
+              <p className="eyebrow">Legacy Local Sync</p>
+              <h2>本地手机同步</h2>
             </div>
-            <button className="icon-only-button" onClick={() => setMobilePairingDialogOpen(false)} type="button" aria-label="关闭手机绑定">
+            <button className="icon-only-button" onClick={() => setMobilePairingDialogOpen(false)} type="button" aria-label="关闭本地手机同步">
               ×
             </button>
           </div>
           <div className="mobile-pairing-dialog-body">
+            <p className="mobile-sync-copy">这是旧版同网络同步入口，仅用于兼容历史测试。正式使用请在“账号与同步”里登录同一个账号。</p>
             <section className="mobile-pairing-detail-card">
               <span>添加设备</span>
               <strong>{mobilePairingInfo.pairing_code}</strong>
@@ -5337,9 +5338,9 @@ export function App() {
                 className="primary-button compact danger-action"
                 onClick={() => {
                   setConfirmDialog({
-                    title: "解除手机绑定？",
-                    message: "解除后，旧手机需要重新输入新的绑定码才能继续同步。已进入电脑收件箱或已入库的数据不会删除。",
-                    confirmLabel: "解除绑定",
+                    title: "清空旧版本地同步设备？",
+                    message: "清空后，旧版同网络手机入口需要重新生成连接。已进入电脑收件箱或已入库的数据不会删除。",
+                    confirmLabel: "清空设备",
                     danger: true,
                     onConfirm: async () => {
                       await resetMobilePairingDevices();
@@ -5458,7 +5459,7 @@ export function App() {
     try {
       const result = await invoke<MobilePairingInfo>("reset_mobile_pairing_devices");
       setMobilePairingInfo(result);
-      setMobileSyncMessage("已解除手机绑定。旧手机需要重新绑定后才能同步。");
+      setMobileSyncMessage("已清空旧版本地同步设备。");
       await refreshMobileSyncSummary();
     } catch (err) {
       setMobileSyncMessage(String(err));
@@ -5593,12 +5594,6 @@ export function App() {
         </div>
         <div className="security-actions">
           {renderThemeSwitcher("全局主题")}
-          {mobilePairingInfo?.enabled ? (
-            <button className="icon-button" onClick={() => setMobilePairingDialogOpen(true)} type="button">
-              <Smartphone size={17} />
-              <span>手机绑定</span>
-            </button>
-          ) : null}
           <button className="icon-button" onClick={() => openSettings("sync")} type="button">
             <Settings size={17} />
             <span>账号与同步</span>
