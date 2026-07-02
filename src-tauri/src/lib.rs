@@ -2060,7 +2060,7 @@ fn mobile_sync_lan_ip() -> String {
 }
 
 fn mobile_pairing_path(pairing_code: &str) -> String {
-  format!("/index.html?mobileVersion=0.3.8&pairCode={pairing_code}")
+  format!("/index.html?mobileVersion=0.3.9&pairCode={pairing_code}")
 }
 
 fn mobile_pairing_url(pairing_code: &str) -> String {

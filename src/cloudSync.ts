@@ -83,6 +83,30 @@ export async function cloudSignUp(email: string, password: string): Promise<Clou
   return response.json();
 }
 
+export async function cloudRefreshSession(session: CloudSession): Promise<CloudSession> {
+  if (!session.refresh_token) {
+    throw new Error("登录已过期，请重新登录账号同步。");
+  }
+  const response = await fetch(`${CLOUD_SYNC_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: cloudHeaders(),
+    body: JSON.stringify({ refresh_token: session.refresh_token })
+  });
+  if (!response.ok) {
+    throw new Error("登录已过期，请重新登录账号同步。");
+  }
+  const refreshed = await response.json();
+  return {
+    ...refreshed,
+    user: refreshed.user || session.user
+  };
+}
+
+export function isCloudTokenExpiredError(error: unknown) {
+  const text = String(error || "").toLowerCase();
+  return text.includes("jwt expired") || text.includes("pgrst303");
+}
+
 export async function listPendingCloudDrafts(session: CloudSession): Promise<CloudDraft[]> {
   const response = await fetch(
     `${CLOUD_SYNC_URL}/rest/v1/mobile_cloud_drafts?sync_status=eq.pending&order=created_at.asc`,

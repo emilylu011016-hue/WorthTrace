@@ -3,7 +3,9 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   cloudSignIn,
   cloudSignUp,
+  cloudRefreshSession,
   cloudSyncConfigured,
+  isCloudTokenExpiredError,
   listPendingCloudDrafts,
   markCloudDraftsPulled,
   upsertCloudDashboardSnapshot,
@@ -2868,6 +2870,13 @@ export function App() {
     }
   }
 
+  async function refreshRememberedCloudSession(session = cloudSession) {
+    if (!session) throw new Error("请先登录账号。");
+    const refreshed = await cloudRefreshSession(session);
+    rememberCloudSession(refreshed);
+    return refreshed;
+  }
+
   async function refreshCloudDrafts(session = cloudSession) {
     if (!session) return;
     setCloudBusy(true);
@@ -2876,7 +2885,18 @@ export function App() {
       setCloudDrafts(drafts);
       setCloudMessage(drafts.length ? `云端有 ${drafts.length} 条手机草稿待处理。` : "云端暂无待处理草稿。");
     } catch (err) {
-      setCloudMessage(`云同步读取失败：${String(err)}`);
+      if (isCloudTokenExpiredError(err)) {
+        try {
+          const refreshed = await refreshRememberedCloudSession(session);
+          const drafts = await listPendingCloudDrafts(refreshed);
+          setCloudDrafts(drafts);
+          setCloudMessage(drafts.length ? `云端有 ${drafts.length} 条手机草稿待处理。` : "云端暂无待处理草稿。");
+        } catch (refreshErr) {
+          setCloudMessage(`登录已过期，请退出账号后重新登录：${String(refreshErr)}`);
+        }
+      } else {
+        setCloudMessage(`云同步读取失败：${String(err)}`);
+      }
     } finally {
       setCloudBusy(false);
     }
@@ -2924,13 +2944,21 @@ export function App() {
     }
     setCloudBusy(true);
     try {
-      const drafts = cloudDrafts.length ? cloudDrafts : await listPendingCloudDrafts(cloudSession);
+      let activeSession = cloudSession;
+      let drafts: CloudDraft[];
+      try {
+        drafts = cloudDrafts.length ? cloudDrafts : await listPendingCloudDrafts(activeSession);
+      } catch (err) {
+        if (!isCloudTokenExpiredError(err)) throw err;
+        activeSession = await refreshRememberedCloudSession(activeSession);
+        drafts = cloudDrafts.length ? cloudDrafts : await listPendingCloudDrafts(activeSession);
+      }
       if (!drafts.length) {
         setCloudMessage("云端暂无待处理草稿。");
         return;
       }
       await invoke("import_cloud_mobile_drafts", { drafts });
-      await markCloudDraftsPulled(cloudSession, drafts.map((draft) => draft.id));
+      await markCloudDraftsPulled(activeSession, drafts.map((draft) => draft.id));
       await refreshMobileSyncSummary();
       setCloudDrafts([]);
       setCloudMessage(`已拉取 ${drafts.length} 条云端草稿到电脑收件箱。`);
@@ -2963,7 +2991,13 @@ export function App() {
     }
     setCloudBusy(true);
     try {
-      await upsertCloudDashboardSnapshot(cloudSession, summary.snapshot_month, cloudDashboardPayload());
+      try {
+        await upsertCloudDashboardSnapshot(cloudSession, summary.snapshot_month, cloudDashboardPayload());
+      } catch (err) {
+        if (!isCloudTokenExpiredError(err)) throw err;
+        const refreshed = await refreshRememberedCloudSession(cloudSession);
+        await upsertCloudDashboardSnapshot(refreshed, summary.snapshot_month, cloudDashboardPayload());
+      }
       setCloudMessage(`已同步 ${summary.snapshot_month} 已发布月报看板到云端。手机端登录同一账号后会显示。`);
     } catch (err) {
       setCloudMessage(`看板同步失败：${String(err)}`);

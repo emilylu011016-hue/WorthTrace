@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.8";
+const MOBILE_APP_VERSION = "0.3.9";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -752,6 +752,48 @@ function cloudHeaders(session = cloudSession) {
   };
 }
 
+function isCloudTokenExpiredText(text) {
+  return /jwt expired|pgrst303/i.test(String(text || ""));
+}
+
+async function refreshCloudSession() {
+  if (!cloudSession?.refresh_token) {
+    rememberCloudSession(null);
+    throw new Error("登录已过期，请重新登录账号同步。");
+  }
+  const response = await fetch(`${CLOUD_SYNC_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: cloudHeaders(null),
+    body: JSON.stringify({ refresh_token: cloudSession.refresh_token })
+  });
+  if (!response.ok) {
+    rememberCloudSession(null);
+    throw new Error("登录已过期，请重新登录账号同步。");
+  }
+  const refreshed = await response.json();
+  rememberCloudSession({ ...refreshed, user: refreshed.user || cloudSession.user });
+  return cloudSession;
+}
+
+async function cloudFetch(url, options = {}) {
+  const buildOptions = () => ({
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...cloudHeaders(),
+      Accept: options.headers?.Accept || "application/json"
+    }
+  });
+  let response = await fetch(url, buildOptions());
+  if (response.ok) return response;
+  const text = await response.text();
+  if (!isCloudTokenExpiredText(text)) throw new Error(text);
+  await refreshCloudSession();
+  response = await fetch(url, buildOptions());
+  if (!response.ok) throw new Error(await response.text());
+  return response;
+}
+
 function showCloudDialog() {
   if (!cloudSyncConfigured()) {
     showToast("云同步还没有配置完成");
@@ -930,10 +972,9 @@ async function syncPendingToCloud(pending) {
     showCloudDialog();
     return false;
   }
-  const response = await fetch(`${CLOUD_SYNC_URL}/rest/v1/mobile_cloud_drafts?on_conflict=user_id,local_id`, {
+  const response = await cloudFetch(`${CLOUD_SYNC_URL}/rest/v1/mobile_cloud_drafts?on_conflict=user_id,local_id`, {
     method: "POST",
     headers: {
-      ...cloudHeaders(),
       Prefer: "resolution=merge-duplicates,return=representation"
     },
     body: JSON.stringify(pending.map(cloudDraftFromRecord))
@@ -1168,11 +1209,10 @@ function currentMonthKey() {
 async function loadMobileDashboardSnapshot() {
   if (cloudSession?.access_token) {
     try {
-      const response = await fetch(
+      const response = await cloudFetch(
         `${CLOUD_SYNC_URL}/rest/v1/mobile_dashboard_snapshots?select=snapshot_month,payload_json&order=updated_at.desc&limit=1`,
         {
           headers: {
-            ...cloudHeaders(),
             Accept: "application/json"
           }
         }
