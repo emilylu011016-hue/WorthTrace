@@ -1,0 +1,84 @@
+name: Build release apps
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: "macOS Apple Silicon"
+            platform: "macos-14"
+            rust_target: "aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles app,dmg"
+          - label: "macOS Intel"
+            platform: "macos-13"
+            rust_target: "x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --bundles app,dmg"
+          - label: "Windows"
+            platform: "windows-latest"
+            rust_target: ""
+            args: "--bundles nsis"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust build target
+        if: matrix.rust_target != ''
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Read app version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const pkg = require('./package.json');
+          fs.appendFileSync(process.env.GITHUB_ENV, 'APP_VERSION=' + pkg.version + '\n');
+          NODE
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Windows installer tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis -y
+
+      - name: Build and upload app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v${{ env.APP_VERSION }}
+          releaseName: WorthTrace v${{ env.APP_VERSION }}
+          releaseBody: |
+            WorthTrace desktop release.
+
+            - macOS Apple Silicon: for newer Macs with M-series chips.
+            - macOS Intel: for older Intel Macs.
+            - Windows: for Windows users.
+
+            The app stores data locally on each user's computer.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
