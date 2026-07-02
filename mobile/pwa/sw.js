@@ -1,11 +1,12 @@
-const CACHE_NAME = "worthtrace-mobile-pwa-0.3.4";
+const CACHE_NAME = "worthtrace-mobile-pwa-0.3.6";
 const ASSETS = [
   "./",
-  "./index.html",
+  "./index.html?mobileVersion=0.3.6",
   "./styles.css?mobileVersion=0.3.4",
-  "./app.js?mobileVersion=0.3.4",
+  "./styles.css?mobileVersion=0.3.6",
+  "./app.js?mobileVersion=0.3.6",
   "./manifest.webmanifest",
-  "../assets/logo-qianji-a.svg"
+  "./logo-qianji-a.svg"
 ];
 
 self.addEventListener("install", (event) => {

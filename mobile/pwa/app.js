@@ -9,7 +9,10 @@ const DEVICE_ID_KEY = "worthtrace_mobile_device_id_v2";
 const ACCOUNT_ID_KEY = "worthtrace_mobile_account_id_v3";
 const BINDING_INFO_KEY = "worthtrace_mobile_binding_info_v1";
 const MOBILE_SESSION_UNLOCK_KEY = "worthtrace_mobile_unlocked_session_v1";
+const CLOUD_SESSION_KEY = "worthtrace_mobile_cloud_session_v1";
 const DEFAULT_SYNC_ENDPOINT = "http://127.0.0.1:18742";
+const CLOUD_SYNC_URL = "https://yyhuxgxohiguyaskhqco.supabase.co";
+const CLOUD_SYNC_PUBLISHABLE_KEY = "sb_publishable_TW9SJoYzougEOl5vvHZVpg_17iMWHH9";
 const LEGACY_DB_NAMES = ["worthtrace_mobile_v1", "worthtrace_mobile_v2"];
 const LEGACY_STORAGE_KEYS = ["worthtrace_mobile_settings_v1", "worthtrace_mobile_custom_categories_v1"];
 
@@ -26,11 +29,13 @@ const customCategories = readCustomCategories();
 const syncEndpoint = resolveSyncEndpoint();
 const deviceId = resolveDeviceId();
 let accountId = localStorage.getItem(ACCOUNT_ID_KEY) || "";
+let cloudSession = readCloudSession();
 const icons = {
   eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12s3.6-7 9.9-7 9.9 7 9.9 7-3.6 7-9.9 7-9.9-7-9.9-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M9.9 4.4A10.7 10.7 0 0 1 12 4.2c6.3 0 9.9 7 9.9 7a16.2 16.2 0 0 1-3.1 3.9"/><path d="M6.5 6.8A16.1 16.1 0 0 0 2.1 12s3.6 7 9.9 7a10.7 10.7 0 0 0 4.1-.8"/></svg>',
   palette: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 1.2-3.6 1.2 1.2 0 0 1 .8-2.1H17a4 4 0 0 0 0-8h-1.2A4.9 4.9 0 0 1 12 3Z"/><circle cx="7.8" cy="10" r=".8"/><circle cx="10.4" cy="7.7" r=".8"/><circle cx="14" cy="7.8" r=".8"/></svg>',
   desktop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/><path d="M9 10h6"/></svg>',
+  account: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M18.5 5.5v4"/><path d="M20.5 7.5h-4"/></svg>',
   lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><path d="M12 15v2"/></svg>'
 };
 
@@ -55,7 +60,7 @@ const syncDot = document.querySelector("#syncDot");
 const pairCard = document.querySelector("#pairCard");
 const pairCardTitle = document.querySelector("#pairCardTitle");
 const pairCardText = document.querySelector("#pairCardText");
-const pairButton = document.querySelector("#pairButton");
+const cloudLoginButton = document.querySelector("#cloudLoginButton");
 const draftEntryGrid = document.querySelector("#draftEntryGrid");
 const localRecords = document.querySelector("#localRecords");
 const bookForm = document.querySelector("#bookForm");
@@ -76,6 +81,20 @@ const bindingDetail = document.querySelector("#bindingDetail");
 const pairCodeInput = document.querySelector("#pairCodeInput");
 const pairSubmitButton = document.querySelector("#pairSubmitButton");
 const unpairButton = document.querySelector("#unpairButton");
+const cloudDialog = document.querySelector("#cloudDialog");
+const cloudForm = document.querySelector("#cloudForm");
+const cloudDialogCopy = document.querySelector("#cloudDialogCopy");
+const cloudAccountDetail = document.querySelector("#cloudAccountDetail");
+const cloudEmailField = document.querySelector("#cloudEmailField");
+const cloudEmailInput = document.querySelector("#cloudEmailInput");
+const cloudPasswordField = document.querySelector("#cloudPasswordField");
+const cloudPasswordInput = document.querySelector("#cloudPasswordInput");
+const cloudPasswordToggle = document.querySelector("#cloudPasswordToggle");
+const cloudHint = document.querySelector("#cloudHint");
+const cloudResendButton = document.querySelector("#cloudResendButton");
+const cloudSignupButton = document.querySelector("#cloudSignupButton");
+const cloudLogoutButton = document.querySelector("#cloudLogoutButton");
+const cloudLoginSubmitButton = document.querySelector("#cloudLoginSubmitButton");
 const categoryDialog = document.querySelector("#categoryDialog");
 const categoryForm = document.querySelector("#categoryForm");
 const categoryDialogTitle = document.querySelector("#categoryDialogTitle");
@@ -282,13 +301,35 @@ creditCardForm.addEventListener("submit", async (event) => {
 document.querySelector("#syncButton").addEventListener("click", showSyncDialog);
 document.querySelector("#confirmSyncButton").addEventListener("click", showSyncDialog);
 document.querySelector("#closeDialogButton").addEventListener("click", () => closeModal(syncDialog));
-pairButton.addEventListener("click", () => {
-  showPairDialog();
-});
-bindingInfoButton.addEventListener("click", () => showPairDialog({ showDetail: true }));
+cloudLoginButton.addEventListener("click", () => showCloudDialog());
+bindingInfoButton.addEventListener("click", () => showCloudDialog());
 document.querySelector("#closePairDialogButton").addEventListener("click", () => closeModal(pairDialog));
+document.querySelector("#closeCloudDialogButton").addEventListener("click", () => closeModal(cloudDialog));
+cloudResendButton.addEventListener("click", () => {
+  void cloudResendConfirmation();
+});
+cloudLogoutButton.addEventListener("click", () => {
+  rememberCloudSession(null);
+  closeModal(cloudDialog);
+  showToast("已退出账号同步");
+});
+cloudPasswordToggle.addEventListener("click", () => {
+  const visible = cloudPasswordInput.type === "text";
+  cloudPasswordInput.type = visible ? "password" : "text";
+  cloudPasswordToggle.textContent = visible ? "显示" : "隐藏";
+  cloudPasswordToggle.setAttribute("aria-label", visible ? "显示密码" : "隐藏密码");
+  cloudPasswordToggle.setAttribute("title", visible ? "显示密码" : "隐藏密码");
+  cloudPasswordInput.focus();
+});
 unpairButton.addEventListener("click", () => {
   void unpairThisDevice();
+});
+cloudSignupButton.addEventListener("click", () => {
+  void cloudAuth("signup");
+});
+cloudForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void cloudAuth("signin");
 });
 pairForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -382,8 +423,8 @@ function render() {
   syncCard.hidden = pending.length === 0;
   syncCardTitle.textContent = pending.length ? `有 ${pending.length} 条 6 月草稿待同步` : "没有待同步记录";
   syncCardText.textContent = state.online
-    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔，信用卡 ${pendingSummary.creditCardCount} 条。同步后进入电脑端 6 月草稿。`
-    : "离线记录会先保存在手机。恢复连接后同步到电脑端 6 月草稿。";
+    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔，信用卡 ${pendingSummary.creditCardCount} 条。同步后进入云端草稿箱。`
+    : "离线记录会先保存在手机。恢复网络后同步到云端草稿箱。";
   privacyButton.innerHTML = state.privacy ? icons.eyeOff : icons.eye;
   privacyButton.setAttribute("aria-label", state.privacy ? "显示金额" : "隐藏金额");
   privacyButton.setAttribute("title", state.privacy ? "显示金额" : "隐藏金额");
@@ -445,7 +486,7 @@ function showSyncDialog() {
       <div class="sync-impact-list">
         <section>
           <b>同步后会影响</b>
-          <p>电脑端 6 月收支确认和信用卡调整草稿。</p>
+          <p>6 月收支确认和信用卡调整草稿。</p>
         </section>
         <section>
           <b>暂不影响</b>
@@ -499,21 +540,24 @@ async function reportMobileStatus() {
       })
     });
   } catch {
-    // 电脑 test app 未启动时，手机继续保留本地草稿。
+    // 电脑 App 未启动时，手机继续保留本地草稿。
   }
 }
 
 function renderPairCard() {
-  const bound = Boolean(accountId);
-  pairCard.hidden = bound;
-  bindingInfoButton.hidden = !bound;
-  bindingInfoButton.innerHTML = icons.desktop;
-  pairCard.classList.toggle("bound", bound);
-  pairCardTitle.textContent = bound ? "已绑定电脑" : "绑定电脑";
-  pairCardText.textContent = bound
-    ? "手机记账会同步到已绑定的电脑账户。"
-    : "输入电脑端显示的绑定码，让手机和电脑识别为同一个账户。";
-  pairButton.textContent = bound ? "重新绑定" : "绑定";
+  const signedIn = Boolean(cloudSession?.access_token);
+  pairCard.hidden = signedIn;
+  bindingInfoButton.hidden = !signedIn;
+  bindingInfoButton.innerHTML = icons.account;
+  bindingInfoButton.setAttribute("aria-label", "账号同步");
+  bindingInfoButton.setAttribute("title", "账号同步");
+  bindingInfoButton.dataset.tooltip = "账号同步";
+  pairCard.classList.toggle("bound", signedIn);
+  pairCardTitle.textContent = signedIn ? "账号已登录" : "登录或注册账号";
+  pairCardText.textContent = signedIn
+    ? "手机草稿会先进入云端草稿箱。"
+    : "先登录账号。新邮箱登录失败后，可以直接创建账号。";
+  cloudLoginButton.textContent = signedIn ? "账号同步" : "登录 / 注册";
 }
 
 function showPairDialog(options = {}) {
@@ -521,7 +565,7 @@ function showPairDialog(options = {}) {
   const bindingInfo = readBindingInfo();
   pairDialog.querySelector("h2").textContent = showDetail ? "电脑绑定" : "绑定电脑";
   pairDialogIntro.textContent = showDetail
-    ? "当前手机已经和电脑 Test 同步入口绑定。重新绑定只会更换手机连接的电脑账户。"
+    ? "当前手机已经和电脑同步入口绑定。重新绑定只会更换手机连接的电脑账户。"
     : "输入电脑端显示的绑定码。绑定后，手机草稿会进入电脑端手机收件箱。";
   bindingDetail.hidden = !showDetail;
   if (showDetail) {
@@ -676,19 +720,247 @@ async function changeMobilePassword() {
   }
 }
 
-async function syncPendingToDesktop() {
-  const pending = pendingRecords();
-  if (!accountId) {
-    showToast("请先用电脑端绑定码绑定手机");
-    syncDialogText.insertAdjacentHTML(
-      "beforeend",
-      `<p class="sync-prototype-note">未绑定电脑账户。请在电脑端打开手机绑定，再用手机打开绑定链接。</p>`
-    );
+function cloudSyncConfigured() {
+  return Boolean(CLOUD_SYNC_URL && CLOUD_SYNC_PUBLISHABLE_KEY && !CLOUD_SYNC_PUBLISHABLE_KEY.includes("PASTE_"));
+}
+
+function readCloudSession() {
+  try {
+    const raw = localStorage.getItem(CLOUD_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberCloudSession(session) {
+  cloudSession = session;
+  if (session) {
+    localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(session));
+  } else {
+    localStorage.removeItem(CLOUD_SESSION_KEY);
+  }
+  render();
+}
+
+function cloudHeaders(session = cloudSession) {
+  return {
+    apikey: CLOUD_SYNC_PUBLISHABLE_KEY,
+    Authorization: `Bearer ${session?.access_token || CLOUD_SYNC_PUBLISHABLE_KEY}`,
+    "Content-Type": "application/json"
+  };
+}
+
+function showCloudDialog() {
+  if (!cloudSyncConfigured()) {
+    showToast("云同步还没有配置完成");
     return;
   }
+  const signedIn = Boolean(cloudSession?.access_token);
+  cloudDialogCopy.textContent = signedIn
+    ? "当前手机已登录账号同步。手机草稿会先进云端草稿箱；电脑端需要用同一账号拉取。"
+    : "同步后，手机草稿会进入云端草稿箱，电脑端再确认入库。";
+  cloudAccountDetail.hidden = !signedIn;
+  cloudAccountDetail.innerHTML = signedIn
+    ? `
+      <section><b>当前账号</b><span>${escapeHtml(cloudSession.user?.email || cloudSession.user?.id || "账号")}</span></section>
+      <section><b>下一步</b><span>在电脑端 WorthTrace 打开“账号与同步”，登录同一账号，再拉取云端草稿。</span></section>
+    `
+    : "";
+  cloudEmailField.hidden = signedIn;
+  cloudPasswordField.hidden = signedIn;
+  cloudEmailInput.value = signedIn ? "" : "";
+  cloudPasswordInput.value = "";
+  cloudPasswordInput.type = "password";
+  cloudPasswordToggle.textContent = "显示";
+  cloudResendButton.hidden = true;
+  cloudSignupButton.hidden = true;
+  cloudLogoutButton.hidden = !signedIn;
+  cloudLoginSubmitButton.hidden = signedIn;
+  cloudHint.textContent = signedIn ? "账号同步已开启。" : "输入邮箱和密码登录。密码区分大小写。";
+  openModal(cloudDialog);
+  if (!signedIn) cloudEmailInput.focus();
+}
+
+async function readAuthError(response) {
+  try {
+    const data = await response.json();
+    return data.msg || data.message || data.error_description || data.error || response.statusText;
+  } catch {
+    return response.statusText || "请求失败";
+  }
+}
+
+function friendlyAuthError(message, mode) {
+  const text = String(message || "").replace(/^Error:\s*/, "").trim();
+  const lower = text.toLowerCase();
+  if (lower.includes("email rate limit") || lower.includes("rate limit")) {
+    return "验证邮件发送太频繁。请先检查邮箱收件箱和垃圾邮件；如果还没有收到，等几分钟后再试。";
+  }
+  if (lower.includes("already registered") || lower.includes("already exists") || lower.includes("user already")) {
+    return "这个邮箱已经注册。请直接登录；如果登录失败，请检查密码大小写，或确认邮箱是否已验证。";
+  }
+  if (lower.includes("email not confirmed") || lower.includes("not confirmed")) {
+    return "这个邮箱还没有完成验证。请先打开邮箱里的验证邮件，再回来登录。";
+  }
+  if (lower.includes("invalid login") || lower.includes("invalid credentials")) {
+    return mode === "signin"
+      ? "邮箱或密码不正确。密码区分大小写；如果这是新邮箱，可以创建新账号。"
+      : "创建失败。请检查邮箱格式和密码长度。";
+  }
+  return text || "账号请求失败，请稍后再试。";
+}
+
+function shouldShowResendConfirmation(message) {
+  return /验证|确认|confirm|confirmed|confirmation/i.test(String(message || ""));
+}
+
+async function cloudResendConfirmation() {
+  const email = cloudEmailInput.value.trim();
+  if (!email) {
+    cloudHint.textContent = "请输入邮箱后再重发验证邮件。";
+    cloudEmailInput.focus();
+    return;
+  }
+  cloudResendButton.disabled = true;
+  cloudHint.textContent = "正在重新发送验证邮件。";
+  try {
+    const response = await fetch(`${CLOUD_SYNC_URL}/auth/v1/resend`, {
+      method: "POST",
+      headers: cloudHeaders(null),
+      body: JSON.stringify({ type: "signup", email })
+    });
+    if (!response.ok) throw new Error(await readAuthError(response));
+    cloudHint.textContent = "验证邮件已重新发送。请检查收件箱和垃圾邮件。";
+  } catch (err) {
+    cloudHint.textContent = friendlyAuthError(err, "signup");
+  } finally {
+    cloudResendButton.disabled = false;
+  }
+}
+
+async function cloudAuth(mode) {
+  if (cloudSession?.access_token) {
+    showCloudDialog();
+    return;
+  }
+  if (!cloudSyncConfigured()) {
+    cloudHint.textContent = "云同步还没有配置完成。";
+    return;
+  }
+  const email = cloudEmailInput.value.trim();
+  const password = cloudPasswordInput.value;
+  if (!email || password.length < 6) {
+    cloudHint.textContent = "请输入邮箱和至少 6 位密码。";
+    return;
+  }
+  if (mode === "signin") {
+    cloudSignupButton.hidden = true;
+    cloudResendButton.hidden = true;
+  }
+  cloudLoginSubmitButton.disabled = true;
+  cloudSignupButton.disabled = true;
+  cloudResendButton.disabled = true;
+  try {
+    const path = mode === "signup" ? "/auth/v1/signup" : "/auth/v1/token?grant_type=password";
+    const response = await fetch(`${CLOUD_SYNC_URL}${path}`, {
+      method: "POST",
+      headers: cloudHeaders(null),
+      body: JSON.stringify({ email, password })
+    });
+    if (!response.ok) throw new Error(await readAuthError(response));
+    const session = await response.json();
+    if (!session?.access_token) {
+      cloudHint.textContent = mode === "signup"
+        ? "账号注册已提交。请先打开邮箱完成验证，验证后回到这里登录。"
+        : "登录失败，请检查邮箱、密码或邮箱验证状态。";
+      cloudResendButton.hidden = !shouldShowResendConfirmation(cloudHint.textContent);
+      if (mode === "signup") {
+        cloudSignupButton.hidden = true;
+      }
+      return;
+    }
+    rememberCloudSession(session);
+    closeModal(cloudDialog);
+    showToast(mode === "signup" ? "账号已创建" : "已登录账号同步");
+  } catch (err) {
+    const message = friendlyAuthError(err, mode);
+    if (mode === "signin") {
+      cloudHint.textContent = message;
+      cloudSignupButton.hidden = !message.includes("新邮箱");
+      cloudResendButton.hidden = false;
+    } else {
+      cloudHint.textContent = message;
+      cloudSignupButton.hidden = true;
+      cloudResendButton.hidden = !email;
+    }
+  } finally {
+    cloudLoginSubmitButton.disabled = false;
+    cloudSignupButton.disabled = false;
+    cloudResendButton.disabled = false;
+  }
+}
+
+function cloudDraftFromRecord(record) {
+  const payload = { ...record };
+  if (record.record_kind === "credit_card_adjustment") {
+    payload.net_adjustment = record.net_adjustment;
+  }
+  return {
+    user_id: cloudSession.user.id,
+    device_id: deviceId,
+    local_id: record.local_id,
+    record_kind: record.record_kind || "transaction",
+    transaction_type: record.transaction_type || null,
+    transaction_date: record.transaction_date || null,
+    period_month: record.period_month || null,
+    amount: record.amount ?? null,
+    currency: record.currency || "CNY",
+    category: record.category || null,
+    note: record.note || null,
+    payload_json: payload,
+    sync_status: "pending",
+    updated_at: new Date().toISOString()
+  };
+}
+
+async function syncPendingToCloud(pending) {
+  if (!cloudSession) {
+    showCloudDialog();
+    return false;
+  }
+  const response = await fetch(`${CLOUD_SYNC_URL}/rest/v1/mobile_cloud_drafts?on_conflict=user_id,local_id`, {
+    method: "POST",
+    headers: {
+      ...cloudHeaders(),
+      Prefer: "resolution=merge-duplicates,return=representation"
+    },
+    body: JSON.stringify(pending.map(cloudDraftFromRecord))
+  });
+  if (!response.ok) throw new Error(await response.text());
+  state.records = state.records.map((record) =>
+    pending.some((item) => item.local_id === record.local_id)
+      ? { ...record, sync_status: "synced", server_id: `cloud:${record.local_id}`, updated_at: new Date().toISOString() }
+      : record
+  );
+  await replaceRecords(state.records);
+  render();
+  showToast(`已上传 ${pending.length} 条到云端草稿箱`);
+  return true;
+}
+
+async function syncPendingToDesktop() {
+  const pending = pendingRecords();
   if (!pending.length) {
     closeModal(syncDialog);
     showToast("没有待同步草稿");
+    return;
+  }
+  if (!accountId) {
+    if (await syncPendingToCloud(pending)) {
+      closeModal(syncDialog);
+      return;
+    }
     return;
   }
   const syncButton = document.querySelector("#mockSyncButton");
@@ -724,16 +996,20 @@ async function syncPendingToDesktop() {
     closeModal(syncDialog);
     render();
     void reportMobileStatus();
-    showToast(`已同步 ${result.accepted_count || 0} 条到电脑 Test 收件箱`);
+    showToast(`已同步 ${result.accepted_count || 0} 条到电脑收件箱`);
   } catch (err) {
-    showToast("同步失败：请确认电脑 Test App 已打开");
-    syncDialogText.insertAdjacentHTML(
-      "beforeend",
-      `<p class="sync-prototype-note">同步失败。${escapeHtml(String(err))}</p>`
-    );
+    if (cloudSession && (await syncPendingToCloud(pending))) {
+      closeModal(syncDialog);
+    } else {
+      showToast("同步失败：请确认电脑 App 已打开，或登录账号同步");
+      syncDialogText.insertAdjacentHTML(
+        "beforeend",
+        `<p class="sync-prototype-note">同步失败。${escapeHtml(String(err))}</p>`
+      );
+    }
   } finally {
     syncButton.disabled = false;
-    syncButton.textContent = "同步到电脑";
+    syncButton.textContent = "同步草稿";
   }
 }
 
@@ -982,7 +1258,7 @@ function canUseDesktopData() {
 }
 
 function updateAccessState() {
-  document.body.classList.toggle("needs-binding", !accountId);
+  document.body.classList.toggle("needs-binding", !accountId && !cloudSession?.access_token);
   document.body.classList.toggle("needs-unlock", Boolean(accountId) && !hasUnlockedSession());
 }
 
@@ -1118,14 +1394,14 @@ function renderSyncedDashboard() {
   setText("#homeIncomeLabel", `${monthLabel}收入`);
   setText("#homeSavingLabel", `${monthLabel}储蓄`);
   setText("#homeDeviationCount", `${mobileDashboardSnapshot.allocationTargets.filter((item) => Math.abs(item.deviation) >= 0.01).length} 项`);
-  setText("#homeDataStamp", mobileDashboardSnapshot.snapshotMonth ? `截至 ${fullMonthLabel}月报；本月手机草稿未计入` : "绑定电脑后同步已发布月报。");
+  setText("#homeDataStamp", mobileDashboardSnapshot.snapshotMonth ? `截至 ${fullMonthLabel}月报；本月手机草稿未计入` : "电脑端登录同一账号后同步已发布月报。");
   setText("#homeStatusTitle", mobileDashboardSnapshot.snapshotMonth ? `看板数据截至 ${fullMonthLabel}` : "看板数据待同步");
-  setText("#homeStatusText", mobileDashboardSnapshot.snapshotMonth ? "首页金额、收益率、收入支出来自电脑端已发布月报，不包含手机草稿。" : "绑定电脑后显示已发布月报，不包含手机草稿。");
+  setText("#homeStatusText", mobileDashboardSnapshot.snapshotMonth ? "首页金额、收益率、收入支出来自电脑端已发布月报，不包含手机草稿。" : "电脑端登录同一账号后显示已发布月报，不包含手机草稿。");
   setText("#homeCashflowTitle", mobileDashboardSnapshot.snapshotMonth ? `收支摘要显示 ${fullMonthLabel}` : "收支摘要待同步");
 
   setText("#cashflowHeroTitle", `${monthLabel}已发布月报储蓄率`);
   setPercent("#cashflowSavingRate", latest?.savingRate || 0);
-  setText("#cashflowDataStamp", mobileDashboardSnapshot.snapshotMonth ? `${fullMonthLabel}；本月手机记账未计入` : "绑定电脑后同步已发布月报。");
+  setText("#cashflowDataStamp", mobileDashboardSnapshot.snapshotMonth ? `${fullMonthLabel}；本月手机记账未计入` : "电脑端登录同一账号后同步已发布月报。");
   setMoney("#cashflowIncome", latest?.income || 0);
   setMoney("#cashflowExpense", latest?.expense || 0);
   setMoney("#cashflowSaving", latest?.savingAmount || 0);
@@ -1140,7 +1416,7 @@ function renderSyncedDashboard() {
   if (savingGoalText) {
     savingGoalText.innerHTML = latest
       ? `目标储蓄率 <span class="percent" data-value="${formatPercentRaw(targetRate)}">${formatPercent(targetRate)}</span>，${monthLabel}月报储蓄率 <span class="percent" data-value="${formatPercentRaw(latest.savingRate)}">${formatPercent(latest.savingRate)}</span>。`
-      : "绑定电脑后同步目标和当前储蓄率。";
+      : "电脑端登录同一账号后同步目标和当前储蓄率。";
   }
   setText("#savingGoalStatus", latest ? (hitTarget ? "达成" : "未达成") : "待同步");
 
@@ -1151,7 +1427,7 @@ function renderSyncedDashboard() {
       ? categories.map((item) => `
         <div class="bar-row"><span>${escapeHtml(item.category)}</span><i style="--w: ${Math.max(4, Math.min(100, item.percent * 100))}%"></i><b class="money" data-value="${formatPlainMoney(item.amount)}">${state.privacy ? "••••••" : formatPlainMoney(item.amount)}</b></div>
       `).join("")
-      : `<div class="draft-empty-card">绑定电脑并生成月报后显示支出分类。</div>`;
+      : `<div class="draft-empty-card">电脑端登录同一账号并生成月报后显示支出分类。</div>`;
   }
 }
 
@@ -1169,7 +1445,7 @@ function renderMayAnomalies() {
   if (!anomalies.length) {
     mayAnomalyDetail.innerHTML = `
       <strong>暂无 ${monthLabel} 异常支出明细</strong>
-      <span>已和电脑端 Test 数据库的已发布月报同步。</span>
+      <span>已和电脑端已发布月报同步。</span>
     `;
     return;
   }

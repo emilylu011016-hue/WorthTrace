@@ -159,6 +159,23 @@ struct MobileSyncInboxRecord {
   received_at: String,
 }
 
+#[derive(Deserialize)]
+struct CloudMobileDraftInput {
+  id: String,
+  user_id: String,
+  device_id: Option<String>,
+  local_id: String,
+  record_kind: String,
+  transaction_type: Option<String>,
+  transaction_date: Option<String>,
+  period_month: Option<String>,
+  amount: Option<f64>,
+  currency: Option<String>,
+  category: Option<String>,
+  note: Option<String>,
+  payload_json: Option<serde_json::Value>,
+}
+
 #[derive(Serialize)]
 struct MobileSyncSummary {
   enabled: bool,
@@ -1728,6 +1745,94 @@ fn store_mobile_sync_records(
       local_id,
       server_id: id,
       sync_status: "synced".to_string(),
+    });
+  }
+  tx.commit()?;
+  Ok(MobileSyncPushResult {
+    accepted_count: acknowledgements.len(),
+    records: acknowledgements,
+  })
+}
+
+fn import_cloud_mobile_drafts_into_connection(
+  connection: &Connection,
+  drafts: Vec<CloudMobileDraftInput>,
+) -> Result<MobileSyncPushResult, AppError> {
+  ensure_mobile_sync_schema(connection)?;
+  let account_id = mobile_account_id(connection)?;
+  let device_id = "worthtrace-cloud".to_string();
+  upsert_mobile_device(
+    connection,
+    &device_id,
+    Some(&account_id),
+    Some("云端手机草稿"),
+    Some("cloud"),
+    0,
+    drafts.len() as i64,
+  )?;
+  let tx = connection.unchecked_transaction()?;
+  let mut acknowledgements = Vec::new();
+  for draft in drafts {
+    let cloud_id = draft.id.trim().to_string();
+    if cloud_id.is_empty() {
+      continue;
+    }
+    let local_id = format!("cloud:{cloud_id}");
+    let id = make_unique_id("mobile", &format!("{device_id}|{local_id}"));
+    let payload_value = draft.payload_json.clone().unwrap_or_else(|| serde_json::json!({}));
+    let payload_json = payload_value.to_string();
+    let net_adjustment = payload_value.get("net_adjustment").and_then(|value| value.as_f64());
+    let record_kind = if draft.record_kind.trim().is_empty() {
+      "transaction".to_string()
+    } else {
+      draft.record_kind
+    };
+    tx.execute(
+      "
+      insert into mobile_sync_inbox (
+        id, account_id, device_id, local_id, record_kind, transaction_type, transaction_date,
+        period_month, amount, currency, category, note, net_adjustment, payload_json, sync_status
+      )
+      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'received')
+      on conflict(device_id, local_id) do update set
+        account_id = excluded.account_id,
+        record_kind = excluded.record_kind,
+        transaction_type = excluded.transaction_type,
+        transaction_date = excluded.transaction_date,
+        period_month = excluded.period_month,
+        amount = excluded.amount,
+        currency = excluded.currency,
+        category = excluded.category,
+        note = excluded.note,
+        net_adjustment = excluded.net_adjustment,
+        payload_json = excluded.payload_json,
+        sync_status = case
+          when mobile_sync_inbox.sync_status = 'reviewed' then 'reviewed'
+          else 'received'
+        end,
+        updated_at = current_timestamp
+      ",
+      params![
+        id,
+        account_id,
+        device_id,
+        local_id,
+        record_kind,
+        draft.transaction_type,
+        draft.transaction_date,
+        draft.period_month,
+        draft.amount,
+        draft.currency.unwrap_or_else(|| "CNY".to_string()),
+        draft.category,
+        draft.note,
+        net_adjustment,
+        payload_json
+      ],
+    )?;
+    acknowledgements.push(MobileSyncAck {
+      local_id: draft.local_id,
+      server_id: id,
+      sync_status: "received".to_string(),
     });
   }
   tx.commit()?;
@@ -8079,6 +8184,17 @@ fn mark_mobile_sync_records_reviewed(
   read_mobile_sync_summary(&connection, true)
 }
 
+#[tauri::command]
+fn import_cloud_mobile_drafts(
+  drafts: Vec<CloudMobileDraftInput>,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<MobileSyncPushResult, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  import_cloud_mobile_drafts_into_connection(&connection, drafts)
+}
+
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
@@ -8143,7 +8259,8 @@ pub fn run() {
       get_mobile_sync_summary,
       get_mobile_pairing_info,
       reset_mobile_pairing_devices,
-      mark_mobile_sync_records_reviewed
+      mark_mobile_sync_records_reviewed,
+      import_cloud_mobile_drafts
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

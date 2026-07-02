@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.4" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.6" />
 </head>
 <body class="theme-champagne privacy-on needs-binding">
   <main class="mobile-shell">
@@ -19,7 +19,7 @@
         <button class="round-button" id="privacyButton" type="button" aria-label="显示金额" title="显示金额" data-tooltip="显示金额"></button>
         <button class="round-button" id="themeButton" type="button" aria-label="切换风格" title="切换风格" data-tooltip="切换风格"></button>
         <button class="round-button" id="securityButton" type="button" aria-label="安全设置" title="安全设置" data-tooltip="安全设置"></button>
-        <button class="round-button" id="bindingInfoButton" type="button" aria-label="电脑绑定" title="电脑绑定" data-tooltip="电脑绑定" hidden></button>
+        <button class="round-button" id="bindingInfoButton" type="button" aria-label="账号同步" title="账号同步" data-tooltip="账号同步" hidden></button>
         <button class="sync-button" id="syncButton" type="button" aria-label="同步状态">
           <span id="syncDot"></span>
           <b id="syncCount">0</b>
@@ -35,30 +35,32 @@
 
     <section class="offline-banner" id="offlineBanner" hidden>
       <strong>离线模式</strong>
-      <span>新记录会先保存在手机，连上电脑后同步。</span>
+      <span>新记录会先保存在手机，恢复网络后同步。</span>
     </section>
 
     <section class="sync-card" id="syncCard" hidden>
       <div>
         <strong id="syncCardTitle">有记录待同步</strong>
-        <span id="syncCardText">连接电脑后可以同步 6 月草稿。</span>
+        <span id="syncCardText">登录账号后可以同步 6 月草稿。</span>
       </div>
       <button id="confirmSyncButton" type="button">同步草稿</button>
     </section>
 
     <section class="pair-card" id="pairCard">
       <div>
-        <strong id="pairCardTitle">绑定电脑</strong>
-        <span id="pairCardText">输入电脑端显示的绑定码，让手机和电脑识别为同一个账户。</span>
+        <strong id="pairCardTitle">登录或注册账号</strong>
+        <span id="pairCardText">先登录账号。新邮箱登录失败后，可以直接创建账号。</span>
       </div>
-      <button id="pairButton" type="button">绑定</button>
+      <div class="pair-card-actions">
+        <button id="cloudLoginButton" type="button">登录 / 注册</button>
+      </div>
     </section>
 
     <section class="view active" data-view="home">
       <article class="hero-card">
         <p id="homeHeroTitle">已发布月报净资产</p>
         <strong id="homeNetWorth" class="money" data-value="CNY 0.00">••••••</strong>
-        <small class="data-stamp" id="homeDataStamp">绑定电脑后同步已发布月报。</small>
+        <small class="data-stamp" id="homeDataStamp">电脑端登录同一账号后同步已发布月报。</small>
         <div class="metric-grid">
           <span><b id="homeExpense" class="money" data-value="CNY 0.00">••••••</b><small id="homeExpenseLabel">支出</small></span>
           <span><b id="homeSavingRate" class="percent" data-value="0.0%">••••••</b><small id="homeSavingRateLabel">储蓄率</small></span>
@@ -85,7 +87,7 @@
       <div class="list">
         <div class="list-row static">
           <i class="tile gold"></i>
-          <span><b id="homeStatusTitle">看板数据待同步</b><small id="homeStatusText">绑定电脑后显示已发布月报，不包含手机草稿。</small></span>
+          <span><b id="homeStatusTitle">看板数据待同步</b><small id="homeStatusText">电脑端登录同一账号后显示已发布月报，不包含手机草稿。</small></span>
           <em>状态</em>
         </div>
         <button class="list-row" data-nav="cashflow" type="button">
@@ -136,7 +138,7 @@
 
       <div class="section-title">
         <h2>信用卡调整</h2>
-        <span>同步到电脑草稿</span>
+        <span>同步到草稿箱</span>
       </div>
       <form class="credit-card-card" id="creditCardForm">
         <div class="credit-fields">
@@ -153,7 +155,7 @@
             <input id="cardPreviousUnbilledInput" inputmode="decimal" placeholder="0.00" />
           </label>
         </div>
-        <p class="credit-formula">每月最后一天更新一次即可。信用卡净调整 = -本月已出账单 - 本月未出账单 + 上月未出账单；同步后进入电脑端 6 月信用卡草稿。</p>
+        <p class="credit-formula">每月最后一天更新一次即可。信用卡净调整 = -本月已出账单 - 本月未出账单 + 上月未出账单；同步后进入 6 月信用卡草稿。</p>
         <button class="save-button" type="submit">保存信用卡调整</button>
       </form>
     </section>
@@ -162,7 +164,7 @@
       <article class="hero-card compact">
         <p id="cashflowHeroTitle">已发布月报储蓄率</p>
         <strong id="cashflowSavingRate" class="percent" data-value="0.0%">••••••</strong>
-        <small class="data-stamp" id="cashflowDataStamp">绑定电脑后同步已发布月报。</small>
+        <small class="data-stamp" id="cashflowDataStamp">电脑端登录同一账号后同步已发布月报。</small>
         <div class="metric-grid">
           <span><b id="cashflowIncome" class="money" data-value="CNY 0.00">••••••</b><small id="cashflowIncomeLabel">收入</small></span>
           <span><b id="cashflowExpense" class="money" data-value="CNY 0.00">••••••</b><small id="cashflowExpenseLabel">支出</small></span>
@@ -180,7 +182,7 @@
       <div class="monthly-draft-list" id="localRecords"></div>
 
       <div class="list">
-        <div class="list-row static" id="savingGoalRow"><i class="tile green"></i><span><b id="savingGoalTitle">储蓄目标待同步</b><small id="savingGoalText">绑定电脑后同步目标和当前储蓄率。</small></span><em id="savingGoalStatus">待同步</em></div>
+        <div class="list-row static" id="savingGoalRow"><i class="tile green"></i><span><b id="savingGoalTitle">储蓄目标待同步</b><small id="savingGoalText">电脑端登录同一账号后同步目标和当前储蓄率。</small></span><em id="savingGoalStatus">待同步</em></div>
         <button class="list-row" id="mayAnomalyButton" type="button"><i class="tile gold"></i><span><b>5 月异常支出</b><small>查看 5 月已发布月报里的异常明细。</small></span><em>查看</em></button>
         <div class="anomaly-detail" id="mayAnomalyDetail" hidden>
           <strong>暂无 5 月异常支出明细</strong>
@@ -213,10 +215,10 @@
 
   <dialog id="syncDialog">
     <h2>同步 6 月草稿</h2>
-    <div class="sync-dialog-body" id="syncDialogText">当前是原型模式。之后会在同 Wi-Fi 下同步到电脑。</div>
+    <div class="sync-dialog-body" id="syncDialogText">手机记录会先进入草稿箱，电脑端确认后再入库。</div>
     <div class="dialog-actions">
       <button id="closeDialogButton" type="button">稍后</button>
-      <button id="mockSyncButton" type="button">同步到电脑</button>
+      <button id="mockSyncButton" type="button">同步草稿</button>
     </div>
   </dialog>
 
@@ -233,6 +235,33 @@
         <button id="closePairDialogButton" type="button">取消</button>
         <button id="unpairButton" type="button" hidden>解除本机绑定</button>
         <button id="pairSubmitButton" type="submit">绑定</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="cloudDialog">
+    <form id="cloudForm">
+      <h2>账号同步</h2>
+      <p id="cloudDialogCopy">同步后，手机草稿会进入云端草稿箱，电脑端再确认入库。</p>
+      <div class="binding-detail" id="cloudAccountDetail" hidden></div>
+      <label class="pair-code-field" id="cloudEmailField">
+        <span>邮箱</span>
+        <input id="cloudEmailInput" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="输入邮箱" />
+      </label>
+      <label class="pair-code-field" id="cloudPasswordField">
+        <span>密码</span>
+        <div class="password-input-wrap">
+          <input id="cloudPasswordInput" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" placeholder="至少 6 位，区分大小写" />
+          <button id="cloudPasswordToggle" type="button" aria-label="显示密码" title="显示密码">显示</button>
+        </div>
+      </label>
+      <p class="password-hint" id="cloudHint">输入邮箱和密码登录。密码区分大小写。</p>
+      <div class="dialog-actions">
+        <button id="closeCloudDialogButton" type="button">取消</button>
+        <button id="cloudResendButton" type="button" hidden>重发验证邮件</button>
+        <button id="cloudSignupButton" type="button" hidden>创建新账号</button>
+        <button id="cloudLogoutButton" type="button" hidden>退出账号</button>
+        <button id="cloudLoginSubmitButton" type="submit">登录</button>
       </div>
     </form>
   </dialog>
@@ -258,7 +287,7 @@
       <p>请输入电脑端相同密码。手机端不会保存密码。</p>
       <label class="pair-code-field">
         <span>密码</span>
-        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="输入密码" />
+        <input id="passwordInput" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" placeholder="输入密码" />
       </label>
       <p class="password-hint" id="passwordHint">手机端使用电脑端同一个密码；未连接电脑时不能解锁或修改密码。</p>
       <div class="dialog-actions">
@@ -274,11 +303,11 @@
       <p>手机端和电脑端使用同一个密码。</p>
       <label class="pair-code-field">
         <span>当前密码</span>
-        <input id="currentPasswordInput" type="password" autocomplete="current-password" />
+        <input id="currentPasswordInput" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" />
       </label>
       <label class="pair-code-field">
         <span>新密码</span>
-        <input id="newPasswordInput" type="password" autocomplete="new-password" />
+        <input id="newPasswordInput" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" />
       </label>
       <p class="password-hint" id="passwordChangeHint">新密码至少 6 位。只有连接到已绑定电脑时才能修改。</p>
       <div class="dialog-actions">
@@ -290,6 +319,6 @@
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.3.4" type="module"></script>
+  <script src="./app.js?mobileVersion=0.3.6" type="module"></script>
 </body>
 </html>

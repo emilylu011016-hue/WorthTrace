@@ -1,6 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
+  cloudSignIn,
+  cloudSignUp,
+  cloudSyncConfigured,
+  listPendingCloudDrafts,
+  markCloudDraftsPulled,
+  type CloudDraft,
+  type CloudSession
+} from "./cloudSync";
+import {
   AlertCircle,
   ArrowRight,
   BarChart3,
@@ -270,6 +279,28 @@ type MobileSyncInboxRecord = {
   sync_status: string;
   received_at: string;
 };
+
+type SyncTab = "sync" | "password" | "reset";
+
+function friendlyCloudAuthError(error: unknown, mode: "signin" | "signup") {
+  const text = String(error || "").replace(/^Error:\s*/, "").trim();
+  const lower = text.toLowerCase();
+  if (lower.includes("email rate limit") || lower.includes("rate limit")) {
+    return "验证邮件发送太频繁。请先检查邮箱收件箱和垃圾邮件；如果还没有收到，等几分钟后再试。";
+  }
+  if (lower.includes("already registered") || lower.includes("already exists") || lower.includes("user already")) {
+    return "这个邮箱已经注册。请直接登录；如果登录失败，请检查密码大小写，或确认邮箱是否已验证。";
+  }
+  if (lower.includes("email not confirmed") || lower.includes("not confirmed")) {
+    return "这个邮箱还没有完成验证。请先打开邮箱里的验证邮件，再回来登录。";
+  }
+  if (lower.includes("invalid login") || lower.includes("invalid credentials")) {
+    return mode === "signin"
+      ? "邮箱或密码不正确。密码区分大小写；如果这是新邮箱，可以创建新账号。"
+      : "创建失败。请检查邮箱格式和密码长度。";
+  }
+  return text || "账号请求失败，请稍后再试。";
+}
 
 type MobileSyncSummary = {
   enabled: boolean;
@@ -1650,7 +1681,7 @@ export function App() {
   const [securityMessage, setSecurityMessage] = useState<string | null>(null);
   const [initialPasswordSetupSkipped, setInitialPasswordSetupSkipped] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"password" | "reset">("password");
+  const [settingsTab, setSettingsTab] = useState<SyncTab>("sync");
   const [settingsCurrentPassword, setSettingsCurrentPassword] = useState("");
   const [settingsNewPassword, setSettingsNewPassword] = useState("");
   const [settingsConfirmPassword, setSettingsConfirmPassword] = useState("");
@@ -1658,6 +1689,20 @@ export function App() {
   const [settingsResetConfirmText, setSettingsResetConfirmText] = useState("");
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [cloudSession, setCloudSession] = useState<CloudSession | null>(() => {
+    try {
+      const raw = window.localStorage.getItem("worthtrace-cloud-session");
+      return raw ? (JSON.parse(raw) as CloudSession) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [cloudEmail, setCloudEmail] = useState("");
+  const [cloudPassword, setCloudPassword] = useState("");
+  const [cloudMessage, setCloudMessage] = useState<string | null>(null);
+  const [cloudSignupSuggested, setCloudSignupSuggested] = useState(false);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudDrafts, setCloudDrafts] = useState<CloudDraft[]>([]);
   const [view, setView] = useState<AppView>(browserPreviewSummary ? "healthDashboard" : "home");
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
   const [onboardingStep, setOnboardingStep] = useState(0);
@@ -2800,15 +2845,99 @@ export function App() {
     }
   }
 
-  function openSettings(tab: "password" | "reset" = "password") {
+  function openSettings(tab: SyncTab = "sync") {
     setSettingsTab(tab);
     setSettingsOpen(true);
     setSettingsMessage(null);
+    setCloudMessage(null);
     setSettingsCurrentPassword("");
     setSettingsNewPassword("");
     setSettingsConfirmPassword("");
     setSettingsResetPassword("");
     setSettingsResetConfirmText("");
+  }
+
+  function rememberCloudSession(session: CloudSession | null) {
+    setCloudSession(session);
+    if (session) {
+      window.localStorage.setItem("worthtrace-cloud-session", JSON.stringify(session));
+    } else {
+      window.localStorage.removeItem("worthtrace-cloud-session");
+      setCloudDrafts([]);
+    }
+  }
+
+  async function refreshCloudDrafts(session = cloudSession) {
+    if (!session) return;
+    setCloudBusy(true);
+    try {
+      const drafts = await listPendingCloudDrafts(session);
+      setCloudDrafts(drafts);
+      setCloudMessage(drafts.length ? `云端有 ${drafts.length} 条手机草稿待处理。` : "云端暂无待处理草稿。");
+    } catch (err) {
+      setCloudMessage(`云同步读取失败：${String(err)}`);
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function handleCloudAuth(mode: "signin" | "signup") {
+    setCloudMessage(null);
+    if (mode === "signin") setCloudSignupSuggested(false);
+    if (!cloudSyncConfigured()) {
+      setCloudMessage("云同步还没有配置完成。");
+      return;
+    }
+    if (!cloudEmail.trim() || cloudPassword.length < 6) {
+      setCloudMessage("请输入邮箱和至少 6 位密码。");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const session = mode === "signup"
+        ? await cloudSignUp(cloudEmail.trim(), cloudPassword)
+        : await cloudSignIn(cloudEmail.trim(), cloudPassword);
+      rememberCloudSession(session);
+      setCloudPassword("");
+      setCloudSignupSuggested(false);
+      setCloudMessage(mode === "signup" ? "账号已创建并登录。" : "已登录账号同步。");
+      await refreshCloudDrafts(session);
+    } catch (err) {
+      const message = friendlyCloudAuthError(err, mode);
+      if (mode === "signin") {
+        setCloudSignupSuggested(message.includes("新邮箱"));
+        setCloudMessage(message);
+      } else {
+        setCloudSignupSuggested(false);
+        setCloudMessage(message);
+      }
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function pullCloudDraftsToInbox() {
+    if (!cloudSession) {
+      setCloudMessage("请先登录账号。");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const drafts = cloudDrafts.length ? cloudDrafts : await listPendingCloudDrafts(cloudSession);
+      if (!drafts.length) {
+        setCloudMessage("云端暂无待处理草稿。");
+        return;
+      }
+      await invoke("import_cloud_mobile_drafts", { drafts });
+      await markCloudDraftsPulled(cloudSession, drafts.map((draft) => draft.id));
+      await refreshMobileSyncSummary();
+      setCloudDrafts([]);
+      setCloudMessage(`已拉取 ${drafts.length} 条云端草稿到电脑收件箱。`);
+    } catch (err) {
+      setCloudMessage(`拉取失败：${String(err)}`);
+    } finally {
+      setCloudBusy(false);
+    }
   }
 
   async function handleChangePassword(event: React.FormEvent<HTMLFormElement>) {
@@ -4973,6 +5102,9 @@ export function App() {
           </div>
 
           <div className="settings-tabs" role="tablist">
+            <button className={settingsTab === "sync" ? "active" : ""} onClick={() => setSettingsTab("sync")} type="button">
+              账号与同步
+            </button>
             <button className={settingsTab === "password" ? "active" : ""} onClick={() => setSettingsTab("password")} type="button">
               {passwordMode === "modify" ? "修改密码" : "设置密码"}
             </button>
@@ -4981,7 +5113,82 @@ export function App() {
             </button>
           </div>
 
-          {settingsTab === "password" ? (
+          {settingsTab === "sync" ? (
+            <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
+              <p className="settings-copy">
+                同步后，手机草稿会进入云端草稿箱。电脑打开后再拉取到本地收件箱，由你确认后入库。
+              </p>
+              {!cloudSyncConfigured() ? (
+                <div className="settings-warning">
+                  当前安装包还没有启用账号同步。请先使用同一网络下的手机绑定。
+                </div>
+              ) : null}
+              {cloudSession ? (
+                <>
+                  <div className="settings-warning">
+                    当前账号：{cloudSession.user.email || cloudSession.user.id}
+                  </div>
+                  <div className="mobile-sync-metrics">
+                    <article><span>云端待处理</span><strong>{cloudDrafts.length} 条</strong></article>
+                    <article><span>本地收件箱</span><strong>{mobileSyncSummary?.received_in_desktop ?? 0} 条</strong></article>
+                  </div>
+                  {cloudMessage ? <p className="settings-message">{cloudMessage}</p> : null}
+                  <div className="row-actions">
+                    <button className="secondary-button compact" disabled={cloudBusy} onClick={() => void refreshCloudDrafts()} type="button">
+                      刷新云草稿
+                    </button>
+                    <button className="primary-button compact" disabled={cloudBusy} onClick={() => void pullCloudDraftsToInbox()} type="button">
+                      拉取到电脑收件箱
+                    </button>
+                    <button className="secondary-button compact" disabled={cloudBusy} onClick={() => rememberCloudSession(null)} type="button">
+                      退出账号
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label>
+                    邮箱
+                    <input
+                      autoComplete="email"
+                      onChange={(event) => {
+                        setCloudEmail(event.target.value);
+                        setCloudSignupSuggested(false);
+                      }}
+                      placeholder="输入邮箱"
+                      type="email"
+                      value={cloudEmail}
+                    />
+                  </label>
+                  <label>
+                    账号密码
+                    <input
+                      autoComplete="current-password"
+                      minLength={6}
+                      onChange={(event) => {
+                        setCloudPassword(event.target.value);
+                        setCloudSignupSuggested(false);
+                      }}
+                      placeholder="至少 6 位"
+                      type="password"
+                      value={cloudPassword}
+                    />
+                  </label>
+                  {cloudMessage ? <p className="settings-message">{cloudMessage}</p> : null}
+                  <div className="row-actions">
+                    <button className="primary-button compact" disabled={cloudBusy || !cloudSyncConfigured()} onClick={() => void handleCloudAuth("signin")} type="button">
+                      登录
+                    </button>
+                    {cloudSignupSuggested ? (
+                      <button className="secondary-button compact" disabled={cloudBusy || !cloudSyncConfigured()} onClick={() => void handleCloudAuth("signup")} type="button">
+                        用此邮箱创建新账号
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </form>
+          ) : settingsTab === "password" ? (
             <form className="settings-form" onSubmit={handleChangePassword}>
               <p className="settings-copy">
                 {passwordMode === "modify"
@@ -5290,7 +5497,7 @@ export function App() {
       <section className="mobile-sync-panel">
         <div className="mobile-sync-head">
           <div>
-            <p className="eyebrow">Test Mobile Sync</p>
+            <p className="eyebrow">Mobile Sync</p>
             <h2>手机同步收件箱</h2>
           </div>
           <div className="mobile-sync-actions">
@@ -5392,9 +5599,9 @@ export function App() {
               <span>手机绑定</span>
             </button>
           ) : null}
-          <button className="icon-button" onClick={() => openSettings("password")} type="button">
+          <button className="icon-button" onClick={() => openSettings("sync")} type="button">
             <Settings size={17} />
-            <span>设置</span>
+            <span>账号与同步</span>
           </button>
           <button className="icon-button" onClick={() => void openPreferences()} type="button">
             <Target size={17} />
