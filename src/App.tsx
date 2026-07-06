@@ -74,6 +74,12 @@ type CategoryBreakdown = {
   month_over_month_delta: number;
 };
 
+type CategoryMonthAmount = {
+  period_month: string;
+  category: string;
+  amount: number;
+};
+
 type AssetAllocationBreakdown = {
   category: string;
   amount: number;
@@ -176,6 +182,7 @@ type DashboardSeedSummary = {
   investment_return_rate?: number | null;
   monthly_trends: MonthlyTrend[];
   expense_categories: CategoryBreakdown[];
+  expense_category_trends: CategoryMonthAmount[];
   income_categories: CategoryBreakdown[];
   expense_year_rank: CategoryBreakdown[];
   income_year_rank: CategoryBreakdown[];
@@ -187,6 +194,8 @@ type DashboardSeedSummary = {
   asset_allocation_trends: AssetAllocationTrend[];
   investment_assets: InvestmentAssetPerformance[];
   investment_cashflow_calendar: InvestmentCashflowCalendarItem[];
+  asset_entry_items: AssetEntryItem[];
+  dca_cashflows: AssetCashflowItem[];
   investment_group_performances: InvestmentGroupPerformance[];
   investment_group_trends: InvestmentGroupTrend[];
   discretionary_trends: DiscretionaryTrend[];
@@ -586,7 +595,7 @@ type TemplateType =
 
 const healthSections = ["总览", "收支储蓄", "支出结构", "资产配置", "投资表现", "月报"] as const;
 type HealthSection = (typeof healthSections)[number];
-const dashboardRanges = ["本月", "3个月", "年初至今", "全部", "整年趋势"] as const;
+const dashboardRanges = ["本月", "近 3 个月", "半年", "今年以来", "投资至今"] as const;
 type DashboardRange = (typeof dashboardRanges)[number];
 type DashboardTheme = "champagne" | "sage" | "graphite";
 type DashboardItemDefinition = {
@@ -1429,6 +1438,7 @@ const fallbackSummary: DashboardSeedSummary = {
   investment_return_rate: null,
   monthly_trends: [],
   expense_categories: [],
+  expense_category_trends: [],
   income_categories: [],
   expense_year_rank: [],
   income_year_rank: [],
@@ -1440,6 +1450,8 @@ const fallbackSummary: DashboardSeedSummary = {
   asset_allocation_trends: [],
   investment_assets: [],
   investment_cashflow_calendar: [],
+  asset_entry_items: [],
+  dca_cashflows: [],
   investment_group_performances: [],
   investment_group_trends: [],
   discretionary_trends: [],
@@ -1733,7 +1745,7 @@ export function App() {
   const [savingOnboarding, setSavingOnboarding] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState("2026-04");
   const [activeHealthSection, setActiveHealthSection] = useState<HealthSection>("总览");
-  const [dashboardRange, setDashboardRange] = useState<DashboardRange>("年初至今");
+  const [dashboardRange, setDashboardRange] = useState<DashboardRange>("今年以来");
   const [kpisExpanded, setKpisExpanded] = useState(false);
   const [expandedDashboardLists, setExpandedDashboardLists] = useState<Record<string, boolean>>({});
   const [dashboardDetail, setDashboardDetail] = useState<string | null>(null);
@@ -2253,9 +2265,9 @@ export function App() {
       .filter((item) => !summary.snapshot_month || item.period_month <= summary.snapshot_month)
       .sort((a, b) => a.period_month.localeCompare(b.period_month));
     if (dashboardRange === "本月") return trends.filter((item) => item.period_month === summary.snapshot_month);
-    if (dashboardRange === "3个月") return trends.slice(-3);
-    if (dashboardRange === "年初至今") return trends.filter((item) => item.period_month.startsWith(summary.snapshot_month.slice(0, 4)));
-    if (dashboardRange === "整年趋势") return trends.filter((item) => item.period_month.startsWith(summary.snapshot_month.slice(0, 4)));
+    if (dashboardRange === "近 3 个月") return trends.slice(-3);
+    if (dashboardRange === "半年") return trends.slice(-6);
+    if (dashboardRange === "今年以来") return trends.filter((item) => item.period_month.startsWith(summary.snapshot_month.slice(0, 4)));
     return trends;
   }, [dashboardRange, summary.monthly_trends, summary.snapshot_month]);
 
@@ -2970,15 +2982,27 @@ export function App() {
   }
 
   function cloudDashboardPayload(): Record<string, unknown> {
+    const publishedTrend = (periodMonth: string) => (!summary.snapshot_month || periodMonth <= summary.snapshot_month) && periodMonth < currentMonth;
     return {
       snapshot_month: summary.snapshot_month,
       target_saving_rate: summary.target_saving_rate,
       asset_gross_value: summary.asset_gross_value,
       credit_card_net_adjustment: summary.credit_card_net_adjustment,
       net_worth: summary.net_worth,
-      monthly_trends: summary.monthly_trends,
+      investment_buy: summary.investment_buy,
+      investment_sell: summary.investment_sell,
+      investment_dividend: summary.investment_dividend,
+      monthly_trends: summary.monthly_trends.filter((item) => publishedTrend(item.period_month)),
       expense_categories: summary.expense_categories,
+      expense_year_rank: summary.expense_year_rank,
+      expense_category_trends: summary.expense_category_trends.filter((item) => publishedTrend(item.period_month)),
       asset_allocations: summary.asset_allocations,
+      investment_assets: summary.investment_assets,
+      investment_group_performances: summary.investment_group_performances,
+      investment_group_trends: summary.investment_group_trends.filter((item) => publishedTrend(item.period_month)),
+      investment_cashflow_calendar: summary.investment_cashflow_calendar,
+      asset_entry_items: summary.asset_entry_items,
+      dca_cashflows: summary.dca_cashflows,
       portfolio_targets: summary.portfolio_targets,
       spending_anomalies: summary.spending_anomalies
     };

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.9" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.28" />
 </head>
 <body class="theme-champagne privacy-on needs-binding">
   <main class="mobile-shell">
@@ -41,7 +41,7 @@
     <section class="sync-card" id="syncCard" hidden>
       <div>
         <strong id="syncCardTitle">有记录待同步</strong>
-        <span id="syncCardText">登录账号后可以同步 6 月草稿。</span>
+        <span id="syncCardText">登录账号后可以同步本月草稿。</span>
       </div>
       <button id="confirmSyncButton" type="button">同步草稿</button>
     </section>
@@ -56,7 +56,7 @@
       </div>
     </section>
 
-    <section class="view active" data-view="home">
+    <section class="view" data-view="home">
       <article class="hero-card">
         <p id="homeHeroTitle">已发布月报净资产</p>
         <strong id="homeNetWorth" class="money" data-value="CNY 0.00">••••••</strong>
@@ -72,7 +72,7 @@
         <article><span id="homeIncomeLabel">收入</span><b id="homeIncome" class="money" data-value="CNY 0.00">••••••</b></article>
         <article><span id="homeSavingLabel">储蓄</span><b id="homeSaving" class="money" data-value="CNY 0.00">••••••</b></article>
         <article><span>资产偏离</span><b id="homeDeviationCount">0 项</b></article>
-        <article><span>6 月草稿待同步</span><b id="homePendingCount">0 条</b></article>
+        <article><span id="homePendingLabel">本月草稿待同步</span><b id="homePendingCount">0 条</b></article>
       </div>
 
       <div class="quick-actions">
@@ -97,67 +97,55 @@
         </button>
         <button class="list-row" data-nav="allocation" type="button">
           <i class="tile rose"></i>
-          <span><b>6 月月底更新未完成</b><small>月底补资产和信用卡，并在电脑端生成 6 月月报后，资产和看板才会刷新。</small></span>
-          <em>进入</em>
+          <span><b id="homeAssetStatusTitle">资产看板待同步</b><small id="homeAssetStatusText">电脑端生成月报后，手机同步展示资产配置和资金趋势。</small></span>
+          <em>查看</em>
         </button>
       </div>
-    </section>
-
-    <section class="view" data-view="book">
-      <form class="book-card" id="bookForm">
-        <label class="amount-field">
-          <span>金额</span>
-          <input id="amountInput" inputmode="decimal" placeholder="0.00" required />
-        </label>
-
-        <div class="segmented" role="group" aria-label="收支类型">
-          <button class="active" data-type="expense" type="button">支出</button>
-          <button data-type="income" type="button">收入</button>
-        </div>
-
-        <label class="field category-field">
-          <span>分类</span>
-          <div>
-            <select id="categoryInput"></select>
-            <button id="addCategoryButton" type="button">新增分类</button>
-          </div>
-        </label>
-
-        <label class="field">
-          <span>日期</span>
-          <input id="dateInput" type="date" required />
-        </label>
-
-        <label class="field">
-          <span>备注</span>
-          <input id="noteInput" placeholder="可空" />
-        </label>
-
-        <button class="save-button" type="submit">保存这一笔</button>
-      </form>
 
       <div class="section-title">
-        <h2>信用卡调整</h2>
-        <span>同步到草稿箱</span>
+        <h2>看板模块</h2>
+        <span>移动版</span>
       </div>
-      <form class="credit-card-card" id="creditCardForm">
-        <div class="credit-fields">
-          <label class="field">
-            <span>本月已出账单</span>
-            <input id="cardBilledInput" inputmode="decimal" placeholder="0.00" />
+      <div class="module-grid" id="dashboardModuleGrid"></div>
+    </section>
+
+    <section class="view" data-view="dashboard">
+      <div class="section-title">
+        <h2>财务健康看板</h2>
+        <span id="dashboardDataStamp">已发布月报口径</span>
+      </div>
+      <div class="mobile-health-tabs" id="dashboardSectionTabs" aria-label="看板模块"></div>
+      <div class="mobile-range-tabs health-range-tabs" id="dashboardRangeTabs" aria-label="时间区间"></div>
+      <div class="mobile-health-content" id="dashboardHealthContent"></div>
+    </section>
+
+    <section class="view active" data-view="book">
+      <section class="book-overview">
+        <div class="book-month-row">
+          <label>
+            <span>月份</span>
+            <input id="bookMonthInput" type="month" />
           </label>
-          <label class="field">
-            <span>本月未出账单</span>
-            <input id="cardUnbilledInput" inputmode="decimal" placeholder="0.00" />
-          </label>
-          <label class="field">
-            <span>上月未出账单</span>
-            <input id="cardPreviousUnbilledInput" inputmode="decimal" placeholder="0.00" />
-          </label>
+          <button id="bookTodayButton" type="button">本月</button>
         </div>
-        <p class="credit-formula">每月最后一天更新一次即可。信用卡净调整 = -本月已出账单 - 本月未出账单 + 上月未出账单；同步后进入 6 月信用卡草稿。</p>
-        <button class="save-button" type="submit">保存信用卡调整</button>
-      </form>
+        <div class="book-total-grid">
+          <article>
+            <span>本月收入</span>
+            <strong id="bookMonthIncome" class="money" data-value="CNY 0.00">••••••</strong>
+          </article>
+          <article>
+            <span>本月支出</span>
+            <strong id="bookMonthExpense" class="money" data-value="CNY 0.00">••••••</strong>
+          </article>
+        </div>
+      </section>
+
+      <div class="section-title compact-title">
+        <h2 id="bookRecordTitle">本月记账记录</h2>
+        <span>收入支出一起看</span>
+      </div>
+      <div class="monthly-draft-list shark-style-list" id="localRecords"></div>
+      <button class="book-add-button" id="openBookDialogButton" type="button" aria-label="新增记账">+</button>
     </section>
 
     <section class="view" data-view="cashflow">
@@ -174,18 +162,11 @@
 
       <div class="chart-card" id="cashflowCategoryChart"></div>
 
-      <div class="section-title">
-        <h2>6 月记账记录</h2>
-        <span>手机草稿</span>
-      </div>
-      <div class="draft-entry-grid" id="draftEntryGrid"></div>
-      <div class="monthly-draft-list" id="localRecords"></div>
-
       <div class="list">
         <div class="list-row static" id="savingGoalRow"><i class="tile green"></i><span><b id="savingGoalTitle">储蓄目标待同步</b><small id="savingGoalText">电脑端登录同一账号后同步目标和当前储蓄率。</small></span><em id="savingGoalStatus">待同步</em></div>
-        <button class="list-row" id="mayAnomalyButton" type="button"><i class="tile gold"></i><span><b>5 月异常支出</b><small>查看 5 月已发布月报里的异常明细。</small></span><em>查看</em></button>
+        <button class="list-row" id="mayAnomalyButton" type="button"><i class="tile gold"></i><span><b>异常支出</b><small>查看已发布月报里的异常明细。</small></span><em>查看</em></button>
         <div class="anomaly-detail" id="mayAnomalyDetail" hidden>
-          <strong>暂无 5 月异常支出明细</strong>
+          <strong>暂无异常支出明细</strong>
           <span>后续同步电脑端已发布月报后，这里只显示电脑端确认过的异常。</span>
         </div>
       </div>
@@ -196,7 +177,7 @@
       <article class="wallet-hero">
         <p>已发布月报资产配置</p>
         <strong class="money" data-value="CNY 244,229.82">••••••</strong>
-        <small class="data-stamp">截至 2026 年 5 月月报；6 月资产未更新</small>
+        <small class="data-stamp">电脑端登录同一账号后同步已发布月报。</small>
         <div class="ring" id="assetRing" aria-hidden="true"></div>
         <div class="allocation-legend" id="allocationLegend"></div>
       </article>
@@ -206,15 +187,58 @@
     </section>
 
     <nav class="bottom-nav" aria-label="底部导航">
-      <button class="active" data-nav="home" type="button">首页</button>
-      <button data-nav="book" type="button">记账</button>
-      <button data-nav="cashflow" type="button">收支</button>
-      <button data-nav="allocation" type="button">资产</button>
+      <button class="active" data-nav="book" type="button">记账</button>
+      <button data-nav="dashboard" type="button">财务健康</button>
     </nav>
   </main>
 
+  <dialog id="bookDialog" class="book-dialog">
+    <form class="book-card" id="bookForm">
+      <div class="book-card-header">
+        <div>
+          <span id="bookModeLabel">新增记录</span>
+          <strong id="bookMonthTitle">本月记账</strong>
+        </div>
+        <button id="cancelEditButton" type="button" hidden>取消修改</button>
+      </div>
+
+      <label class="amount-field">
+        <span>金额</span>
+        <input id="amountInput" inputmode="decimal" placeholder="0.00" required />
+      </label>
+
+      <div class="segmented" role="group" aria-label="收支类型">
+        <button class="active" data-type="expense" type="button">支出</button>
+        <button data-type="income" type="button">收入</button>
+      </div>
+
+      <label class="field category-field">
+        <span>分类</span>
+        <div>
+          <select id="categoryInput"></select>
+          <button id="addCategoryButton" type="button">新增分类</button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span>日期</span>
+        <input id="dateInput" type="date" required />
+      </label>
+
+      <label class="field">
+        <span>备注</span>
+        <input id="noteInput" placeholder="可空" />
+      </label>
+
+      <div class="dialog-actions">
+        <button id="closeBookDialogButton" type="button">取消</button>
+        <button class="save-button" type="submit">保存这一笔</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="syncDialog">
-    <h2>同步 6 月草稿</h2>
+    <h2 id="syncDialogTitle">同步本月草稿</h2>
     <div class="sync-dialog-body" id="syncDialogText">手机记录会先进入草稿箱，电脑端确认后再入库。</div>
     <div class="dialog-actions">
       <button id="closeDialogButton" type="button">稍后</button>
@@ -319,6 +343,6 @@
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.3.9" type="module"></script>
+  <script src="./app.js?mobileVersion=0.3.28" type="module"></script>
 </body>
 </html>

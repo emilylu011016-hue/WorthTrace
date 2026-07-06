@@ -5,13 +5,14 @@
 ## 当前状态
 
 - 这是当前唯一维护的最新版源码目录。
-- 当前正式版本：2.7.5。
+- 当前正式版本：2.7.7。
 - 桌面 App 使用 Tauri + React + TypeScript + SQLite。
 - 已包含月底财务信息更新、财务健康看板、内容模板设置。
 - 财务健康看板、首页、月底更新共用同一套香槟 / 鼠尾草 / 石墨主题。
 - SQLite schema 和初始 seed 位于 `src-tauri/migrations/`。
 - `finance-core` 包含储蓄率、信用卡调整、资产配置、XIRR 等核心计算。
 - 当前以前端 `src/`、样式 `src/styles/`、后端 `src-tauri/src/` 为正式来源；数据库、备份和构建产物不进入 GitHub。
+- 平台、账号、云同步关系见 `docs/platforms_and_accounts.md`。
 
 ## 运行前置
 

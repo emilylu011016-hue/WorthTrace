@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.9";
+const MOBILE_APP_VERSION = "0.3.28";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -20,7 +20,11 @@ const baseCategories = {
   expense: ["餐饮", "交通", "购物", "居住", "日用", "医疗", "娱乐", "旅行", "人情", "学习", "运动", "宠物", "保险", "税费", "其他支出"],
   income: ["工资", "奖金", "副业", "投资收益", "分红", "利息", "报销", "退款", "红包", "租金", "其他收入"]
 };
+const healthSections = ["总览", "收支储蓄", "支出结构", "资产配置", "投资表现"];
+const dashboardRanges = ["本月", "近 3 个月", "半年", "今年以来", "投资至今"];
+const investmentGroupOrder = ["全球资产", "红利低波", "债券", "黄金", "A股权益", "其他"];
 
+await resetRuntimeCacheIfRequested();
 await resetLegacyLocalData();
 resetBindingFromUrlIfNeeded();
 
@@ -40,14 +44,18 @@ const icons = {
 };
 
 const state = {
-  view: "home",
+  view: "book",
   type: "expense",
-  draftSection: "",
+  draftSection: "all",
   records: [],
   online: navigator.onLine,
   privacy: true,
   theme: settings.theme,
-  assetRange: "ytd"
+  assetRange: "ytd",
+  dashboardSection: "总览",
+  dashboardRange: "今年以来",
+  bookMonth: currentMonthKey(),
+  editingLocalId: ""
 };
 
 const pageTitle = document.querySelector("#pageTitle");
@@ -68,11 +76,19 @@ const dateInput = document.querySelector("#dateInput");
 const amountInput = document.querySelector("#amountInput");
 const categoryInput = document.querySelector("#categoryInput");
 const noteInput = document.querySelector("#noteInput");
-const creditCardForm = document.querySelector("#creditCardForm");
-const cardBilledInput = document.querySelector("#cardBilledInput");
-const cardUnbilledInput = document.querySelector("#cardUnbilledInput");
-const cardPreviousUnbilledInput = document.querySelector("#cardPreviousUnbilledInput");
+const bookMonthInput = document.querySelector("#bookMonthInput");
+const bookTodayButton = document.querySelector("#bookTodayButton");
+const bookMonthIncome = document.querySelector("#bookMonthIncome");
+const bookMonthExpense = document.querySelector("#bookMonthExpense");
+const openBookDialogButton = document.querySelector("#openBookDialogButton");
+const bookDialog = document.querySelector("#bookDialog");
+const bookModeLabel = document.querySelector("#bookModeLabel");
+const bookMonthTitle = document.querySelector("#bookMonthTitle");
+const bookRecordTitle = document.querySelector("#bookRecordTitle");
+const cancelEditButton = document.querySelector("#cancelEditButton");
+const closeBookDialogButton = document.querySelector("#closeBookDialogButton");
 const syncDialog = document.querySelector("#syncDialog");
+const syncDialogTitle = document.querySelector("#syncDialogTitle");
 const syncDialogText = document.querySelector("#syncDialogText");
 const pairDialog = document.querySelector("#pairDialog");
 const pairForm = document.querySelector("#pairForm");
@@ -125,6 +141,11 @@ const assetRing = document.querySelector("#assetRing");
 const allocationLegend = document.querySelector("#allocationLegend");
 const assetRangeTabs = document.querySelector("#assetRangeTabs");
 const assetRangeSummary = document.querySelector("#assetRangeSummary");
+const dashboardModuleGrid = document.querySelector("#dashboardModuleGrid");
+const dashboardSectionTabs = document.querySelector("#dashboardSectionTabs");
+const dashboardRangeTabs = document.querySelector("#dashboardRangeTabs");
+const dashboardHealthContent = document.querySelector("#dashboardHealthContent");
+const dashboardDataStamp = document.querySelector("#dashboardDataStamp");
 let toastTimer = null;
 let pendingCategoryType = "expense";
 
@@ -138,7 +159,8 @@ const assetRanges = [
   { key: "1y", label: "一年", months: 12 }
 ];
 
-dateInput.value = new Date().toISOString().slice(0, 10);
+dateInput.value = todayKey();
+if (bookMonthInput) bookMonthInput.value = state.bookMonth;
 applyTheme();
 renderCategoryOptions();
 void loadMobileDashboardSnapshot();
@@ -167,12 +189,44 @@ document.querySelectorAll(".theme-choice").forEach((button) => {
     showToast(`已切换为${button.textContent.trim()}风格`);
   });
 });
-assetRangeTabs.addEventListener("click", (event) => {
+assetRangeTabs?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-asset-range]");
   if (!button) return;
   state.assetRange = button.dataset.assetRange;
   renderAssetDashboard();
   render();
+});
+dashboardSectionTabs?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-dashboard-section]");
+  if (!button) return;
+  state.dashboardSection = button.dataset.dashboardSection;
+  render();
+});
+dashboardRangeTabs?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-dashboard-range]");
+  if (!button) return;
+  state.dashboardRange = button.dataset.dashboardRange;
+  render();
+});
+
+bookMonthInput?.addEventListener("change", () => {
+  state.bookMonth = bookMonthInput.value || currentMonthKey();
+  state.draftSection = "all";
+  render();
+});
+
+bookTodayButton?.addEventListener("click", () => {
+  state.bookMonth = currentMonthKey();
+  if (bookMonthInput) bookMonthInput.value = state.bookMonth;
+  state.draftSection = "all";
+  render();
+});
+
+openBookDialogButton?.addEventListener("click", () => {
+  clearBookEditForm();
+  setBookType("expense");
+  render();
+  openBookDialog();
 });
 
 privacyButton.addEventListener("click", () => {
@@ -239,11 +293,15 @@ bookForm.addEventListener("submit", async (event) => {
     return;
   }
   const now = new Date().toISOString();
+  const editingRecord = state.editingLocalId
+    ? state.records.find((item) => item.local_id === state.editingLocalId)
+    : null;
   const record = {
-    local_id: createLocalId("txn"),
-    server_id: null,
+    ...(editingRecord || {}),
+    local_id: editingRecord?.local_id || createLocalId("txn"),
+    server_id: editingRecord?.server_id || null,
     record_kind: "transaction",
-    operation: "create",
+    operation: editingRecord ? "update" : "create",
     sync_status: "pending",
     transaction_type: state.type,
     amount,
@@ -251,51 +309,30 @@ bookForm.addEventListener("submit", async (event) => {
     category: categoryInput.value,
     transaction_date: dateInput.value,
     note: noteInput.value.trim(),
-    created_at: now,
+    created_at: editingRecord?.created_at || now,
     updated_at: now
   };
-  state.records.unshift(record);
+  state.records = [record, ...state.records.filter((item) => item.local_id !== record.local_id)];
   await putRecord(record);
   amountInput.value = "";
   noteInput.value = "";
+  dateInput.value = todayKey();
+  state.editingLocalId = "";
   render();
   void reportMobileStatus();
-  navigate("home");
+  closeModal(bookDialog);
+  navigate("book");
 });
 
-creditCardForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const currentBilledAmount = Number(cardBilledInput.value || 0);
-  const currentUnbilledAmount = Number(cardUnbilledInput.value || 0);
-  const previousUnbilledAmount = Number(cardPreviousUnbilledInput.value || 0);
-  if (![currentBilledAmount, currentUnbilledAmount, previousUnbilledAmount].every(Number.isFinite)) {
-    cardBilledInput.focus();
-    return;
-  }
-  const now = new Date().toISOString();
-  const periodMonth = currentMonthKey();
-  const record = {
-    local_id: createLocalId("card"),
-    server_id: null,
-    record_kind: "credit_card_adjustment",
-    operation: "create",
-    sync_status: "pending",
-    period_month: periodMonth,
-    current_billed_amount: Math.max(0, currentBilledAmount),
-    current_unbilled_amount: Math.max(0, currentUnbilledAmount),
-    previous_unbilled_amount: Math.max(0, previousUnbilledAmount),
-    net_adjustment: -Math.max(0, currentBilledAmount) - Math.max(0, currentUnbilledAmount) + Math.max(0, previousUnbilledAmount),
-    created_at: now,
-    updated_at: now
-  };
-  state.records.unshift(record);
-  await putRecord(record);
-  cardBilledInput.value = "";
-  cardUnbilledInput.value = "";
-  cardPreviousUnbilledInput.value = "";
+cancelEditButton.addEventListener("click", () => {
+  clearBookEditForm();
   render();
-  void reportMobileStatus();
-  showToast("已保存 6 月信用卡调整草稿");
+  closeModal(bookDialog);
+});
+closeBookDialogButton.addEventListener("click", () => {
+  clearBookEditForm();
+  render();
+  closeModal(bookDialog);
 });
 
 document.querySelector("#syncButton").addEventListener("click", showSyncDialog);
@@ -344,11 +381,21 @@ pairForm.addEventListener("submit", (event) => {
 mayAnomalyButton.addEventListener("click", () => {
   mayAnomalyDetail.hidden = !mayAnomalyDetail.hidden;
 });
-draftEntryGrid.addEventListener("click", (event) => {
+draftEntryGrid?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-draft-section]");
   if (!button) return;
-  state.draftSection = state.draftSection === button.dataset.draftSection ? "" : button.dataset.draftSection;
+  state.draftSection = state.draftSection === button.dataset.draftSection ? "all" : button.dataset.draftSection;
   renderLocalRecords();
+});
+localRecords.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-edit-record]");
+  if (!button) return;
+  startEditingRecord(button.dataset.editRecord);
+});
+dashboardHealthContent?.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-detail-toast]");
+  if (!target) return;
+  showToast(target.dataset.detailToast);
 });
 document.querySelector("#mockSyncButton").addEventListener("click", async () => {
   await syncPendingToDesktop();
@@ -370,12 +417,26 @@ if ("serviceWorker" in navigator) {
 }
 
 state.records = await readRecords();
+navigate(state.view);
 render();
 await pairFromUrlIfNeeded();
 void reportMobileStatus();
 
 function navigate(view) {
+  const dashboardAliases = {
+    home: "总览",
+    cashflow: "收支储蓄",
+    allocation: "资产配置"
+  };
+  if (dashboardAliases[view]) {
+    state.dashboardSection = dashboardAliases[view];
+    view = "dashboard";
+  }
+  if (view === "monthEnd") view = "book";
   state.view = view;
+  if (view === "book" && !state.editingLocalId) {
+    dateInput.value = todayKey();
+  }
   document.querySelectorAll(".view").forEach((section) => {
     section.classList.toggle("active", section.dataset.view === view);
   });
@@ -383,11 +444,9 @@ function navigate(view) {
     button.classList.toggle("active", button.dataset.nav === view);
   });
   pageTitle.textContent = {
-    home: "今天",
     book: "记一笔",
-    cashflow: "收支",
-    allocation: "资产"
-  }[view] || "今天";
+    dashboard: "财务健康看板"
+  }[view] || "记一笔";
 }
 
 function setBookType(type) {
@@ -409,21 +468,24 @@ function renderCategoryOptions(selected = categoryInput.value) {
 }
 
 function pendingRecords() {
-  return state.records.filter((record) => record.sync_status !== "synced");
+  return state.records.filter((record) => record.sync_status !== "synced" && (record.record_kind || "transaction") === "transaction");
 }
 
 function render() {
   const pending = pendingRecords();
   const pendingSummary = summarizeRecords(pending);
+  const draftMonth = activeDraftMonthKey();
+  const draftMonthLabel = formatMonthShortLabel(draftMonth);
   updateAccessState();
   syncCount.textContent = String(pending.length);
   homePendingCount.textContent = `${pending.length} 条`;
+  setText("#homePendingLabel", `${draftMonthLabel}草稿待同步`);
   syncDot.classList.toggle("offline", !state.online);
   offlineBanner.hidden = state.online;
   syncCard.hidden = pending.length === 0;
-  syncCardTitle.textContent = pending.length ? `有 ${pending.length} 条 6 月草稿待同步` : "没有待同步记录";
+  syncCardTitle.textContent = pending.length ? `有 ${pending.length} 条 ${draftMonthLabel}草稿待同步` : "没有待同步记录";
   syncCardText.textContent = state.online
-    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔，信用卡 ${pendingSummary.creditCardCount} 条。同步后进入云端草稿箱。`
+    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔。同步后进入云端草稿箱。`
     : "离线记录会先保存在手机。恢复网络后同步到云端草稿箱。";
   privacyButton.innerHTML = state.privacy ? icons.eyeOff : icons.eye;
   privacyButton.setAttribute("aria-label", state.privacy ? "显示金额" : "隐藏金额");
@@ -434,29 +496,36 @@ function render() {
   securityButton.hidden = !accountId;
   renderPairCard();
   document.body.classList.toggle("privacy-on", state.privacy);
+  renderBookMeta();
   renderSyncedDashboard();
   renderMayAnomalies();
+  renderDashboardModules();
+  renderHealthDashboard();
   document.querySelectorAll(".money").forEach((node) => {
+    if (node.closest("[data-view='book']")) return;
     node.textContent = state.privacy ? "••••••" : node.dataset.value;
   });
   document.querySelectorAll(".percent").forEach((node) => {
+    if (node.closest("[data-view='book']")) return;
     node.textContent = state.privacy ? "••••••" : node.dataset.value;
   });
   renderLocalRecords();
 }
 
 function renderLocalRecords() {
-  const month = currentMonthKey();
+  const month = activeDraftMonthKey();
+  const monthLabel = formatMonthShortLabel(month);
   const monthTransactions = state.records.filter((record) => (record.record_kind || "transaction") === "transaction" && String(record.transaction_date || "").startsWith(month));
   const monthIncome = monthTransactions.filter((record) => record.transaction_type === "income");
   const monthExpense = monthTransactions.filter((record) => record.transaction_type === "expense");
   const monthCards = state.records.filter((record) => record.record_kind === "credit_card_adjustment" && (record.period_month || "").startsWith(month));
   renderDraftEntryGrid(monthIncome, monthExpense, monthCards);
+  renderBookTotals(monthIncome, monthExpense);
   if (!monthTransactions.length && !monthCards.length) {
     localRecords.innerHTML = `
       <div class="list-row static">
         <i class="tile gold"></i>
-        <span><b>6 月还没有手机草稿</b><small>先记一笔收入、支出，或保存信用卡调整。</small></span>
+        <span><b>${monthLabel}还没有记账明细</b><small>可切换月份查看过往记录，或先记一笔收入/支出。</small></span>
         <em>空</em>
       </div>
     `;
@@ -469,58 +538,73 @@ function renderLocalRecords() {
   } else if (state.draftSection === "credit" && monthCards.length) {
     localRecords.innerHTML = renderCreditCardDraftGroup(monthCards);
   } else {
-    localRecords.innerHTML = `<div class="draft-empty-card">选择上方收入、支出${monthCards.length ? "或信用卡" : ""}，查看 6 月草稿明细。</div>`;
+    localRecords.innerHTML = renderAllDraftRecords(monthTransactions, monthCards);
   }
 }
 
 function showSyncDialog() {
   const pending = pendingRecords();
   const summary = summarizeRecords(pending);
+  const draftMonthLabel = formatMonthShortLabel(activeDraftMonthKey());
+  const publishedMonthLabel = formatMonthShortLabel(mobileDashboardSnapshot.snapshotMonth);
+  if (syncDialogTitle) syncDialogTitle.textContent = `同步 ${draftMonthLabel}草稿`;
   syncDialogText.innerHTML = pending.length
     ? `
       <div class="sync-summary-grid">
         <article><span>收入</span><strong>${summary.incomeCount} 笔</strong><small>${formatPlainMoney(summary.incomeAmount)}</small></article>
         <article><span>支出</span><strong>${summary.expenseCount} 笔</strong><small>${formatPlainMoney(summary.expenseAmount)}</small></article>
-        <article><span>信用卡</span><strong>${summary.creditCardCount} 条</strong><small>净调整 ${formatPlainMoney(summary.creditCardNetAdjustment)}</small></article>
       </div>
       <div class="sync-impact-list">
         <section>
           <b>同步后会影响</b>
-          <p>6 月收支确认和信用卡调整草稿。</p>
+          <p>${draftMonthLabel}手机记账草稿。</p>
         </section>
         <section>
           <b>暂不影响</b>
-          <p>5 月首页看板、资产总额、净资产、资产配置、正式健康看板和月报。</p>
+          <p>${publishedMonthLabel}首页看板、资产总额、净资产、资产配置、正式健康看板和月报。</p>
         </section>
         <section>
           <b>下一步</b>
-          <p>电脑端确认 6 月收支、补资产和信用卡，并生成 6 月月报后，才刷新手机看板。</p>
+          <p>电脑端确认 ${draftMonthLabel}收支并发布财务健康看板后，手机看板刷新。</p>
         </section>
       </div>
     `
     : `
       <div class="sync-empty">
-        <strong>当前没有待同步的 6 月草稿</strong>
-        <span>新增收入、支出或信用卡调整后，这里会显示本次同步内容。</span>
+        <strong>当前没有待同步的 ${draftMonthLabel}草稿</strong>
+        <span>新增收入或支出后，这里会显示本次同步内容。</span>
       </div>
     `;
   openModal(syncDialog);
 }
 
 function openModal(dialog) {
-  if (typeof dialog.showModal === "function") {
-    dialog.showModal();
-    return;
+  if (!dialog) return;
+  try {
+    if (typeof dialog.showModal === "function" && !dialog.open) {
+      dialog.showModal();
+      dialog.classList.add("modal-open");
+      return;
+    }
+  } catch {
+    // Some mobile browsers expose dialog.showModal but fail to display it reliably.
   }
   dialog.setAttribute("open", "");
+  dialog.classList.add("modal-open");
 }
 
 function closeModal(dialog) {
-  if (typeof dialog.close === "function") {
-    dialog.close();
-    return;
+  if (!dialog) return;
+  try {
+    if (typeof dialog.close === "function" && dialog.open) {
+      dialog.close();
+    } else {
+      dialog.removeAttribute("open");
+    }
+  } catch {
+    dialog.removeAttribute("open");
   }
-  dialog.removeAttribute("open");
+  dialog.classList.remove("modal-open");
 }
 
 async function reportMobileStatus() {
@@ -945,7 +1029,17 @@ async function cloudAuth(mode) {
 }
 
 function cloudDraftFromRecord(record) {
-  const payload = { ...record };
+  const payload = record.payload_json && typeof record.payload_json === "object"
+    ? {
+      ...record.payload_json,
+      local_id: record.local_id,
+      record_kind: record.record_kind || "transaction",
+      operation: record.operation,
+      sync_status: record.sync_status,
+      period_month: record.period_month,
+      updated_at: record.updated_at
+    }
+    : { ...record };
   if (record.record_kind === "credit_card_adjustment") {
     payload.net_adjustment = record.net_adjustment;
   }
@@ -1127,7 +1221,7 @@ function summarizeRecords(records) {
 
 function renderTransactionGroup(title, rows, type) {
   const total = rows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
-  const statusText = rows.length ? `${rows.length} 笔 · 合计 ${state.privacy ? "••••••" : formatPlainMoney(total)}` : "0 笔";
+  const statusText = rows.length ? `${rows.length} 笔 · 合计 ${formatPlainMoney(total)}` : "0 笔";
   return `
     <section class="draft-group">
       <header>
@@ -1143,10 +1237,12 @@ function renderTransactionGroup(title, rows, type) {
 }
 
 function renderDraftEntryGrid(incomeRows, expenseRows, cardRows) {
+  if (!draftEntryGrid) return;
   const incomeTotal = incomeRows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
   const expenseTotal = expenseRows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
   const cardTotal = cardRows.reduce((sum, record) => sum + (Number(record.net_adjustment) || 0), 0);
   const cards = [
+    draftEntryButton("all", "明细", incomeRows.length + expenseRows.length, incomeTotal - expenseTotal),
     draftEntryButton("income", "收入", incomeRows.length, incomeTotal),
     draftEntryButton("expense", "支出", expenseRows.length, expenseTotal)
   ];
@@ -1162,7 +1258,7 @@ function draftEntryButton(section, label, count, amount) {
     <button class="draft-entry${active}" data-draft-section="${section}" type="button">
       <span>${label}</span>
       <strong>${count} ${section === "credit" ? "条" : "笔"}</strong>
-      <small>${state.privacy ? "••••••" : formatPlainMoney(amount)}</small>
+      <small>${formatPlainMoney(amount)}</small>
     </button>
   `;
 }
@@ -1170,13 +1266,82 @@ function draftEntryButton(section, label, count, amount) {
 function renderTransactionRow(record, type) {
   const sign = type === "income" ? "+" : "-";
   const status = record.sync_status === "synced" ? "已同步" : "待同步";
+  const icon = categoryIcon(record.category, type);
+  const active = state.editingLocalId === record.local_id ? " editing" : "";
   return `
-    <div class="draft-row">
-      <span>${escapeHtml(record.transaction_date || "")}</span>
-      <span>${escapeHtml(record.category || "未分类")}<small>${escapeHtml(status)}</small></span>
-      <span>${sign}${state.privacy ? "••••••" : formatPlainMoney(record.amount).replace("CNY ", "")}</span>
-    </div>
+    <button class="draft-row draft-row-button${active}" data-edit-record="${escapeHtml(record.local_id)}" type="button">
+      <span class="draft-date">${formatDayLabel(record.transaction_date || "")}</span>
+      <span class="draft-category"><i>${icon}</i><b>${escapeHtml(record.note || record.category || "未分类")}</b><small>${escapeHtml(record.category || "未分类")} · ${escapeHtml(status)}</small></span>
+      <span>${sign}${formatPlainMoney(record.amount).replace("CNY ", "")}</span>
+    </button>
   `;
+}
+
+function renderAllDraftRecords(transactionRows, cardRows) {
+  const rows = [...transactionRows].sort((a, b) => String(b.transaction_date || "").localeCompare(String(a.transaction_date || "")));
+  const transactionHtml = rows.length
+    ? renderTransactionsByDate(rows)
+    : "";
+  return `
+    <section class="draft-group">
+      <header>
+        <strong>明细</strong>
+        <span>${rows.length} 笔 · 收入支出合并</span>
+      </header>
+      <div class="draft-table detailed">
+        ${transactionHtml || `<div class="draft-empty">本月暂无收入/支出记录</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderTransactionsByDate(rows) {
+  const groups = rows.reduce((map, record) => {
+    const date = record.transaction_date || "";
+    if (!map.has(date)) map.set(date, []);
+    map.get(date).push(record);
+    return map;
+  }, new Map());
+  return Array.from(groups.entries()).map(([date, records]) => {
+    const summary = summarizeRecords(records);
+    const parts = [];
+    if (summary.incomeAmount) parts.push(`收入 ${formatPlainMoney(summary.incomeAmount).replace("CNY ", "")}`);
+    if (summary.expenseAmount) parts.push(`支出 ${formatPlainMoney(summary.expenseAmount).replace("CNY ", "")}`);
+    return `
+      <section class="book-day-group">
+        <header>
+          <span>${formatDateHeader(date)}</span>
+          <em>${parts.join(" · ") || `${records.length} 笔`}</em>
+        </header>
+        ${records.map((record) => renderTransactionRow(record, record.transaction_type)).join("")}
+      </section>
+    `;
+  }).join("");
+}
+
+function renderBookTotals(incomeRows, expenseRows) {
+  const incomeTotal = incomeRows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
+  const expenseTotal = expenseRows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
+  if (bookMonthIncome) {
+    bookMonthIncome.dataset.value = formatPlainMoney(incomeTotal);
+    bookMonthIncome.textContent = bookMonthIncome.dataset.value;
+  }
+  if (bookMonthExpense) {
+    bookMonthExpense.dataset.value = formatPlainMoney(expenseTotal);
+    bookMonthExpense.textContent = bookMonthExpense.dataset.value;
+  }
+  if (bookMonthInput && bookMonthInput.value !== state.bookMonth) {
+    bookMonthInput.value = state.bookMonth;
+  }
+}
+
+function formatDateHeader(value) {
+  if (!value || value.length < 10) return "未填日期";
+  const date = new Date(`${value}T00:00:00`);
+  const weekday = Number.isNaN(date.getTime())
+    ? ""
+    : `星期${"日一二三四五六"[date.getDay()]}`;
+  return `${Number(value.slice(5, 7))}月${Number(value.slice(8, 10))}日${weekday ? ` ${weekday}` : ""}`;
 }
 
 function renderCreditCardDraftGroup(rows) {
@@ -1203,7 +1368,89 @@ function renderCreditCardDraftGroup(rows) {
 }
 
 function currentMonthKey() {
-  return new Date().toISOString().slice(0, 7);
+  return todayKey().slice(0, 7);
+}
+
+function todayKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function activeDraftMonthKey() {
+  return state.bookMonth || currentMonthKey();
+}
+
+function nextMonthKey(monthKey) {
+  if (!monthKey || monthKey.length < 7) return currentMonthKey();
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return currentMonthKey();
+  const date = new Date(year, month, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+async function resetRuntimeCacheIfRequested() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("resetCache") !== "1" || params.get("cacheResetDone") === MOBILE_APP_VERSION) return;
+  try {
+    if ("serviceWorker" in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch {
+    // Cache reset is best-effort; versioned asset URLs still force a fresh fetch.
+  }
+  params.set("cacheResetDone", MOBILE_APP_VERSION);
+  window.location.replace(`${window.location.pathname}?${params.toString()}`);
+  await new Promise(() => {});
+}
+
+function previousMonthKey(monthKey = currentMonthKey()) {
+  if (!monthKey || monthKey.length < 7) return "";
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return "";
+  const date = new Date(year, month - 2, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isPublishedTrendMonth(periodMonth, snapshotMonth) {
+  return Boolean(periodMonth)
+    && periodMonth < currentMonthKey()
+    && (!snapshotMonth || periodMonth <= snapshotMonth);
+}
+
+function resolvePublishedSnapshotMonth(data, snapshotMonthOverride = "") {
+  const requestedMonth = snapshotMonthOverride || data.snapshot_month || "";
+  if (requestedMonth && requestedMonth < currentMonthKey()) return requestedMonth;
+  const trendMonths = Array.isArray(data.monthly_trends)
+    ? data.monthly_trends
+      .map((item) => item.period_month || "")
+      .filter((periodMonth) => periodMonth && periodMonth < currentMonthKey())
+      .sort((a, b) => a.localeCompare(b))
+    : [];
+  return trendMonths[trendMonths.length - 1] || previousMonthKey();
+}
+
+async function fetchDesktopDashboardSnapshot() {
+  const response = await fetch(`${syncEndpoint}/mobile-sync/dashboard`);
+  if (!response.ok) throw new Error(await response.text());
+  const data = await response.json();
+  return normalizeDashboardSnapshot(data);
+}
+
+function renderLoadedDashboardSnapshot(snapshot) {
+  mobileDashboardSnapshot = snapshot;
+  renderAssetDashboard();
+  renderTargetDeviation();
+  render();
 }
 
 async function loadMobileDashboardSnapshot() {
@@ -1220,48 +1467,46 @@ async function loadMobileDashboardSnapshot() {
       if (!response.ok) throw new Error(await response.text());
       const rows = await response.json();
       if (Array.isArray(rows) && rows[0]?.payload_json) {
-        mobileDashboardSnapshot = normalizeDashboardSnapshot(rows[0].payload_json);
-        renderAssetDashboard();
-        renderTargetDeviation();
-        render();
+        const cloudSnapshot = normalizeDashboardSnapshot(rows[0].payload_json, rows[0].snapshot_month || "");
+        try {
+          const desktopSnapshot = await fetchDesktopDashboardSnapshot();
+          renderLoadedDashboardSnapshot(desktopSnapshot.snapshotMonth ? desktopSnapshot : cloudSnapshot);
+        } catch {
+          renderLoadedDashboardSnapshot(cloudSnapshot);
+        }
         return;
       }
     } catch {
-      mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
-      renderAssetDashboard();
-      renderTargetDeviation();
-      render();
+      try {
+        renderLoadedDashboardSnapshot(await fetchDesktopDashboardSnapshot());
+      } catch {
+        renderLoadedDashboardSnapshot(makeEmptyDashboardSnapshot());
+      }
       return;
     }
   }
   if (!canUseDesktopData()) {
-    mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
-    renderAssetDashboard();
-    renderTargetDeviation();
-    render();
+    renderLoadedDashboardSnapshot(makeEmptyDashboardSnapshot());
     return;
   }
   try {
-    const response = await fetch(`${syncEndpoint}/mobile-sync/dashboard`);
-    if (!response.ok) throw new Error(await response.text());
-    const data = await response.json();
-    mobileDashboardSnapshot = normalizeDashboardSnapshot(data);
-    renderAssetDashboard();
-    renderTargetDeviation();
-    render();
+    renderLoadedDashboardSnapshot(await fetchDesktopDashboardSnapshot());
   } catch {
-    mobileDashboardSnapshot = makeEmptyDashboardSnapshot();
-    renderAssetDashboard();
-    renderTargetDeviation();
-    render();
+    renderLoadedDashboardSnapshot(makeEmptyDashboardSnapshot());
   }
 }
 
-function normalizeDashboardSnapshot(data) {
+function normalizeDashboardSnapshot(data, snapshotMonthOverride = "") {
+  const snapshotMonth = resolvePublishedSnapshotMonth(data, snapshotMonthOverride);
   return {
-    snapshotMonth: data.snapshot_month || "",
+    snapshotMonth,
     targetSavingRate: Number(data.target_saving_rate) || 0,
+    assetGrossValue: Number(data.asset_gross_value) || 0,
+    creditCardNetAdjustment: Number(data.credit_card_net_adjustment) || 0,
     netWorth: Number(data.net_worth) || 0,
+    investmentBuy: Number(data.investment_buy) || 0,
+    investmentSell: Number(data.investment_sell) || 0,
+    investmentDividend: Number(data.investment_dividend) || 0,
     assetAllocations: Array.isArray(data.asset_allocations)
       ? data.asset_allocations.map((item) => ({
         category: item.category,
@@ -1286,9 +1531,14 @@ function normalizeDashboardSnapshot(data) {
         savingAmount: Number(item.saving_amount) || 0,
         netWorth: Number(item.net_worth) || 0,
         savingRate: Number(item.saving_rate) || 0,
+        investmentBuy: Number(item.investment_buy) || 0,
+        investmentSell: Number(item.investment_sell) || 0,
+        investmentDividend: Number(item.investment_dividend) || 0,
         investmentGain: Number(item.investment_gain) || 0,
         monthlyXirr: item.monthly_xirr === null || item.monthly_xirr === undefined ? null : Number(item.monthly_xirr)
       }))
+        .filter((item) => isPublishedTrendMonth(item.periodMonth, snapshotMonth))
+        .sort((a, b) => a.periodMonth.localeCompare(b.periodMonth))
       : [],
     expenseCategories: Array.isArray(data.expense_categories)
       ? data.expense_categories.map((item) => ({
@@ -1296,6 +1546,21 @@ function normalizeDashboardSnapshot(data) {
         amount: Number(item.amount) || 0,
         percent: Number(item.percent) || 0
       }))
+      : [],
+    expenseYearRank: Array.isArray(data.expense_year_rank)
+      ? data.expense_year_rank.map((item) => ({
+        category: item.category || "未分类",
+        amount: Number(item.amount) || 0,
+        percent: Number(item.percent) || 0
+      }))
+      : [],
+    expenseCategoryTrends: Array.isArray(data.expense_category_trends)
+      ? data.expense_category_trends.map((item) => ({
+        periodMonth: item.period_month || "",
+        category: item.category || "未分类",
+        amount: Number(item.amount) || 0
+      }))
+        .filter((item) => isPublishedTrendMonth(item.periodMonth, snapshotMonth))
       : [],
     spendingAnomalies: Array.isArray(data.spending_anomalies)
       ? data.spending_anomalies.map((item) => ({
@@ -1305,6 +1570,43 @@ function normalizeDashboardSnapshot(data) {
         note: item.note || "",
         reason: item.reason || ""
       }))
+      : [],
+    investmentAssets: Array.isArray(data.investment_assets)
+      ? data.investment_assets.map((item) => ({
+        assetName: item.asset_name || "未命名资产",
+        beginningValue: Number(item.beginning_value) || 0,
+        endingValue: Number(item.ending_value) || 0,
+        buy: Number(item.buy) || 0,
+        sell: Number(item.sell) || 0,
+        dividend: Number(item.dividend) || 0,
+        gain: Number(item.gain) || 0,
+        periodReturn: item.period_return === null || item.period_return === undefined ? null : Number(item.period_return),
+        monthlyXirr: item.monthly_xirr === null || item.monthly_xirr === undefined ? null : Number(item.monthly_xirr)
+      }))
+      : [],
+    investmentGroupPerformances: Array.isArray(data.investment_group_performances)
+      ? data.investment_group_performances.map(normalizeInvestmentGroupPerformance)
+      : [],
+    investmentGroupTrends: Array.isArray(data.investment_group_trends)
+      ? data.investment_group_trends.map((item) => ({
+        ...normalizeInvestmentGroupPerformance(item),
+        periodMonth: item.period_month || ""
+      }))
+        .filter((item) => isPublishedTrendMonth(item.periodMonth, snapshotMonth))
+      : [],
+    investmentCashflowCalendar: Array.isArray(data.investment_cashflow_calendar)
+      ? data.investment_cashflow_calendar.map((item) => ({
+        flowDate: item.flow_date || "",
+        assetName: item.asset_name || "未命名资产",
+        flowType: item.flow_type || "",
+        amount: Number(item.amount) || 0
+      }))
+      : [],
+    assetEntryItems: Array.isArray(data.asset_entry_items)
+      ? data.asset_entry_items.map(normalizeAssetEntryItem)
+      : [],
+    dcaCashflows: Array.isArray(data.dca_cashflows)
+      ? data.dca_cashflows.map(normalizeDcaCashflow)
       : []
   };
 }
@@ -1313,12 +1615,91 @@ function makeEmptyDashboardSnapshot() {
   return {
     snapshotMonth: "",
     targetSavingRate: 0,
+    assetGrossValue: 0,
+    creditCardNetAdjustment: 0,
     netWorth: 0,
+    investmentBuy: 0,
+    investmentSell: 0,
+    investmentDividend: 0,
     assetAllocations: [],
     allocationTargets: [],
     monthlyTrends: [],
     expenseCategories: [],
-    spendingAnomalies: []
+    expenseYearRank: [],
+    expenseCategoryTrends: [],
+    spendingAnomalies: [],
+    investmentAssets: [],
+    investmentGroupPerformances: [],
+    investmentGroupTrends: [],
+    investmentCashflowCalendar: [],
+    assetEntryItems: [],
+    dcaCashflows: []
+  };
+}
+
+function normalizeAssetEntryItem(item) {
+  return {
+    id: item.id || item.asset_id || createLocalId("asset"),
+    name: item.name || item.asset_name || "未命名资产",
+    asset_type: item.asset_type || null,
+    main_asset_category_id: item.main_asset_category_id || null,
+    sub_asset_category_id: item.sub_asset_category_id || null,
+    main_category: item.main_category || "",
+    sub_category: item.sub_category || null,
+    tags: item.tags || "",
+    currency: item.currency || "CNY",
+    platform: item.platform || "",
+    is_dca: Boolean(item.is_dca),
+    asset_status: item.asset_status || "active",
+    note: item.note || "",
+    month_end_amount: Number(item.month_end_amount) || 0,
+    month_status: item.month_status || "held",
+    previous_snapshot_month: item.previous_snapshot_month || "",
+    previous_month_amount: Number(item.previous_month_amount) || 0,
+    previous_month_status: item.previous_month_status || "missing",
+    confirmed: Boolean(item.confirmed),
+    dca_plans: Array.isArray(item.dca_plans) ? item.dca_plans.map(normalizeDcaPlan) : [],
+    cashflows: Array.isArray(item.cashflows) ? item.cashflows.map(normalizeDcaCashflow) : []
+  };
+}
+
+function normalizeDcaPlan(plan) {
+  return {
+    id: plan.id ?? null,
+    frequency: plan.frequency || "monthly",
+    amount: Number(plan.amount) || 0,
+    start_date: plan.start_date || `${activeDraftMonthKey()}-01`,
+    end_date: plan.end_date || null,
+    weekly_rules_json: plan.weekly_rules_json || null,
+    monthly_day: plan.monthly_day === null || plan.monthly_day === undefined ? 1 : Number(plan.monthly_day) || 1
+  };
+}
+
+function normalizeDcaCashflow(flow) {
+  return {
+    id: flow.id || createLocalId("flow"),
+    asset_id: flow.asset_id || "",
+    asset_name: flow.asset_name || "",
+    flow_date: flow.flow_date || `${activeDraftMonthKey()}-28`,
+    flow_type: flow.flow_type || "buy",
+    amount: Number(flow.amount) || 0,
+    currency: flow.currency || "CNY",
+    source_kind: flow.source_kind || "monthly_asset_entry",
+    dca_plan_id: flow.dca_plan_id ?? null,
+    note: flow.note || "",
+    included: flow.included !== false
+  };
+}
+
+function normalizeInvestmentGroupPerformance(item) {
+  return {
+    groupName: item.group_name || "未命名资产组",
+    buy: Number(item.buy) || 0,
+    sell: Number(item.sell) || 0,
+    dividend: Number(item.dividend) || 0,
+    gain: Number(item.gain) || 0,
+    endingValue: Number(item.ending_value) || 0,
+    returnRate: item.return_rate === null || item.return_rate === undefined ? null : Number(item.return_rate)
   };
 }
 
@@ -1471,6 +1852,8 @@ function renderSyncedDashboard() {
   setText("#homeStatusTitle", mobileDashboardSnapshot.snapshotMonth ? `看板数据截至 ${fullMonthLabel}` : "看板数据待同步");
   setText("#homeStatusText", mobileDashboardSnapshot.snapshotMonth ? "首页金额、收益率、收入支出来自电脑端已发布月报，不包含手机草稿。" : "电脑端登录同一账号后显示已发布月报，不包含手机草稿。");
   setText("#homeCashflowTitle", mobileDashboardSnapshot.snapshotMonth ? `收支摘要显示 ${fullMonthLabel}` : "收支摘要待同步");
+  setText("#homeAssetStatusTitle", mobileDashboardSnapshot.snapshotMonth ? `资产看板显示 ${fullMonthLabel}` : "资产看板待同步");
+  setText("#homeAssetStatusText", mobileDashboardSnapshot.snapshotMonth ? "资产配置、资金趋势来自电脑端已发布月报；手机只负责展示。" : "电脑端登录同一账号后同步资产看板。");
 
   setText("#cashflowHeroTitle", `${monthLabel}已发布月报储蓄率`);
   setPercent("#cashflowSavingRate", latest?.savingRate || 0);
@@ -1502,6 +1885,874 @@ function renderSyncedDashboard() {
       `).join("")
       : `<div class="draft-empty-card">电脑端登录同一账号并生成月报后显示支出分类。</div>`;
   }
+}
+
+function renderBookMeta() {
+  const monthLabel = formatMonthShortLabel(activeDraftMonthKey());
+  if (bookMonthTitle) bookMonthTitle.textContent = `${monthLabel}记账`;
+  if (bookRecordTitle) bookRecordTitle.textContent = `${monthLabel}记账记录`;
+  if (bookModeLabel) bookModeLabel.textContent = state.editingLocalId ? "修改记录" : "新增记录";
+  if (cancelEditButton) cancelEditButton.hidden = !state.editingLocalId;
+}
+
+function openBookDialog() {
+  openModal(bookDialog);
+  amountInput.focus();
+}
+
+function startEditingRecord(localId) {
+  const record = state.records.find((item) => item.local_id === localId);
+  if (!record || (record.record_kind || "transaction") !== "transaction") return;
+  state.editingLocalId = record.local_id;
+  setBookType(record.transaction_type || "expense");
+  amountInput.value = String(record.amount || "");
+  renderCategoryOptions(record.category || "");
+  dateInput.value = record.transaction_date || todayKey();
+  noteInput.value = record.note || "";
+  render();
+  openBookDialog();
+}
+
+function clearBookEditForm() {
+  state.editingLocalId = "";
+  amountInput.value = "";
+  noteInput.value = "";
+  dateInput.value = todayKey();
+}
+
+function categoryIcon(category, type) {
+  const text = String(category || "");
+  if (type === "income") {
+    if (/工资|奖金|租|补贴/.test(text)) return "¥";
+    if (/投资|分红|利息/.test(text)) return "↗";
+    return "+";
+  }
+  if (/餐|饭|饮/.test(text)) return "🍽";
+  if (/交通|车|机票|高铁|打车/.test(text)) return "✈";
+  if (/购物|日用/.test(text)) return "□";
+  if (/居住|房|租/.test(text)) return "⌂";
+  if (/医疗|保险/.test(text)) return "+";
+  if (/娱乐|旅行/.test(text)) return "♪";
+  return "•";
+}
+
+function formatDayLabel(value) {
+  if (!value || value.length < 10) return "";
+  return `${Number(value.slice(5, 7))}/${Number(value.slice(8, 10))}`;
+}
+
+function healthTrendRows() {
+  const rows = [...mobileDashboardSnapshot.monthlyTrends]
+    .filter((item) => isPublishedTrendMonth(item.periodMonth, mobileDashboardSnapshot.snapshotMonth))
+    .sort((a, b) => a.periodMonth.localeCompare(b.periodMonth));
+  if (!rows.length) return [];
+  if (state.dashboardRange === "本月") {
+    return rows.filter((item) => item.periodMonth === mobileDashboardSnapshot.snapshotMonth);
+  }
+  if (state.dashboardRange === "近 3 个月") return rows.slice(-3);
+  if (state.dashboardRange === "半年") return rows.slice(-6);
+  if (state.dashboardRange === "今年以来") {
+    const year = (mobileDashboardSnapshot.snapshotMonth || rows[rows.length - 1].periodMonth).slice(0, 4);
+    return rows.filter((item) => item.periodMonth.startsWith(year));
+  }
+  return rows;
+}
+
+function sumHealthRows(rows) {
+  return rows.reduce((total, item) => ({
+    income: total.income + item.income,
+    expense: total.expense + item.expense,
+    savingAmount: total.savingAmount + item.savingAmount,
+    investmentBuy: total.investmentBuy + item.investmentBuy,
+    investmentSell: total.investmentSell + item.investmentSell,
+    investmentDividend: total.investmentDividend + item.investmentDividend,
+    investmentGain: total.investmentGain + item.investmentGain
+  }), {
+    income: 0,
+    expense: 0,
+    savingAmount: 0,
+    investmentBuy: 0,
+    investmentSell: 0,
+    investmentDividend: 0,
+    investmentGain: 0
+  });
+}
+
+function renderHealthDashboard() {
+  if (!dashboardHealthContent) return;
+  if (!healthSections.includes(state.dashboardSection)) state.dashboardSection = "总览";
+  if (!dashboardRanges.includes(state.dashboardRange)) state.dashboardRange = "今年以来";
+  if (dashboardDataStamp) {
+    dashboardDataStamp.textContent = mobileDashboardSnapshot.snapshotMonth
+      ? `截至 ${formatMonthLabel(mobileDashboardSnapshot.snapshotMonth)}月报`
+      : "等待电脑端发布看板";
+  }
+  dashboardSectionTabs.innerHTML = healthSections.map((section) => `
+    <button class="${state.dashboardSection === section ? "active" : ""}" data-dashboard-section="${section}" type="button">${section}</button>
+  `).join("");
+  dashboardRangeTabs.innerHTML = dashboardRanges.map((range) => `
+    <button class="${state.dashboardRange === range ? "active" : ""}" data-dashboard-range="${range}" type="button">${range}</button>
+  `).join("");
+  const rows = healthTrendRows();
+  if (!mobileDashboardSnapshot.snapshotMonth && !rows.length) {
+    dashboardHealthContent.innerHTML = `
+      <div class="health-empty">
+        <b>财务健康看板待同步</b>
+        <span>电脑端生成并发布月报后，手机端同步展示同一套模块和数据。</span>
+      </div>
+    `;
+    return;
+  }
+  const renderers = {
+    总览: renderHealthOverview,
+    收支储蓄: renderHealthCashflow,
+    支出结构: renderHealthExpense,
+    资产配置: renderHealthAllocation,
+    投资表现: renderHealthInvestment
+  };
+  dashboardHealthContent.innerHTML = renderers[state.dashboardSection](rows);
+}
+
+function renderKpi(label, value, tone = "") {
+  return `<article class="${tone}"><span>${escapeHtml(label)}</span><b>${value}</b></article>`;
+}
+
+function renderMiniTrend(rows, key, label, formatter = privacyMoney) {
+  if (!rows.length) return `<div class="health-empty small">暂无${escapeHtml(label)}数据</div>`;
+  const max = Math.max(...rows.map((item) => Math.abs(Number(item[key]) || 0)), 1);
+  return `
+    <div class="health-chart-list">
+      ${rows.map((item) => {
+        const value = Number(item[key]) || 0;
+        return `
+        <div class="health-row signed ${value < 0 ? "negative" : "positive"}">
+          <span>${formatMonthShortLabel(item.periodMonth)}</span>
+          <i style="--positive:${value > 0 ? Math.max(4, Math.min(50, Math.abs(value) / max * 50)) : 0}%; --negative:${value < 0 ? Math.max(4, Math.min(50, Math.abs(value) / max * 50)) : 0}%"></i>
+          <b>${formatter(value)}</b>
+        </div>
+      `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderNetWorthBarChart(rows) {
+  if (!rows.length) return `<div class="health-empty small">暂无净资产趋势数据</div>`;
+  const max = Math.max(...rows.map((item) => Math.abs(Number(item.netWorth) || 0)), 1);
+  return `
+    <div class="mobile-svg-wrap">
+      <svg class="mobile-svg-chart mobile-bar-chart" viewBox="0 0 360 220" role="img" aria-label="净资产趋势条形图">
+        ${rows.map((item, index) => {
+          const count = rows.length;
+          const gap = 14;
+          const chartLeft = 28;
+          const chartWidth = 304;
+          const barWidth = Math.max(16, Math.min(34, (chartWidth - gap * Math.max(0, count - 1)) / Math.max(count, 1)));
+          const x = chartLeft + index * (barWidth + gap);
+          const height = Math.max(8, Math.abs(item.netWorth) / max * 128);
+          const y = 154 - height;
+          return `
+            <g>
+              <rect x="${x}" y="${y}" width="${barWidth}" height="${height}" rx="7"></rect>
+              <text class="chart-value-label" x="${x + barWidth / 2}" y="${Math.max(14, y - 7)}" text-anchor="middle">${state.privacy ? "•••" : chartMoneyShort(item.netWorth)}</text>
+              <text x="${x + barWidth / 2}" y="181" text-anchor="middle">${formatMonthShortLabel(item.periodMonth)}</text>
+              <title>${item.periodMonth} 净资产 ${formatPlainMoney(item.netWorth)}</title>
+            </g>
+          `;
+        }).join("")}
+        <line x1="20" x2="342" y1="154" y2="154"></line>
+      </svg>
+    </div>
+  `;
+}
+
+function renderAllocationDonutChart(rows, title = "当前资产配置") {
+  const rawRows = rows.filter((item) => Math.abs(item.amount) > 0.0001 || Math.abs(item.percent) > 0.0001);
+  const sortedRows = [...rawRows].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const topRows = sortedRows.slice(0, 5);
+  const otherRows = sortedRows.slice(5);
+  const totalAmount = sortedRows.reduce((sum, item) => sum + item.amount, 0);
+  const otherAmount = otherRows.reduce((sum, item) => sum + item.amount, 0);
+  const visibleRows = otherRows.length
+    ? [...topRows, { category: "其他", amount: otherAmount, percent: totalAmount > 0 ? otherAmount / totalAmount : 0 }]
+    : topRows;
+  if (!visibleRows.length) return `<div class="health-empty small">暂无${escapeHtml(title)}数据</div>`;
+  const colors = ["#c7a76d", "#88a998", "#9cacbf", "#c47766", "#627d9a", "#b6927a"];
+  let offset = 25;
+  const circles = visibleRows.map((item, index) => {
+    const dash = Math.max(0.2, item.percent * 100);
+    const detail = `${item.category}：${formatPlainMoney(item.amount)}，占比 ${formatPercentRaw(item.percent)}`;
+    const circle = `<circle data-detail-toast="${escapeHtml(detail)}" pathLength="100" r="46" cx="60" cy="60" fill="transparent" stroke="${colors[index % colors.length]}" stroke-width="18" stroke-dasharray="${dash} ${100 - dash}" stroke-dashoffset="${offset}"><title>${escapeHtml(detail)}</title></circle>`;
+    offset -= dash;
+    return circle;
+  }).join("");
+  return `
+    <div class="mobile-donut-layout">
+      <svg class="mobile-donut-chart" viewBox="0 0 120 120" role="img" aria-label="${escapeHtml(title)}饼状图">
+        <circle pathLength="100" r="46" cx="60" cy="60" fill="transparent" stroke="rgba(127,127,127,.14)" stroke-width="18"></circle>
+        ${circles}
+        <circle r="30" cx="60" cy="60" fill="var(--panel)"></circle>
+        <text x="60" y="57" text-anchor="middle">配置</text>
+        <text x="60" y="73" text-anchor="middle">${visibleRows.length} 类</text>
+      </svg>
+      <div class="mobile-donut-legend">
+        ${visibleRows.map((item, index) => `
+          <span data-detail-toast="${escapeHtml(`${item.category}：${formatPlainMoney(item.amount)}，占比 ${formatPercentRaw(item.percent)}`)}"><i style="background:${colors[index % colors.length]}"></i><b>${escapeHtml(item.category)}</b><em>${formatPercent(item.percent)}</em></span>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderCashflowGapChart(rows) {
+  const chartRows = rows.filter((item) => item.income > 0 || item.expense > 0);
+  if (!chartRows.length) return `<div class="health-empty small">暂无数据：缺少收支趋势。</div>`;
+  const maxAmount = Math.max(...chartRows.flatMap((item) => [item.income, item.expense, Math.abs(item.savingAmount)]), 1);
+  const maxRate = Math.max(mobileDashboardSnapshot.targetSavingRate, ...chartRows.map((item) => Math.max(item.savingRate, 0)), 1);
+  const xPoint = (index) => chartRows.length === 1 ? 180 : 36 + index * (288 / (chartRows.length - 1));
+  const yAmount = (value) => 24 + 126 * (1 - value / maxAmount);
+  const yRate = (value) => 24 + 126 * (1 - Math.max(Math.min(value / maxRate, 1), 0));
+  const points = (key, mapper = yAmount) => chartRows.map((item, index) => `${xPoint(index)},${mapper(item[key])}`).join(" ");
+  const incomeLine = points("income");
+  const expenseLine = points("expense");
+  const savingRateLine = chartRows.map((item, index) => `${xPoint(index)},${yRate(item.savingRate)}`).join(" ");
+  const targetRateLine = chartRows.map((item, index) => `${xPoint(index)},${yRate(mobileDashboardSnapshot.targetSavingRate)}`).join(" ");
+  const areaPath = `M ${incomeLine.split(" ").join(" L ")} L ${[...chartRows].reverse().map((item, reverseIndex) => {
+    const index = chartRows.length - 1 - reverseIndex;
+    return `${xPoint(index)},${yAmount(item.expense)}`;
+  }).join(" L ")} Z`;
+  return `
+    <div class="mobile-svg-wrap">
+      <svg class="mobile-svg-chart cashflow-gap-chart" viewBox="0 0 360 220" role="img" aria-label="收入支出储蓄缺口图表">
+        <path d="${areaPath}"></path>
+        <polyline class="income-line" points="${incomeLine}"></polyline>
+        <polyline class="expense-line" points="${expenseLine}"></polyline>
+        <polyline class="rate-line" points="${savingRateLine}"></polyline>
+        <polyline class="target-line" points="${targetRateLine}"></polyline>
+        ${chartRows.map((item, index) => {
+          const x = xPoint(index);
+          return `
+            <g>
+              <circle class="income-dot" cx="${x}" cy="${yAmount(item.income)}" r="4"></circle>
+              <circle class="expense-dot" cx="${x}" cy="${yAmount(item.expense)}" r="4"></circle>
+              <circle class="rate-dot" cx="${x}" cy="${yRate(item.savingRate)}" r="4"></circle>
+              <text x="${x}" y="184" text-anchor="middle">${item.periodMonth.slice(5)}</text>
+              <text x="${x}" y="${Math.min(yAmount(item.income), yAmount(item.expense)) - 8}" text-anchor="middle">${state.privacy ? "•••" : chartMoneyShort(item.savingAmount)}</text>
+              <title>${item.periodMonth} 收入 ${formatPlainMoney(item.income)}，支出 ${formatPlainMoney(item.expense)}，储蓄 ${formatPlainMoney(item.savingAmount)}，储蓄率 ${formatPercentRaw(item.savingRate)}</title>
+            </g>
+          `;
+        }).join("")}
+      </svg>
+      <div class="mobile-chart-legend">
+        <span><i class="income"></i>收入</span>
+        <span><i class="expense"></i>支出</span>
+        <span><i class="rate"></i>储蓄率</span>
+        <span><i class="target"></i>目标储蓄率</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderSavingTargetMobileChart(rows) {
+  const chartRows = rows.filter((item) => item.income > 0 || item.expense > 0);
+  if (!chartRows.length) return `<div class="health-empty small">暂无数据：缺少储蓄趋势。</div>`;
+  const maxAmount = Math.max(...chartRows.flatMap((item) => [Math.abs(item.savingAmount), item.income * mobileDashboardSnapshot.targetSavingRate]), 1);
+  return `
+    <div class="health-chart-list">
+      ${chartRows.map((item) => {
+        const target = item.income * mobileDashboardSnapshot.targetSavingRate;
+        return `
+          <div class="health-row dual">
+            <span>${formatMonthShortLabel(item.periodMonth)}</span>
+            <i style="--w:${Math.max(4, Math.min(100, Math.abs(item.savingAmount) / maxAmount * 100))}%; --target:${Math.max(4, Math.min(100, Math.abs(target) / maxAmount * 100))}%"></i>
+            <b>${privacyMoney(item.savingAmount)}</b>
+          </div>
+        `;
+      }).join("")}
+    </div>
+    <div class="mobile-chart-legend"><span><i class="saving"></i>实际储蓄</span><span><i class="target"></i>目标储蓄</span></div>
+  `;
+}
+
+function rangeSavingRate(rows) {
+  const totals = sumHealthRows(rows);
+  return totals.income > 0 ? totals.savingAmount / totals.income : 0;
+}
+
+function dashboardSnapshotMonthLabel() {
+  return mobileDashboardSnapshot.snapshotMonth
+    ? formatMonthShortLabel(mobileDashboardSnapshot.snapshotMonth)
+    : "看板最新月";
+}
+
+function renderHealthOverview(rows) {
+  const latest = latestMonthlyTrend();
+  const totals = sumHealthRows(rows);
+  const snapshotLabel = dashboardSnapshotMonthLabel();
+  return `
+    <article class="health-panel lead">
+      <p>总览</p>
+      <strong>${privacyMoney(mobileDashboardSnapshot.netWorth)}</strong>
+      <small>净资产趋势、当前资产配置、${snapshotLabel}异常提醒。</small>
+    </article>
+    <div class="health-kpi-grid">
+      ${renderKpi(`${state.dashboardRange}收入`, privacyMoney(totals.income))}
+      ${renderKpi(`${state.dashboardRange}支出`, privacyMoney(totals.expense))}
+      ${renderKpi(`${state.dashboardRange}储蓄`, privacyMoney(totals.savingAmount), totals.savingAmount >= 0 ? "positive" : "negative")}
+      ${renderKpi(`${snapshotLabel}储蓄率`, formatPercent(latest?.savingRate || 0))}
+    </div>
+    <section class="health-panel">
+      <h3>净资产金额变化 / 增长率</h3>
+      ${renderAssetEvolutionChart(rows)}
+    </section>
+    <section class="health-panel">
+      <h3>当前资产配置</h3>
+      ${renderAllocationDonutChart(mobileDashboardSnapshot.assetAllocations, "当前资产配置")}
+    </section>
+    <section class="health-panel">
+      <h3>${snapshotLabel}异常提醒 / 大额支出提醒</h3>
+      ${renderAnomalyRows(3)}
+    </section>
+  `;
+}
+
+function renderHealthCashflow(rows) {
+  const latest = latestMonthlyTrend();
+  const totals = sumHealthRows(rows);
+  const activeSavingRate = rangeSavingRate(rows);
+  const snapshotLabel = dashboardSnapshotMonthLabel();
+  return `
+    <div class="health-kpi-grid">
+      ${renderKpi("当前范围累计储蓄", privacyMoney(totals.savingAmount), totals.savingAmount >= 0 ? "positive" : "negative")}
+      ${renderKpi(`${state.dashboardRange}储蓄率`, formatPercent(activeSavingRate))}
+      ${renderKpi("目标储蓄率", formatPercent(mobileDashboardSnapshot.targetSavingRate))}
+      ${renderKpi(`${snapshotLabel}储蓄`, privacyMoney(latest?.savingAmount || 0))}
+    </div>
+    <section class="health-panel">
+      <h3>收入支出储蓄缺口图表</h3>
+      ${renderCashflowGapChart(rows)}
+    </section>
+  `;
+}
+
+function expenseRowsForHealthRange() {
+  const trendRows = healthTrendRows();
+  const months = new Set(trendRows.map((item) => item.periodMonth));
+  const grouped = new Map();
+  (mobileDashboardSnapshot.expenseCategoryTrends || [])
+    .filter((item) => months.has(item.periodMonth))
+    .forEach((item) => {
+      grouped.set(item.category, (grouped.get(item.category) || 0) + item.amount);
+    });
+  const total = [...grouped.values()].reduce((sum, amount) => sum + amount, 0);
+  const rows = [...grouped.entries()]
+    .map(([category, amount]) => ({
+      category,
+      amount,
+      percent: total > 0 ? amount / total : 0
+    }))
+    .sort((a, b) => b.amount - a.amount);
+  if (rows.length) return rows;
+  return state.dashboardRange === "本月"
+    ? mobileDashboardSnapshot.expenseCategories
+    : (mobileDashboardSnapshot.expenseYearRank.length ? mobileDashboardSnapshot.expenseYearRank : mobileDashboardSnapshot.expenseCategories);
+}
+
+function renderExpenseShareRows(rows) {
+  if (!rows.length) return `<div class="health-empty small">暂无分类数据</div>`;
+  return renderCategoryRows(rows);
+}
+
+function renderHealthExpense() {
+  const rows = expenseRowsForHealthRange();
+  const largest = [...rows].sort((a, b) => b.amount - a.amount)[0];
+  return `
+    <div class="health-kpi-grid">
+      ${renderKpi("最大支出分类", largest ? escapeHtml(largest.category) : "待同步")}
+    </div>
+    <section class="health-panel">
+      <h3>分类花费金额排行</h3>
+      ${renderExpenseShareRows(rows)}
+    </section>
+    <section class="health-panel">
+      <h3>支出分类占比图表</h3>
+      ${renderAllocationDonutChart(rows, "支出分类占比")}
+    </section>
+    <section class="health-panel">
+      <h3>大额异常支出</h3>
+      ${renderAnomalyRows(6)}
+    </section>
+  `;
+}
+
+function renderAssetEvolutionChart(rows) {
+  const chartRows = rows
+    .filter((item) => isPublishedTrendMonth(item.periodMonth, mobileDashboardSnapshot.snapshotMonth))
+    .filter((item) => Math.abs(item.netWorth || 0) > 0.0001);
+  if (!chartRows.length) return `<div class="health-empty small">暂无资产结构演变数据</div>`;
+  const max = Math.max(...chartRows.map((item) => Math.abs(item.netWorth || 0)), 1);
+  const allRows = [...mobileDashboardSnapshot.monthlyTrends]
+    .filter((item) => isPublishedTrendMonth(item.periodMonth, mobileDashboardSnapshot.snapshotMonth))
+    .filter((item) => Math.abs(item.netWorth || 0) > 0.0001)
+    .sort((a, b) => a.periodMonth.localeCompare(b.periodMonth));
+  const previousNetWorthByMonth = new Map();
+  allRows.forEach((item, index) => {
+    const previous = allRows[index - 1];
+    previousNetWorthByMonth.set(item.periodMonth, previous ? previous.netWorth : null);
+  });
+  const growthValues = chartRows.map((item) => {
+    const previous = previousNetWorthByMonth.get(item.periodMonth);
+    return previous === null || previous === undefined || Math.abs(previous) < 0.000001
+      ? null
+      : (item.netWorth - previous) / Math.abs(previous);
+  });
+  const count = chartRows.length;
+  const gap = 14;
+  const chartLeft = 30;
+  const chartWidth = 300;
+  const barWidth = Math.max(15, Math.min(32, (chartWidth - gap * Math.max(0, count - 1)) / Math.max(count, 1)));
+  const barLayout = chartRows.map((item, index) => {
+    const x = count === 1 ? chartLeft + chartWidth / 2 - barWidth / 2 : chartLeft + index * (barWidth + gap);
+    const height = Math.max(8, Math.abs(item.netWorth || 0) / max * 112);
+    const y = 154 - height;
+    return {
+      item,
+      index,
+      x,
+      y,
+      height,
+      centerX: x + barWidth / 2,
+      topY: y
+    };
+  });
+  const growthPointItems = chartRows.flatMap((item, index) => {
+    const growth = growthValues[index];
+    if (growth === null) return [];
+    const layout = barLayout[index];
+    const y = Math.max(18, layout.topY - 9);
+    return [{
+      month: item.periodMonth,
+      growth,
+      x: layout.centerX,
+      y
+    }];
+  });
+  const growthSegments = growthPointItems.slice(1).map((item, index) => {
+    const previous = growthPointItems[index];
+    return `<line class="growth-segment" x1="${previous.x}" y1="${previous.y}" x2="${item.x}" y2="${item.y}"></line>`;
+  }).join("");
+  return `
+    <div class="mobile-svg-wrap">
+      <svg class="mobile-svg-chart mobile-composite-chart" viewBox="0 0 360 210" role="img" aria-label="资产配置结构演变复合图表">
+        ${barLayout.map(({ item, index, x, y, height }) => {
+          return `
+            <g>
+              <rect x="${x}" y="${y}" width="${barWidth}" height="${height}" rx="7"></rect>
+              <text class="chart-value-label" x="${x + barWidth / 2}" y="${Math.max(14, y - 7)}" text-anchor="middle">${state.privacy ? "•••" : chartMoneyShort(item.netWorth)}</text>
+              <text x="${x + barWidth / 2}" y="181" text-anchor="middle">${formatMonthShortLabel(item.periodMonth)}</text>
+              <title>${item.periodMonth} 净资产 ${formatPlainMoney(item.netWorth)}，增长率 ${growthValues[index] === null ? "无上月基准" : formatSignedPercentRaw(growthValues[index])}</title>
+            </g>
+          `;
+        }).join("")}
+        ${growthSegments}
+        ${growthPointItems.map((item) => `
+          <g>
+            <circle class="chart-dot growth" cx="${item.x}" cy="${item.y}" r="4"></circle>
+            <text class="chart-value-label growth-label" x="${item.x}" y="${item.growth >= 0 ? item.y - 10 : item.y + 18}" text-anchor="middle">${formatSignedPercentRaw(item.growth)}</text>
+            <title>${item.month} 增长率 ${formatSignedPercentRaw(item.growth)}</title>
+          </g>
+        `).join("")}
+        <line x1="20" x2="342" y1="154" y2="154"></line>
+      </svg>
+      <div class="mobile-chart-legend"><span><i class="saving"></i>金额变化</span><span><i class="growth"></i>增长率</span></div>
+    </div>
+  `;
+}
+
+function renderHealthAllocation() {
+  return `
+    <section class="health-panel">
+      <h3>资产配置饼图</h3>
+      ${renderAllocationDonutChart(mobileDashboardSnapshot.assetAllocations, "资产配置")}
+    </section>
+    <section class="health-panel">
+      <h3>目标资产配置偏离图表</h3>
+      ${renderTargetRows()}
+    </section>
+    <section class="health-panel">
+      <h3>结构演变</h3>
+      ${renderAssetEvolutionChart(healthTrendRows())}
+    </section>
+  `;
+}
+
+function renderHealthInvestment(rows) {
+  const totals = sumHealthRows(rows);
+  const latest = latestMonthlyTrend();
+  return `
+    <div class="health-kpi-grid">
+      ${renderKpi("买入", privacyMoney(totals.investmentBuy))}
+      ${renderKpi("卖出", privacyMoney(totals.investmentSell))}
+      ${renderKpi("分红", privacyMoney(totals.investmentDividend))}
+      ${renderKpi("月度 XIRR", latest?.monthlyXirr === null || latest?.monthlyXirr === undefined ? "待计算" : formatPercent(latest.monthlyXirr))}
+    </div>
+    <section class="health-panel">
+      <h3>历史月度收益与资金加权收益</h3>
+      ${renderInvestmentMonthlyComposite(rows)}
+    </section>
+  `;
+}
+
+function renderCategoryRows(rows) {
+  if (!rows.length) return `<div class="health-empty small">暂无分类数据</div>`;
+  const max = Math.max(...rows.map((item) => Math.abs(item.amount)), 1);
+  return `
+    <div class="health-chart-list">
+      ${rows.map((item) => `
+        <div class="health-row">
+          <span>${escapeHtml(item.category)}</span>
+          <i style="--w:${Math.max(4, Math.min(100, Math.abs(item.amount) / max * 100))}%"></i>
+          <b>${privacyMoney(item.amount)} · ${formatPercent(item.percent)}</b>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAllocationRows(rows) {
+  const visibleRows = rows.filter((item) => Math.abs(item.amount) > 0.0001 || Math.abs(item.percent) > 0.0001);
+  if (!visibleRows.length) return `<div class="health-empty small">暂无资产配置数据</div>`;
+  return `
+    <div class="health-chart-list">
+      ${visibleRows.map((item) => `
+        <div class="health-row">
+          <span>${escapeHtml(item.category)}</span>
+          <i style="--w:${Math.max(4, Math.min(100, item.percent * 100))}%"></i>
+          <b>${privacyMoney(item.amount)} · ${formatPercent(item.percent)}</b>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderTargetRows() {
+  const rows = mobileDashboardSnapshot.allocationTargets || [];
+  if (!rows.length) return `<div class="health-empty small">暂无目标偏离数据</div>`;
+  const max = Math.max(...rows.flatMap((item) => [Math.abs(item.current), Math.abs(item.target), Math.abs(item.deviation)]), 0.01);
+  return `
+    <div class="target-gap-chart">
+      ${rows.map((item) => `
+        <div class="target-gap-row">
+          <span>${escapeHtml(item.category)}</span>
+          <div>
+            <i class="current" style="--w:${Math.max(4, Math.min(100, Math.abs(item.current) / max * 100))}%"></i>
+            <i class="target" style="--w:${Math.max(4, Math.min(100, Math.abs(item.target) / max * 100))}%"></i>
+            <i class="gap" style="--w:${Math.max(4, Math.min(100, Math.abs(item.deviation) / max * 100))}%"></i>
+          </div>
+          <b>${formatPercent(item.current)} / ${formatPercent(item.target)} · Gap ${formatSignedPercent(item.deviation)}</b>
+        </div>
+      `).join("")}
+    </div>
+    <div class="mobile-chart-legend"><span><i class="saving"></i>目前</span><span><i class="target"></i>计划目标</span><span><i class="expense"></i>Gap</span></div>
+  `;
+}
+
+function renderInvestmentFlowRows() {
+  const rows = (mobileDashboardSnapshot.investmentCashflowCalendar || []).slice(0, 8);
+  if (!rows.length) return `<div class="health-empty small">暂无买入卖出分红记录</div>`;
+  return rows.map((item) => `
+    <div class="list-row static">
+      <i class="tile green"></i>
+      <span><b>${escapeHtml(item.assetName)}</b><small>${escapeHtml(item.flowDate)} · ${escapeHtml(item.flowType)}</small></span>
+      <em>${privacyMoney(item.amount)}</em>
+    </div>
+  `).join("");
+}
+
+function hasInvestmentGroupData(item) {
+  return item.groupName !== "现金" && (
+    Math.abs(item.endingValue || 0) > 0.0001 ||
+    Math.abs(item.gain || 0) > 0.0001 ||
+    Math.abs(item.buy || 0) > 0.0001 ||
+    Math.abs(item.sell || 0) > 0.0001 ||
+    Math.abs(item.dividend || 0) > 0.0001 ||
+    item.returnRate !== null
+  );
+}
+
+function orderedInvestmentGroups(rows) {
+  const names = [...new Set(rows.filter(hasInvestmentGroupData).map((item) => item.groupName))];
+  return [
+    ...investmentGroupOrder.filter((name) => names.includes(name)),
+    ...names.filter((name) => !investmentGroupOrder.includes(name)).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+  ];
+}
+
+function investmentGroupRowsForSnapshot() {
+  const performanceRows = (mobileDashboardSnapshot.investmentGroupPerformances || []).filter(hasInvestmentGroupData);
+  if (performanceRows.length) return performanceRows;
+  return (mobileDashboardSnapshot.investmentGroupTrends || [])
+    .filter((item) => item.periodMonth === mobileDashboardSnapshot.snapshotMonth)
+    .filter(hasInvestmentGroupData);
+}
+
+function investmentGroupTrendRowsForRange(rangeRows) {
+  const months = new Set(rangeRows.map((item) => item.periodMonth));
+  const trendRows = (mobileDashboardSnapshot.investmentGroupTrends || [])
+    .filter((item) => months.has(item.periodMonth))
+    .filter(hasInvestmentGroupData);
+  if (trendRows.length) return trendRows;
+  return investmentGroupRowsForSnapshot().map((item) => ({
+    ...item,
+    periodMonth: mobileDashboardSnapshot.snapshotMonth
+  }));
+}
+
+function chartRateScale(rows) {
+  return Math.max(...rows.map((item) => Math.abs(item.returnRate || 0)), 0.01);
+}
+
+function renderInvestmentGroupRateChart(rangeRows) {
+  const rows = investmentGroupTrendRowsForRange(rangeRows);
+  const groups = orderedInvestmentGroups(rows);
+  const months = [...new Set(rows.map((item) => item.periodMonth))].sort((a, b) => a.localeCompare(b));
+  if (!rows.length || !groups.length) return `<div class="health-empty small">暂无资产组收益数据。请先在电脑端发布包含资产组的看板快照。</div>`;
+  const maxRate = chartRateScale(rows);
+  const zeroY = 104;
+  const yTick = (rate) => zeroY - (rate / maxRate) * 70;
+  const monthWidth = 300 / Math.max(months.length, 1);
+  const barWidth = Math.max(4, Math.min(12, monthWidth / Math.max(groups.length + 1, 2)));
+  const colors = ["#17231f", "#c2a05b", "#719681", "#9cacbf", "#c47766", "#627d9a"];
+  return `
+    <div class="mobile-svg-wrap">
+      <svg class="mobile-svg-chart investment-rate-chart" viewBox="0 0 360 220" role="img" aria-label="资产组月度收益率">
+        ${[-1, -0.5, 0, 0.5, 1].map((ratio) => {
+          const rate = maxRate * ratio;
+          return `
+            <g>
+              <line class="${Math.abs(rate) < 0.0001 ? "zero" : ""}" x1="34" x2="342" y1="${yTick(rate)}" y2="${yTick(rate)}"></line>
+              <text x="29" y="${yTick(rate) + 4}" text-anchor="end">${formatPercentRaw(rate)}</text>
+            </g>
+          `;
+        }).join("")}
+        ${months.map((month, monthIndex) => {
+          const baseX = 42 + monthIndex * monthWidth + monthWidth / 2 - groups.length * barWidth / 2;
+          return `
+            <g>
+              ${groups.map((group, groupIndex) => {
+                const item = rows.find((row) => row.periodMonth === month && row.groupName === group);
+                if (!item || item.returnRate === null) return `<rect class="empty" x="${baseX + groupIndex * barWidth}" y="${zeroY - 1}" width="${Math.max(2, barWidth - 2)}" height="2" rx="1"></rect>`;
+                const height = Math.max(5, Math.abs(item.returnRate) / maxRate * 70);
+                const y = item.returnRate >= 0 ? zeroY - height : zeroY;
+                return `
+                  <g>
+                    <rect class="${item.returnRate >= 0 ? "positive" : "negative"}" style="fill:${colors[groupIndex % colors.length]}" x="${baseX + groupIndex * barWidth}" y="${y}" width="${Math.max(2, barWidth - 2)}" height="${height}" rx="3"></rect>
+                    ${months.length <= 6 ? `<text class="chart-value-label" x="${baseX + groupIndex * barWidth + barWidth / 2}" y="${item.returnRate >= 0 ? y - 5 : y + height + 12}" text-anchor="middle">${formatPercentRaw(item.returnRate)}</text>` : ""}
+                    <title>${month} ${group} 收益率 ${formatPercentRaw(item.returnRate)}，收益 ${formatPlainMoney(item.gain)}</title>
+                  </g>
+                `;
+              }).join("")}
+              <text x="${42 + monthIndex * monthWidth + monthWidth / 2}" y="197" text-anchor="middle">${month.slice(5)}</text>
+            </g>
+          `;
+        }).join("")}
+      </svg>
+      <div class="mobile-chart-legend">
+        ${groups.map((group, index) => `<span><i style="background:${colors[index % colors.length]}"></i>${escapeHtml(group)}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderInvestmentReturnPerspective(rangeRows) {
+  const rows = investmentGroupTrendRowsForRange(rangeRows);
+  const groups = orderedInvestmentGroups(rows);
+  const group = groups[0];
+  if (!group) return `<div class="health-empty small">暂无资产组回报透视数据</div>`;
+  const chartRows = rangeRows.map((trend) => {
+    const item = rows.find((row) => row.periodMonth === trend.periodMonth && row.groupName === group);
+    return {
+      periodMonth: trend.periodMonth,
+      returnRate: item?.returnRate ?? null,
+      gain: item?.gain ?? 0
+    };
+  });
+  const maxRate = Math.max(...chartRows.map((item) => Math.abs(item.returnRate || 0)), 0.01);
+  const zeroY = 96;
+  return `
+    <div class="mobile-svg-wrap">
+      <svg class="mobile-svg-chart investment-focus-chart" viewBox="0 0 360 206" role="img" aria-label="${escapeHtml(group)}回报透视">
+        ${[-1, -0.5, 0, 0.5, 1].map((ratio) => {
+          const rate = maxRate * ratio;
+          const y = zeroY - (rate / maxRate) * 64;
+          return `<line class="${Math.abs(rate) < 0.0001 ? "zero" : ""}" x1="32" x2="340" y1="${y}" y2="${y}"></line>`;
+        }).join("")}
+        ${chartRows.map((item, index) => {
+          const x = chartRows.length === 1 ? 178 : 42 + index * (286 / (chartRows.length - 1));
+          if (item.returnRate === null) return `<rect class="empty" x="${x - 13}" y="${zeroY - 1}" width="26" height="2" rx="1"></rect><text x="${x}" y="180" text-anchor="middle">${item.periodMonth.slice(5)}</text>`;
+          const height = Math.max(6, Math.abs(item.returnRate) / maxRate * 64);
+          const y = item.returnRate >= 0 ? zeroY - height : zeroY;
+          return `
+            <g>
+              <rect class="${item.returnRate >= 0 ? "positive" : "negative"}" x="${x - 13}" y="${y}" width="26" height="${height}" rx="6"></rect>
+              <text class="chart-value-label" x="${x}" y="${item.returnRate >= 0 ? y - 7 : y + height + 14}" text-anchor="middle">${formatPercentRaw(item.returnRate)}</text>
+              <text x="${x}" y="180" text-anchor="middle">${item.periodMonth.slice(5)}</text>
+              <title>${item.periodMonth} ${group} 收益率 ${formatPercentRaw(item.returnRate)}，收益 ${formatPlainMoney(item.gain)}</title>
+            </g>
+          `;
+        }).join("")}
+      </svg>
+      <div class="return-switcher mobile-return-groups">
+        ${groups.map((name, index) => `<button class="${index === 0 ? "active" : ""}" data-detail-toast="${escapeHtml(`${name}：手机端默认展示第一个资产组；完整多组收益率见上方资产组月度收益率。`)}" type="button">${escapeHtml(name)}</button>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function daysInMonthFromKey(periodMonth) {
+  const year = Number(String(periodMonth).slice(0, 4));
+  const month = Number(String(periodMonth).slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return 30;
+  return new Date(year, month, 0).getDate();
+}
+
+function xirrToPeriodReturn(rate, periodMonth) {
+  if (rate === null || rate === undefined || rate <= -0.999999) return null;
+  return Math.pow(1 + rate, daysInMonthFromKey(periodMonth) / 365) - 1;
+}
+
+function renderInvestmentMonthlyComposite(rows) {
+  const chartRows = rows.filter((item) => Math.abs(item.investmentGain || 0) > 0.0001 || item.monthlyXirr !== null);
+  if (!chartRows.length) return `<div class="health-empty small">暂无历史月度收益数据</div>`;
+  const maxGain = Math.max(...chartRows.map((item) => Math.abs(item.investmentGain || 0)), 1);
+  const rateRows = chartRows.map((item) => ({ ...item, xirrPeriodReturn: xirrToPeriodReturn(item.monthlyXirr, item.periodMonth) }));
+  const maxRate = Math.max(...rateRows.map((item) => Math.abs(item.xirrPeriodReturn || 0)), 0.01);
+  const zeroY = 104;
+  const points = rateRows.flatMap((item, index) => {
+    if (item.xirrPeriodReturn === null) return [];
+    const x = rateRows.length === 1 ? 180 : 42 + index * (286 / (rateRows.length - 1));
+    const y = 104 - (item.xirrPeriodReturn / maxRate) * 66;
+    return [{ x, y, rate: item.xirrPeriodReturn, month: item.periodMonth }];
+  });
+  return `
+    <div class="mobile-svg-wrap">
+      <svg class="mobile-svg-chart investment-monthly-chart" viewBox="0 0 360 220" role="img" aria-label="历史月度收益与资金加权收益">
+        <line class="zero" x1="32" x2="340" y1="${zeroY}" y2="${zeroY}"></line>
+        ${rateRows.map((item, index) => {
+          const x = rateRows.length === 1 ? 180 : 42 + index * (286 / (rateRows.length - 1));
+          const height = Math.max(item.investmentGain === 0 ? 2 : 6, Math.abs(item.investmentGain || 0) / maxGain * 70);
+          const y = item.investmentGain >= 0 ? zeroY - height : zeroY;
+          return `
+            <g>
+              <rect class="${item.investmentGain >= 0 ? "positive" : "negative"}" x="${x - 13}" y="${y}" width="26" height="${height}" rx="6"></rect>
+              <text class="chart-value-label" x="${x}" y="${item.investmentGain >= 0 ? y - 7 : y + height + 14}" text-anchor="middle">${state.privacy ? "•••" : chartMoneyShort(item.investmentGain)}</text>
+              <text x="${x}" y="194" text-anchor="middle">${item.periodMonth.slice(5)}</text>
+              <title>${item.periodMonth} 投资收益 ${formatPlainMoney(item.investmentGain)}，资金加权收益 ${item.xirrPeriodReturn === null ? "待计算" : formatPercentRaw(item.xirrPeriodReturn)}</title>
+            </g>
+          `;
+        }).join("")}
+        ${points.slice(1).map((item, index) => {
+          const previous = points[index];
+          return `<line class="rate-line" x1="${previous.x}" y1="${previous.y}" x2="${item.x}" y2="${item.y}"></line>`;
+        }).join("")}
+        ${points.map((item) => `<circle class="rate-dot" cx="${item.x}" cy="${item.y}" r="4"><title>${item.month} 资金加权收益 ${formatPercentRaw(item.rate)}</title></circle>`).join("")}
+      </svg>
+      <div class="mobile-chart-legend"><span><i class="saving"></i>投资收益</span><span><i class="growth"></i>资金加权收益率</span></div>
+    </div>
+  `;
+}
+
+function renderInvestmentAssetRows() {
+  const rows = mobileDashboardSnapshot.investmentAssets || [];
+  if (!rows.length) return `<div class="health-empty small">暂无资产明细收益数据。请同步电脑端包含资产名称的看板快照。</div>`;
+  const totalEnding = rows.reduce((sum, item) => sum + Math.max(0, item.endingValue), 0);
+  return `
+    <div class="investment-detail-list">
+      ${rows.map((item) => {
+        const netInvest = item.buy - item.sell;
+        const baseValue = item.beginningValue + netInvest;
+        const growthRate = baseValue > 0 ? item.gain / baseValue : null;
+        const share = totalEnding > 0 ? item.endingValue / totalEnding : 0;
+        return `
+          <button class="investment-detail-row" data-detail-toast="${escapeHtml(`${item.assetName}：期末 ${formatPlainMoney(item.endingValue)}，收益 ${formatPlainMoney(item.gain)}，占比 ${formatPercentRaw(share)}`)}" type="button">
+            <span>
+              <b>${escapeHtml(item.assetName)}</b>
+              <small>区间收益率 ${item.periodReturn === null ? "待计算" : formatPercent(item.periodReturn)} · XIRR ${item.monthlyXirr === null ? "待计算" : formatPercent(item.monthlyXirr)} · 增长 ${growthRate === null ? "待计算" : formatSignedPercent(growthRate)}</small>
+            </span>
+            <i style="--w:${Math.max(4, Math.min(100, share * 100))}%"></i>
+            <em>${privacyMoney(item.endingValue)} · ${formatPercent(share)}</em>
+            <small>买入 ${privacyMoney(item.buy)} / 卖出 ${privacyMoney(item.sell)} / 分红 ${privacyMoney(item.dividend)} / 收益 ${privacyMoney(item.gain)}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderInvestmentGroupRows() {
+  const rows = investmentGroupRowsForSnapshot();
+  if (!rows.length) return `<div class="health-empty small">暂无资产组收益数据。请同步电脑端包含资产组的看板快照。</div>`;
+  const totalEnding = rows.reduce((sum, item) => sum + Math.max(0, item.endingValue), 0);
+  return `
+    <div class="investment-detail-list">
+      ${rows.map((item) => {
+        const share = totalEnding > 0 ? item.endingValue / totalEnding : 0;
+        return `
+          <button class="investment-detail-row" data-detail-toast="${escapeHtml(`${item.groupName}：期末 ${formatPlainMoney(item.endingValue)}，收益 ${formatPlainMoney(item.gain)}，收益率 ${item.returnRate === null ? "待计算" : formatPercentRaw(item.returnRate)}`)}" type="button">
+            <span>
+              <b>${escapeHtml(item.groupName)}</b>
+              <small>收益率 ${item.returnRate === null ? "待计算" : formatPercent(item.returnRate)} · 占比 ${formatPercent(share)}</small>
+            </span>
+            <i style="--w:${Math.max(4, Math.min(100, share * 100))}%"></i>
+            <em>${privacyMoney(item.endingValue)} · ${formatPercent(share)}</em>
+            <small>买入 ${privacyMoney(item.buy)} / 卖出 ${privacyMoney(item.sell)} / 分红 ${privacyMoney(item.dividend)} / 收益 ${privacyMoney(item.gain)}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderAnomalyRows(limit) {
+  const rows = (mobileDashboardSnapshot.spendingAnomalies || []).slice(0, limit);
+  if (!rows.length) return `<div class="health-empty small">暂无异常支出</div>`;
+  return rows.map((item) => `
+    <div class="list-row static">
+      <i class="tile gold"></i>
+      <span><b>${escapeHtml(item.category)}</b><small>${escapeHtml(item.transactionDate || "")} ${escapeHtml(item.note || item.reason || "")}</small></span>
+      <em>${privacyMoney(item.amount)}</em>
+    </div>
+  `).join("");
+}
+
+function renderDashboardModules() {
+  if (!dashboardModuleGrid) return;
+  const latest = latestMonthlyTrend();
+  const monthLabel = formatMonthShortLabel(mobileDashboardSnapshot.snapshotMonth);
+  const snapshotLabel = dashboardSnapshotMonthLabel();
+  const categories = mobileDashboardSnapshot.expenseCategories || [];
+  const largestCategory = [...categories].sort((a, b) => b.amount - a.amount)[0];
+  const modules = [
+    { section: "总览", icon: "◎", title: "总览", value: mobileDashboardSnapshot.snapshotMonth ? `截至 ${monthLabel}` : "待同步", detail: `关键指标、净资产趋势、${snapshotLabel}异常提醒。` },
+    { section: "收支储蓄", icon: "↕", title: "收支储蓄", value: latest ? formatPercentRaw(latest.savingRate) : "待同步", detail: "收支储蓄趋势、储蓄目标达成。" },
+    { section: "支出结构", icon: "◫", title: "支出结构", value: largestCategory ? largestCategory.category : "待同步", detail: "支出分类占比、分类累计排行、大额异常支出。" },
+    { section: "资产配置", icon: "◌", title: "资产配置", value: `${mobileDashboardSnapshot.allocationTargets.length} 项偏离`, detail: "资产配置饼图、目标资产配置偏离图表。" },
+    { section: "投资表现", icon: "↗", title: "投资表现", value: latest ? (state.privacy ? "••••••" : formatPlainMoney(latest.investmentGain)) : "待同步", detail: "买入卖出分红、月度 XIRR、资产组收益。" }
+  ];
+  dashboardModuleGrid.innerHTML = modules.map((item) => `
+    <button class="module-card" data-dashboard-section="${item.section}" type="button">
+      <i>${item.icon}</i>
+      <span><b>${escapeHtml(item.title)}</b><small>${escapeHtml(item.detail)}</small></span>
+      <em>${escapeHtml(item.value)}</em>
+    </button>
+  `).join("");
+  dashboardModuleGrid.querySelectorAll("[data-dashboard-section]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.dashboardSection = button.dataset.dashboardSection;
+      navigate("dashboard");
+      render();
+    });
+  });
 }
 
 function renderMayAnomalies() {
@@ -1539,6 +2790,19 @@ function formatPlainMoney(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })}`;
+}
+
+function chartMoneyShort(value) {
+  const number = Number(value || 0);
+  const sign = number < 0 ? "-" : "";
+  const absolute = Math.abs(number);
+  if (absolute >= 10000) return `${sign}${(absolute / 10000).toFixed(1)}万`;
+  if (absolute >= 1000) return `${sign}${(absolute / 1000).toFixed(1)}k`;
+  return `${sign}${absolute.toFixed(0)}`;
+}
+
+function privacyMoney(value) {
+  return state.privacy ? "••••••" : formatPlainMoney(value);
 }
 
 function formatPercent(value) {

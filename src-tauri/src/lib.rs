@@ -53,6 +53,7 @@ struct MobileSyncRecordInput {
   current_unbilled_amount: Option<f64>,
   previous_unbilled_amount: Option<f64>,
   net_adjustment: Option<f64>,
+  payload_json: Option<serde_json::Value>,
   created_at: Option<String>,
   updated_at: Option<String>,
 }
@@ -207,15 +208,33 @@ struct MobilePortfolioTarget {
 }
 
 #[derive(Serialize)]
+struct MobileCategoryMonthAmount {
+  period_month: String,
+  category: String,
+  amount: f64,
+}
+
+#[derive(Serialize)]
 struct MobileDashboardSnapshot {
   snapshot_month: String,
   target_saving_rate: f64,
   asset_gross_value: f64,
   credit_card_net_adjustment: f64,
   net_worth: f64,
+  investment_buy: f64,
+  investment_sell: f64,
+  investment_dividend: f64,
   monthly_trends: Vec<MonthlyTrend>,
   expense_categories: Vec<CategoryBreakdown>,
+  expense_year_rank: Vec<CategoryBreakdown>,
+  expense_category_trends: Vec<MobileCategoryMonthAmount>,
   asset_allocations: Vec<MobileAssetAllocation>,
+  investment_assets: Vec<InvestmentAssetPerformance>,
+  investment_group_performances: Vec<InvestmentGroupPerformance>,
+  investment_group_trends: Vec<InvestmentGroupTrend>,
+  investment_cashflow_calendar: Vec<InvestmentCashflowCalendarItem>,
+  asset_entry_items: Vec<AssetEntryItem>,
+  dca_cashflows: Vec<GeneratedDcaCashflow>,
   portfolio_targets: Vec<MobilePortfolioTarget>,
   spending_anomalies: Vec<SpendingAnomaly>,
 }
@@ -271,6 +290,7 @@ struct DashboardSeedSummary {
   investment_return_rate: Option<f64>,
   monthly_trends: Vec<MonthlyTrend>,
   expense_categories: Vec<CategoryBreakdown>,
+  expense_category_trends: Vec<MobileCategoryMonthAmount>,
   income_categories: Vec<CategoryBreakdown>,
   expense_year_rank: Vec<CategoryBreakdown>,
   income_year_rank: Vec<CategoryBreakdown>,
@@ -282,6 +302,8 @@ struct DashboardSeedSummary {
   asset_allocation_trends: Vec<AssetAllocationTrend>,
   investment_assets: Vec<InvestmentAssetPerformance>,
   investment_cashflow_calendar: Vec<InvestmentCashflowCalendarItem>,
+  asset_entry_items: Vec<AssetEntryItem>,
+  dca_cashflows: Vec<GeneratedDcaCashflow>,
   investment_group_performances: Vec<InvestmentGroupPerformance>,
   investment_group_trends: Vec<InvestmentGroupTrend>,
   discretionary_trends: Vec<DiscretionaryTrend>,
@@ -648,7 +670,7 @@ struct OnboardingInput {
   skip_allocation_targets: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct AssetMonthEntryInput {
   asset_id: String,
   name: Option<String>,
@@ -1665,8 +1687,57 @@ fn unpair_mobile_device(connection: &Connection, input: MobileUnpairInput) -> Re
   Ok(())
 }
 
+fn mobile_asset_entries_from_payload(
+  record_kind: &str,
+  period_month: Option<&str>,
+  payload: Option<&serde_json::Value>,
+) -> Result<Option<(String, Vec<AssetMonthEntryInput>)>, AppError> {
+  if record_kind != "monthly_update_assets" {
+    return Ok(None);
+  }
+  let Some(payload) = payload else {
+    return Ok(None);
+  };
+  let period = payload
+    .get("period_month")
+    .and_then(|value| value.as_str())
+    .or(period_month)
+    .unwrap_or("")
+    .to_string();
+  if period.trim().is_empty() {
+    return Ok(None);
+  }
+  let Some(entries_value) = payload.get("entries") else {
+    return Ok(None);
+  };
+  let entries = serde_json::from_value::<Vec<AssetMonthEntryInput>>(entries_value.clone())
+    .map_err(|err| AppError::InvalidCsvValue(format!("手机资产录入草稿无法套用：{err}")))?;
+  Ok(Some((period, entries)))
+}
+
+fn apply_mobile_asset_entry_batches(
+  connection: &mut Connection,
+  batches: Vec<(String, String, Vec<AssetMonthEntryInput>)>,
+) -> Result<(), AppError> {
+  for (inbox_id, period_month, entries) in batches {
+    if entries.is_empty() {
+      continue;
+    }
+    save_asset_month_entries_for_connection(connection, &period_month, &entries)?;
+    connection.execute(
+      "
+      update mobile_sync_inbox
+      set sync_status = 'reviewed', reviewed_at = current_timestamp, updated_at = current_timestamp
+      where id = ?1
+      ",
+      params![inbox_id],
+    )?;
+  }
+  Ok(())
+}
+
 fn store_mobile_sync_records(
-  connection: &Connection,
+  connection: &mut Connection,
   input: MobileSyncPushInput,
 ) -> Result<MobileSyncPushResult, AppError> {
   let device_id = mobile_sync_device_id(input.device_id);
@@ -1678,6 +1749,7 @@ fn store_mobile_sync_records(
   upsert_mobile_device(connection, &device_id, Some(&expected_account_id), None, input.app_version.as_deref(), 0, input.records.len() as i64)?;
   let tx = connection.unchecked_transaction()?;
   let mut acknowledgements = Vec::new();
+  let mut asset_entry_batches: Vec<(String, String, Vec<AssetMonthEntryInput>)> = Vec::new();
   for record in input.records {
     let local_id = record.local_id.trim().to_string();
     if local_id.is_empty() {
@@ -1692,6 +1764,13 @@ fn store_mobile_sync_records(
       .to_string();
     let payload_json = serde_json::to_string(&record)
       .map_err(|err| AppError::InvalidCsvValue(format!("手机同步数据无法保存：{err}")))?;
+    if let Some((period_month, entries)) = mobile_asset_entries_from_payload(
+      &record_kind,
+      record.period_month.as_deref(),
+      record.payload_json.as_ref(),
+    )? {
+      asset_entry_batches.push((id.clone(), period_month, entries));
+    }
     tx.execute(
       "
       insert into mobile_sync_inbox (
@@ -1748,6 +1827,7 @@ fn store_mobile_sync_records(
     });
   }
   tx.commit()?;
+  apply_mobile_asset_entry_batches(connection, asset_entry_batches)?;
   Ok(MobileSyncPushResult {
     accepted_count: acknowledgements.len(),
     records: acknowledgements,
@@ -1755,7 +1835,7 @@ fn store_mobile_sync_records(
 }
 
 fn import_cloud_mobile_drafts_into_connection(
-  connection: &Connection,
+  connection: &mut Connection,
   drafts: Vec<CloudMobileDraftInput>,
 ) -> Result<MobileSyncPushResult, AppError> {
   ensure_mobile_sync_schema(connection)?;
@@ -1772,6 +1852,7 @@ fn import_cloud_mobile_drafts_into_connection(
   )?;
   let tx = connection.unchecked_transaction()?;
   let mut acknowledgements = Vec::new();
+  let mut asset_entry_batches: Vec<(String, String, Vec<AssetMonthEntryInput>)> = Vec::new();
   for draft in drafts {
     let cloud_id = draft.id.trim().to_string();
     if cloud_id.is_empty() {
@@ -1829,6 +1910,9 @@ fn import_cloud_mobile_drafts_into_connection(
         payload_json
       ],
     )?;
+    if let Some((period_month, entries)) = mobile_asset_entries_from_payload(&record_kind, draft.period_month.as_deref(), Some(&payload_value))? {
+      asset_entry_batches.push((id.clone(), period_month, entries));
+    }
     acknowledgements.push(MobileSyncAck {
       local_id: draft.local_id,
       server_id: id,
@@ -1836,6 +1920,7 @@ fn import_cloud_mobile_drafts_into_connection(
     });
   }
   tx.commit()?;
+  apply_mobile_asset_entry_batches(connection, asset_entry_batches)?;
   Ok(MobileSyncPushResult {
     accepted_count: acknowledgements.len(),
     records: acknowledgements,
@@ -1950,9 +2035,38 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
       percent: item.percent,
     })
     .collect();
-  let monthly_trends = dashboard_monthly_trends(connection)?;
+  let monthly_trends = dashboard_monthly_trends(connection)?
+    .into_iter()
+    .filter(|item| item.period_month.as_str() <= snapshot_month.as_str())
+    .collect();
+  let (investment_buy, investment_sell, investment_dividend): (f64, f64, f64) = connection.query_row(
+    "
+    select
+      coalesce(sum(case when flow_type = 'buy' then amount_cny else 0 end), 0),
+      coalesce(sum(case when flow_type = 'sell' then amount_cny else 0 end), 0),
+      coalesce(sum(case when flow_type = 'dividend' then amount_cny else 0 end), 0)
+    from investment_cashflows ic
+    join assets a on a.id = ic.asset_id
+    where ic.period_month = ?1
+      and a.main_asset_category_id <> 'asset_cat_cash'
+    ",
+    params![snapshot_month],
+    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+  )?;
+  let investment_assets = investment_asset_performance(connection, &snapshot_month)?;
+  let investment_group_performances = investment_group_performances(connection, &snapshot_month)?;
+  let investment_group_trends = investment_group_trends(connection)?
+    .into_iter()
+    .filter(|item| item.period_month.as_str() <= snapshot_month.as_str())
+    .collect();
+  let investment_cashflow_calendar = investment_cashflow_calendar(connection, &snapshot_month)?;
+  let mobile_update_month = next_period_month(&snapshot_month);
+  let asset_entry_items = asset_entry_items_for_connection(connection, &mobile_update_month)?;
+  let dca_cashflows = generated_dca_cashflows_for_connection(connection, &mobile_update_month)?;
   let spending_anomalies = spending_anomalies(connection, &snapshot_month)?;
   let expense_categories = category_breakdown(connection, &snapshot_month, "expense")?;
+  let expense_year_rank = category_year_rank(connection, &snapshot_month, "expense")?;
+  let expense_category_trends = category_month_amounts(connection, &snapshot_month, "expense")?;
   let mut statement = connection.prepare(
     "
     select
@@ -1998,9 +2112,20 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
     asset_gross_value,
     credit_card_net_adjustment,
     net_worth: asset_gross_value + credit_card_net_adjustment,
+    investment_buy,
+    investment_sell,
+    investment_dividend,
     monthly_trends,
     expense_categories,
+    expense_year_rank,
+    expense_category_trends,
     asset_allocations,
+    investment_assets,
+    investment_group_performances,
+    investment_group_trends,
+    investment_cashflow_calendar,
+    asset_entry_items,
+    dca_cashflows,
     portfolio_targets,
     spending_anomalies,
   })
@@ -2255,9 +2380,9 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
         match serde_json::from_str::<MobileSyncPushInput>(&body) {
           Ok(input) => match Connection::open(&work_db_path)
             .map_err(AppError::from)
-            .and_then(|connection| {
+            .and_then(|mut connection| {
               ensure_mobile_sync_schema(&connection)?;
-              store_mobile_sync_records(&connection, input)
+              store_mobile_sync_records(&mut connection, input)
             }) {
               Ok(result) => http_json(&result),
               Err(err) => http_error("500 Internal Server Error", &err.to_string()),
@@ -2697,6 +2822,7 @@ fn latest_completed_period_month(connection: &Connection) -> Result<String, AppE
       select max(period_month)
       from monthly_step_status
       where step_key = 'final' and completed = 1
+        and period_month < strftime('%Y-%m', 'now', 'localtime')
       ",
       [],
       |row| row.get::<_, Option<String>>(0),
@@ -2706,27 +2832,13 @@ fn latest_completed_period_month(connection: &Connection) -> Result<String, AppE
     return Ok(period);
   }
 
-  let from_confirmed_transactions = connection
-    .query_row(
-      "
-      select max(period_month)
-      from confirmed_transactions
-      where confirmation_status = 'confirmed'
-      ",
-      [],
-      |row| row.get::<_, Option<String>>(0),
-    )?
-    .filter(|value| !value.trim().is_empty());
-  if let Some(period) = from_confirmed_transactions {
-    return Ok(period);
-  }
-
   let from_closes = connection
     .query_row(
       "
       select max(period_month)
       from monthly_closes
       where status in ('generated', 'historical_numbers_imported')
+        and period_month < strftime('%Y-%m', 'now', 'localtime')
       ",
       [],
       |row| row.get::<_, Option<String>>(0),
@@ -2743,6 +2855,7 @@ fn latest_completed_period_month(connection: &Connection) -> Result<String, AppE
         select max(period_month)
         from monthly_asset_snapshots
         where version_no = 1
+          and period_month < strftime('%Y-%m', 'now', 'localtime')
           and note = '初始化资产快照'
         ",
         [],
@@ -3024,6 +3137,40 @@ fn category_year_rank(
         amount: row.get(2)?,
         percent: row.get(3)?,
         month_over_month_delta: 0.0,
+      })
+    })?
+    .collect::<Result<Vec<_>, _>>()?;
+  Ok(rows)
+}
+
+fn category_month_amounts(
+  connection: &Connection,
+  snapshot_month: &str,
+  transaction_type: &str,
+) -> Result<Vec<MobileCategoryMonthAmount>, AppError> {
+  let mut statement = connection.prepare(
+    "
+    select
+      ct.period_month,
+      coalesce(c.name, ct.raw_category_snapshot, '未分类') as category,
+      sum(ct.amount) as amount
+    from confirmed_transactions ct
+    left join categories c on c.id = ct.category_id
+    where ct.period_month <= ?1
+      and ct.transaction_type = ?2
+      and ct.include_in_stats = 1
+      and ct.confirmation_status = 'confirmed'
+      and coalesce(c.name, ct.raw_category_snapshot, '') <> 'Numbers校准调整'
+    group by ct.period_month, category
+    order by ct.period_month, amount desc
+    ",
+  )?;
+  let rows = statement
+    .query_map(params![snapshot_month, transaction_type], |row| {
+      Ok(MobileCategoryMonthAmount {
+        period_month: row.get(0)?,
+        category: row.get(1)?,
+        amount: row.get(2)?,
       })
     })?
     .collect::<Result<Vec<_>, _>>()?;
@@ -6807,7 +6954,7 @@ fn generate_monthly_analysis(
     ",
     params![
       make_unique_id("audit", &format!("monthly_close|{}", period_month)),
-      &period_month,
+      period_month,
       serde_json::json!({ "status": "generated" }).to_string()
     ],
   )?;
@@ -6835,15 +6982,15 @@ fn generate_monthly_analysis(
   Ok(status)
 }
 
-#[tauri::command]
-fn get_asset_entry_items(
-  period_month: String,
-  db: State<'_, Database>,
-  security: State<'_, SecuritySession>,
-) -> Result<Vec<AssetEntryItem>, AppError> {
-  let connection = db.work_connection.lock().expect("database mutex poisoned");
-  ensure_unlocked(&connection, &security)?;
-  let previous_month = latest_monthly_update_run_before(&connection, &period_month)?
+fn next_period_month(period_month: &str) -> String {
+  let (year, month) = parse_period(period_month);
+  let date_month = if month >= 12 { 1 } else { month + 1 };
+  let date_year = if month >= 12 { year + 1 } else { year };
+  format!("{}-{:02}", date_year, date_month)
+}
+
+fn asset_entry_items_for_connection(connection: &Connection, period_month: &str) -> Result<Vec<AssetEntryItem>, AppError> {
+  let previous_month = latest_monthly_update_run_before(connection, period_month)?
     .unwrap_or_default();
   let mut statement = connection.prepare(
     "
@@ -6917,12 +7064,23 @@ fn get_asset_entry_items(
     .collect::<Result<Vec<_>, _>>()?;
   drop(statement);
   for item in rows.iter_mut() {
-    item.dca_plans = asset_dca_plans(&connection, &item.id)?;
+    item.dca_plans = asset_dca_plans(connection, &item.id)?;
     if !item.dca_plans.is_empty() {
       item.is_dca = true;
     }
   }
   Ok(rows)
+}
+
+#[tauri::command]
+fn get_asset_entry_items(
+  period_month: String,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<Vec<AssetEntryItem>, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  asset_entry_items_for_connection(&connection, &period_month)
 }
 
 #[tauri::command]
@@ -7168,15 +7326,11 @@ fn delete_asset(
   Ok(())
 }
 
-#[tauri::command]
-fn save_asset_month_entries(
-  period_month: String,
-  entries: Vec<AssetMonthEntryInput>,
-  db: State<'_, Database>,
-  security: State<'_, SecuritySession>,
+fn save_asset_month_entries_for_connection(
+  connection: &mut Connection,
+  period_month: &str,
+  entries: &[AssetMonthEntryInput],
 ) -> Result<MonthlyStepStatus, AppError> {
-  let mut connection = db.work_connection.lock().expect("database mutex poisoned");
-  ensure_unlocked(&connection, &security)?;
   let tx = connection.transaction()?;
   let snapshot_date = month_end_date(&period_month);
 
@@ -7323,7 +7477,7 @@ fn save_asset_month_entries(
       params![
         snapshot_id,
         entry.asset_id,
-        period_month,
+        &period_month,
         snapshot_date,
         entry.month_end_amount,
         entry.currency,
@@ -7453,18 +7607,23 @@ fn save_asset_month_entries(
   set_step_status(&tx, &period_month, "assets", all_confirmed)?;
   tx.commit()?;
 
-  build_monthly_step_status(&connection, &period_month)
+  build_monthly_step_status(connection, period_month)
 }
 
 #[tauri::command]
-fn get_generated_dca_cashflows(
+fn save_asset_month_entries(
   period_month: String,
+  entries: Vec<AssetMonthEntryInput>,
   db: State<'_, Database>,
   security: State<'_, SecuritySession>,
-) -> Result<Vec<GeneratedDcaCashflow>, AppError> {
-  let connection = db.work_connection.lock().expect("database mutex poisoned");
+) -> Result<MonthlyStepStatus, AppError> {
+  let mut connection = db.work_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
-  let (year, month) = parse_period(&period_month);
+  save_asset_month_entries_for_connection(&mut connection, &period_month, &entries)
+}
+
+fn generated_dca_cashflows_for_connection(connection: &Connection, period_month: &str) -> Result<Vec<GeneratedDcaCashflow>, AppError> {
+  let (year, month) = parse_period(period_month);
   let month_days = days_in_month(year, month);
   let month_start = format!("{}-{:02}-01", year, month);
   let month_end = format!("{}-{:02}-{:02}", year, month, month_days);
@@ -7602,7 +7761,7 @@ fn get_generated_dca_cashflows(
   for flow in generated.iter_mut() {
     let override_id = dca_override_id(
       &flow.asset_id,
-      &period_month,
+      period_month,
       &flow.flow_date,
       flow.dca_plan_id.as_deref(),
     );
@@ -7632,6 +7791,17 @@ fn get_generated_dca_cashflows(
     }
   }
   Ok(generated)
+}
+
+#[tauri::command]
+fn get_generated_dca_cashflows(
+  period_month: String,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<Vec<GeneratedDcaCashflow>, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  generated_dca_cashflows_for_connection(&connection, &period_month)
 }
 
 #[tauri::command]
@@ -8006,6 +8176,7 @@ fn get_dashboard_seed_summary(
     .find(|item| item.period_month == snapshot_month.as_str())
     .and_then(|item| item.investment_return_rate);
   let expense_categories = category_breakdown(&connection, &snapshot_month, "expense")?;
+  let expense_category_trends = category_month_amounts(&connection, &snapshot_month, "expense")?;
   let income_categories = category_breakdown(&connection, &snapshot_month, "income")?;
   let expense_year_rank = category_year_rank(&connection, &snapshot_month, "expense")?;
   let income_year_rank = category_year_rank(&connection, &snapshot_month, "income")?;
@@ -8022,6 +8193,9 @@ fn get_dashboard_seed_summary(
   let asset_allocation_trends = asset_allocation_trends(&connection)?;
   let investment_assets = investment_asset_performance(&connection, &snapshot_month)?;
   let investment_cashflow_calendar = investment_cashflow_calendar(&connection, &snapshot_month)?;
+  let mobile_update_month = next_period_month(&snapshot_month);
+  let asset_entry_items = asset_entry_items_for_connection(&connection, &mobile_update_month)?;
+  let dca_cashflows = generated_dca_cashflows_for_connection(&connection, &mobile_update_month)?;
   let investment_group_performances = investment_group_performances(&connection, &snapshot_month)?;
   let investment_group_trends = investment_group_trends(&connection)?;
   let discretionary_trends = discretionary_trends(&connection)?;
@@ -8097,6 +8271,7 @@ fn get_dashboard_seed_summary(
     investment_return_rate,
     monthly_trends,
     expense_categories,
+    expense_category_trends,
     income_categories,
     expense_year_rank,
     income_year_rank,
@@ -8108,6 +8283,8 @@ fn get_dashboard_seed_summary(
     asset_allocation_trends,
     investment_assets,
     investment_cashflow_calendar,
+    asset_entry_items,
+    dca_cashflows,
     investment_group_performances,
     investment_group_trends,
     discretionary_trends,
@@ -8190,9 +8367,9 @@ fn import_cloud_mobile_drafts(
   db: State<'_, Database>,
   security: State<'_, SecuritySession>,
 ) -> Result<MobileSyncPushResult, AppError> {
-  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  let mut connection = db.work_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
-  import_cloud_mobile_drafts_into_connection(&connection, drafts)
+  import_cloud_mobile_drafts_into_connection(&mut connection, drafts)
 }
 
 pub fn run() {
