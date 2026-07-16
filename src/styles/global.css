@@ -1556,6 +1556,17 @@ h2 {
   line-height: 1.5;
 }
 
+.secondary-mobile-link-card {
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+
+.mobile-link-copy-button {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 7px;
+}
+
 .mobile-device-list-head,
 .mobile-device-list article {
   display: flex;

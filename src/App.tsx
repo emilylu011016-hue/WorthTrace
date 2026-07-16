@@ -329,6 +329,7 @@ type MobileSyncSummary = {
 
 type MobilePairingInfo = {
   enabled: boolean;
+  mobile_app_version: string;
   account_id: string;
   pairing_code: string;
   pairing_url_path: string;
@@ -1847,6 +1848,7 @@ export function App() {
   const [mobileSyncMessage, setMobileSyncMessage] = useState<string | null>(null);
   const [mobileSyncExpanded, setMobileSyncExpanded] = useState(false);
   const [mobilePairingDialogOpen, setMobilePairingDialogOpen] = useState(false);
+  const [mobilePairingCopyMessage, setMobilePairingCopyMessage] = useState<string | null>(null);
   const environmentLabel = security?.environment_label || (browserPreviewSummary ? "Demo" : "");
   const isDemoEnvironment = environmentLabel.toLowerCase() === "demo";
   const isTestEnvironment = environmentLabel.toLowerCase() === "test";
@@ -5385,26 +5387,41 @@ export function App() {
 
   const renderMobilePairingDialog = () => {
     if (!mobilePairingDialogOpen || !mobilePairingInfo?.enabled) return null;
+    const localMobileUrl = mobilePairingInfo.pairing_url || mobilePairingInfo.pairing_url_path;
     return (
       <div className="settings-dialog-backdrop" role="presentation">
         <section aria-modal="true" className="settings-dialog mobile-pairing-dialog" role="dialog">
           <div className="settings-dialog-header">
             <div>
-              <p className="eyebrow">Legacy Local Sync</p>
-              <h2>本地手机同步</h2>
+              <p className="eyebrow">Mobile Companion</p>
+              <h2>手机版</h2>
             </div>
-            <button className="icon-only-button" onClick={() => setMobilePairingDialogOpen(false)} type="button" aria-label="关闭本地手机同步">
+            <button className="icon-only-button" onClick={() => setMobilePairingDialogOpen(false)} type="button" aria-label="关闭手机版">
               ×
             </button>
           </div>
           <div className="mobile-pairing-dialog-body">
-            <p className="mobile-sync-copy">这是旧版同网络同步入口，仅用于兼容历史测试。正式使用请在“账号与同步”里登录同一个账号。</p>
+            <p className="mobile-sync-copy">复制链接到手机浏览器打开，即可使用当前电脑内置的最新版手机界面，并自动连接这台电脑。</p>
             <section className="mobile-pairing-detail-card">
-              <span>添加设备</span>
+              <span>手机联动版 · v{mobilePairingInfo.mobile_app_version}</span>
               <strong>{mobilePairingInfo.pairing_code}</strong>
-              <code>{mobilePairingInfo.pairing_url || mobilePairingInfo.pairing_url_path}</code>
-              <small>手机打开上面的链接即可，不需要再下载或双击 .command。手机和电脑需要能互相访问同一局域网地址；手机开热点、电脑连接该热点也可以。</small>
+              <code>{localMobileUrl}</code>
+              <button
+                className="primary-button compact mobile-link-copy-button"
+                onClick={() => void copyMobileLink(localMobileUrl, "手机联动链接已复制")}
+                type="button"
+              >
+                <Copy size={15} />
+                复制手机联动链接
+              </button>
+              <small>手机和电脑需连接同一 Wi-Fi，电脑 App 需保持打开。首次打开后可从浏览器菜单“添加到主屏幕”。</small>
             </section>
+            <section className="mobile-pairing-detail-card secondary-mobile-link-card">
+              <span>跨网络账号同步</span>
+              <b>手机与电脑登录同一账号</b>
+              <small>手机草稿会进入云端草稿箱；电脑端从“账号与同步”拉取并确认入库。该流程不依赖本地配对。</small>
+            </section>
+            {mobilePairingCopyMessage ? <p className="mobile-sync-message">{mobilePairingCopyMessage}</p> : null}
             <section className="mobile-device-list">
               <div className="mobile-device-list-head">
                 <b>已绑定设备</b>
@@ -5432,8 +5449,8 @@ export function App() {
                 className="primary-button compact danger-action"
                 onClick={() => {
                   setConfirmDialog({
-                    title: "清空旧版本地同步设备？",
-                    message: "清空后，旧版同网络手机入口需要重新生成连接。已进入电脑收件箱或已入库的数据不会删除。",
+                    title: "清空本地同步设备？",
+                    message: "清空后，本地联动链接会重新生成。云端账号、已进入电脑收件箱或已入库的数据不会删除。",
                     confirmLabel: "清空设备",
                     danger: true,
                     onConfirm: async () => {
@@ -5444,7 +5461,7 @@ export function App() {
                 }}
                 type="button"
               >
-                解除绑定
+                清空本地绑定
               </button>
             </div>
           </div>
@@ -5540,12 +5557,41 @@ export function App() {
     }
   }
 
-  async function refreshMobilePairingInfo() {
+  async function refreshMobilePairingInfo(): Promise<MobilePairingInfo | null> {
     try {
       const result = await invoke<MobilePairingInfo>("get_mobile_pairing_info");
       setMobilePairingInfo(result);
+      return result;
     } catch {
       setMobilePairingInfo(null);
+      return null;
+    }
+  }
+
+  async function openMobilePairingDialog() {
+    setMobilePairingCopyMessage(null);
+    const info = await refreshMobilePairingInfo();
+    if (info?.enabled) {
+      setMobilePairingDialogOpen(true);
+    } else {
+      setMobileSyncMessage("手机版链接暂时不可用，请确认当前为已解锁的桌面 App。");
+    }
+  }
+
+  async function copyMobileLink(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMobilePairingCopyMessage(successMessage);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      setMobilePairingCopyMessage(copied ? successMessage : "复制失败，请手动选择链接复制");
     }
   }
 
@@ -5688,6 +5734,10 @@ export function App() {
         </div>
         <div className="security-actions">
           {renderThemeSwitcher("全局主题")}
+          <button className="icon-button" onClick={() => void openMobilePairingDialog()} type="button">
+            <Smartphone size={17} />
+            <span>手机版</span>
+          </button>
           <button className="icon-button" onClick={() => openSettings("sync")} type="button">
             <Settings size={17} />
             <span>账号与同步</span>

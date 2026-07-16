@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.28";
+const MOBILE_APP_VERSION = "0.3.29";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";

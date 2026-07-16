@@ -1,14 +1,14 @@
 # 钱迹WorthTrace 手机端工作区
 
-更新时间：2026-06-27
+更新时间：2026-07-16
 
 ## 当前版本
 
-- 手机 PWA 原型版本：0.3.4。
-- 所属项目版本：2.7.4。
+- 手机 PWA 版本：0.3.29。
+- 所属项目版本：2.7.8。
 - 当前手机端通过已绑定的电脑 App 本地同步服务读取看板和提交草稿，不直接打开 SQLite 文件。
 - 手机端本地草稿使用浏览器 IndexedDB：`worthtrace_mobile_v3`。
-- 0.3.4 首次打开会清理旧 `worthtrace_mobile_v1` / `worthtrace_mobile_v2` 测试草稿，让手机端回到干净初始状态。
+- 手机端首次打开新版会清理旧 `worthtrace_mobile_v1` / `worthtrace_mobile_v2` 测试草稿，让手机端回到干净初始状态。
 
 ## 这个文件夹放什么
 

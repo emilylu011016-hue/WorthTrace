@@ -38,10 +38,8 @@ fi
 find "$TEST_DIR" -maxdepth 1 -name 'monthly_update_test_*.sqlite3' -delete
 find "$TEST_DIR" -maxdepth 1 -name 'dashboard_test_*.sqlite3' -delete
 
-if [ ! -f "$DASHBOARD_DB" ]; then
-  sqlite3 "$REAL_DB" ".backup '$DASHBOARD_DB'"
-fi
-
+rm -f "$DASHBOARD_DB"
+sqlite3 "$REAL_DB" ".backup '$DASHBOARD_DB'"
 rm -f "$WORK_DB"
 sqlite3 "$DASHBOARD_DB" ".backup '$WORK_DB'"
 

@@ -25,6 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
+const MOBILE_PWA_VERSION: &str = "0.3.29";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -86,6 +87,7 @@ struct MobilePairInput {
 #[derive(Serialize)]
 struct MobilePairingInfo {
   enabled: bool,
+  mobile_app_version: String,
   account_id: String,
   pairing_code: String,
   pairing_url_path: String,
@@ -1664,6 +1666,7 @@ fn reset_mobile_pairing(connection: &Connection) -> Result<MobilePairingInfo, Ap
   let pairing_url_path = mobile_pairing_path(&pairing_code);
   Ok(MobilePairingInfo {
     enabled: true,
+    mobile_app_version: MOBILE_PWA_VERSION.to_string(),
     account_id,
     pairing_url_path,
     pairing_url: mobile_pairing_url(&pairing_code),
@@ -2185,7 +2188,7 @@ fn mobile_sync_lan_ip() -> String {
 }
 
 fn mobile_pairing_path(pairing_code: &str) -> String {
-  format!("/index.html?mobileVersion=0.3.9&pairCode={pairing_code}")
+  format!("/index.html?mobileVersion={MOBILE_PWA_VERSION}&resetCache=1&pairCode={pairing_code}")
 }
 
 fn mobile_pairing_url(pairing_code: &str) -> String {
@@ -2199,6 +2202,7 @@ fn mobile_pwa_response(path: &str) -> Option<Vec<u8>> {
     "/styles.css" => Some(http_response("200 OK", "text/css", MOBILE_PWA_STYLES)),
     "/sw.js" => Some(http_response("200 OK", "application/javascript", MOBILE_PWA_SW)),
     "/manifest.webmanifest" => Some(http_response("200 OK", "application/manifest+json", MOBILE_PWA_MANIFEST)),
+    "/logo-qianji-a.svg" => Some(http_bytes("200 OK", "image/svg+xml", MOBILE_PWA_LOGO.as_bytes())),
     "/assets/logo-qianji-a.svg" => Some(http_bytes("200 OK", "image/svg+xml", MOBILE_PWA_LOGO.as_bytes())),
     _ => None,
   }
@@ -2279,6 +2283,7 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
               let pairing_url_path = mobile_pairing_path(&pairing_code);
               Ok(MobilePairingInfo {
                 enabled: true,
+                mobile_app_version: MOBILE_PWA_VERSION.to_string(),
                 account_id,
                 pairing_url_path,
                 pairing_url: mobile_pairing_url(&pairing_code),
@@ -8321,6 +8326,7 @@ fn get_mobile_pairing_info(
   let pairing_url_path = mobile_pairing_path(&pairing_code);
   Ok(MobilePairingInfo {
     enabled: true,
+    mobile_app_version: MOBILE_PWA_VERSION.to_string(),
     account_id,
     pairing_url_path,
     pairing_url: mobile_pairing_url(&pairing_code),

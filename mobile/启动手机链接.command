@@ -9,7 +9,7 @@ IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null |
 
 if [ ! -d "$MOBILE_DIR" ]; then
   echo "找不到手机端文件夹：$MOBILE_DIR"
-  echo "请确认已经完整解压 worthtrace-mobile-pwa-0.3.28.zip。"
+  echo "请确认已经完整解压 worthtrace-mobile-pwa-0.3.29.zip。"
   read -r "?按回车退出。"
   exit 1
 fi
@@ -20,8 +20,8 @@ if [ -z "$IP" ]; then
   exit 1
 fi
 
-URL="http://$IP:$PORT/index.html?mobileVersion=0.3.28&resetCache=1&syncUrl=http://$IP:$SYNC_PORT"
-RESET_URL="http://$IP:$PORT/index.html?mobileVersion=0.3.28&resetCache=1&resetBinding=1&syncUrl=http://$IP:$SYNC_PORT"
+URL="http://$IP:$PORT/index.html?mobileVersion=0.3.29&resetCache=1&syncUrl=http://$IP:$SYNC_PORT"
+RESET_URL="http://$IP:$PORT/index.html?mobileVersion=0.3.29&resetCache=1&resetBinding=1&syncUrl=http://$IP:$SYNC_PORT"
 LINK_PAGE="$DIR/手机打开链接.html"
 
 cat > "$LINK_PAGE" <<HTML
@@ -61,7 +61,7 @@ HTML
 open "$LINK_PAGE" >/dev/null 2>&1 || true
 
 echo ""
-echo "钱迹 WorthTrace 手机端 PWA 0.3.28"
+echo "钱迹 WorthTrace 手机端 PWA 0.3.29"
 echo ""
 echo "请把这个链接发到手机："
 echo "$URL"
