@@ -17,10 +17,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - label: "macOS Apple Silicon"
+            platform: "macos-14"
+            rust_target: "aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles app,dmg"
           - label: "macOS Intel"
             platform: "macos-15-intel"
             rust_target: "x86_64-apple-darwin"
             args: "--target x86_64-apple-darwin --bundles app,dmg"
+          - label: "Windows"
+            platform: "windows-latest"
+            rust_target: ""
+            args: "--bundles nsis"
 
     steps:
       - name: Checkout repository
