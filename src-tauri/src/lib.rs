@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.3.29";
+const MOBILE_PWA_VERSION: &str = "0.3.30";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -42,6 +42,7 @@ struct MobileSyncRecordInput {
   local_id: String,
   server_id: Option<String>,
   record_kind: Option<String>,
+  operation: Option<String>,
   sync_status: Option<String>,
   transaction_type: Option<String>,
   amount: Option<f64>,
@@ -59,7 +60,7 @@ struct MobileSyncRecordInput {
   updated_at: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct MobileSyncPushInput {
   device_id: Option<String>,
   account_id: Option<String>,
@@ -151,6 +152,7 @@ struct MobileSyncInboxRecord {
   device_id: String,
   local_id: String,
   record_kind: String,
+  operation: String,
   transaction_type: Option<String>,
   transaction_date: Option<String>,
   period_month: Option<String>,
@@ -162,7 +164,7 @@ struct MobileSyncInboxRecord {
   received_at: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct CloudMobileDraftInput {
   id: String,
   user_id: String,
@@ -978,6 +980,7 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
       device_id text not null,
       local_id text not null,
       record_kind text not null,
+      operation text not null default 'create',
       transaction_type text,
       transaction_date text,
       period_month text,
@@ -1007,6 +1010,12 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
   add_column_if_missing(connection, "mobile_sync_devices", "device_name", "device_name text")?;
   add_column_if_missing(connection, "mobile_sync_devices", "paired_at", "paired_at text")?;
   add_column_if_missing(connection, "mobile_sync_inbox", "account_id", "account_id text")?;
+  add_column_if_missing(
+    connection,
+    "mobile_sync_inbox",
+    "operation",
+    "operation text not null default 'create'",
+  )?;
   connection.execute(
     "
     create table if not exists credit_cards (
@@ -1739,6 +1748,236 @@ fn apply_mobile_asset_entry_batches(
   Ok(())
 }
 
+fn mobile_record_operation(record: &MobileSyncRecordInput) -> String {
+  record
+    .operation
+    .as_deref()
+    .or_else(|| record.payload_json.as_ref()?.get("operation")?.as_str())
+    .unwrap_or("create")
+    .trim()
+    .to_lowercase()
+}
+
+fn mobile_confirmed_transaction_id(account_id: &str, device_id: &str, local_id: &str) -> String {
+  make_id("mobile_confirmed", &format!("{account_id}|{device_id}|{local_id}"))
+}
+
+fn mobile_category_id(
+  connection: &Connection,
+  category: Option<&str>,
+  transaction_type: &str,
+) -> Result<Option<String>, AppError> {
+  let name = category.unwrap_or("").trim();
+  if name.is_empty() {
+    return Ok(None);
+  }
+  if let Some(id) = connection
+    .query_row(
+      "select id from categories where name = ?1 and category_kind = ?2",
+      params![name, transaction_type],
+      |row| row.get::<_, String>(0),
+    )
+    .optional()?
+  {
+    return Ok(Some(id));
+  }
+  let id = make_id("cat", &format!("mobile|{transaction_type}|{name}"));
+  let rigidity: Option<&str> = if transaction_type == "expense" { Some("flexible") } else { None };
+  connection.execute(
+    "
+    insert into categories (
+      id, name, category_kind, rigidity, is_personal, is_active,
+      sort_order, is_auto_created, source, created_from_raw_category, note
+    )
+    values (?1, ?2, ?3, ?4, 1, 1, 999, 1, 'mobile', ?2, '手机记账自动新增')
+    on conflict(name, category_kind) do nothing
+    ",
+    params![id, name, transaction_type, rigidity],
+  )?;
+  let actual_id = connection.query_row(
+    "select id from categories where name = ?1 and category_kind = ?2",
+    params![name, transaction_type],
+    |row| row.get::<_, String>(0),
+  )?;
+  Ok(Some(actual_id))
+}
+
+fn apply_mobile_transaction_record(
+  connection: &Connection,
+  account_id: &str,
+  device_id: &str,
+  record: &MobileSyncRecordInput,
+) -> Result<(), AppError> {
+  if record.record_kind.as_deref().unwrap_or("transaction") != "transaction" {
+    return Ok(());
+  }
+  let local_id = record.local_id.trim();
+  if local_id.is_empty() {
+    return Ok(());
+  }
+  let operation = mobile_record_operation(record);
+  let id = mobile_confirmed_transaction_id(account_id, device_id, local_id);
+  if operation == "delete" {
+    let deleted = connection.execute(
+      "delete from confirmed_transactions where id = ?1 and source_kind = 'mobile'",
+      params![id],
+    )?;
+    if deleted > 0 {
+      connection.execute(
+        "
+        insert into audit_logs (id, entity_type, entity_id, action, old_value_json, new_value_json)
+        values (?1, 'confirmed_transactions', ?2, 'mobile_delete', ?3, null)
+        ",
+        params![
+          make_unique_id("audit", &format!("mobile_delete|{id}")),
+          id,
+          serde_json::json!({ "device_id": device_id, "local_id": local_id }).to_string()
+        ],
+      )?;
+    }
+    return Ok(());
+  }
+  if operation != "create" && operation != "update" {
+    return Err(AppError::InvalidCsvValue(format!("不支持的手机记账操作：{operation}")));
+  }
+  let transaction_type = record.transaction_type.as_deref().unwrap_or("").trim();
+  if transaction_type != "income" && transaction_type != "expense" {
+    return Err(AppError::InvalidCsvValue("手机记账类型必须是收入或支出".to_string()));
+  }
+  let transaction_date = record.transaction_date.as_deref().unwrap_or("").trim();
+  if transaction_date.len() < 10 {
+    return Err(AppError::InvalidCsvValue("手机记账日期无效".to_string()));
+  }
+  let amount = record.amount.unwrap_or(0.0).abs();
+  if !amount.is_finite() || amount <= 0.0 {
+    return Err(AppError::InvalidCsvValue("手机记账金额必须大于 0".to_string()));
+  }
+  let period_month = period_from_date(transaction_date);
+  let category_id = mobile_category_id(connection, record.category.as_deref(), transaction_type)?;
+  let existed: bool = connection.query_row(
+    "select exists(select 1 from confirmed_transactions where id = ?1)",
+    params![id],
+    |row| row.get(0),
+  )?;
+  connection.execute(
+    "
+    insert into confirmed_transactions (
+      id, source_kind, raw_transaction_id, period_month, transaction_date,
+      transaction_type, amount, currency, category_id, raw_category_snapshot,
+      include_in_stats, confirmation_status, adjustment_reason, note
+    )
+    values (?1, 'mobile', null, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 'confirmed', null, ?9)
+    on conflict(id) do update set
+      period_month = excluded.period_month,
+      transaction_date = excluded.transaction_date,
+      transaction_type = excluded.transaction_type,
+      amount = excluded.amount,
+      currency = excluded.currency,
+      category_id = excluded.category_id,
+      raw_category_snapshot = excluded.raw_category_snapshot,
+      include_in_stats = 1,
+      confirmation_status = 'confirmed',
+      adjustment_reason = null,
+      note = excluded.note,
+      updated_at = current_timestamp
+    ",
+    params![
+      id,
+      period_month,
+      transaction_date,
+      transaction_type,
+      amount,
+      record.currency.as_deref().unwrap_or("CNY"),
+      category_id,
+      record.category,
+      record.note
+    ],
+  )?;
+  connection.execute(
+    "
+    insert into audit_logs (id, entity_type, entity_id, action, old_value_json, new_value_json)
+    values (?1, 'confirmed_transactions', ?2, ?3, ?4, ?5)
+    ",
+    params![
+      make_unique_id("audit", &format!("mobile_upsert|{id}|{}", record.updated_at.as_deref().unwrap_or(""))),
+      id,
+      if existed { "mobile_update" } else { "mobile_create" },
+      if existed { Some(serde_json::json!({ "replaced": true }).to_string()) } else { None },
+      serde_json::json!({
+        "device_id": device_id,
+        "local_id": local_id,
+        "period_month": period_month,
+        "transaction_date": transaction_date,
+        "transaction_type": transaction_type,
+        "amount": amount,
+        "category": record.category,
+        "note": record.note
+      }).to_string()
+    ],
+  )?;
+  Ok(())
+}
+
+fn cloud_draft_as_mobile_record(draft: &CloudMobileDraftInput) -> MobileSyncRecordInput {
+  MobileSyncRecordInput {
+    local_id: draft.local_id.clone(),
+    server_id: Some(draft.id.clone()),
+    record_kind: Some(draft.record_kind.clone()),
+    operation: draft
+      .payload_json
+      .as_ref()
+      .and_then(|payload| payload.get("operation"))
+      .and_then(|value| value.as_str())
+      .map(str::to_string),
+    sync_status: Some("synced".to_string()),
+    transaction_type: draft.transaction_type.clone(),
+    amount: draft.amount,
+    currency: draft.currency.clone(),
+    category: draft.category.clone(),
+    transaction_date: draft.transaction_date.clone(),
+    period_month: draft.period_month.clone(),
+    note: draft.note.clone(),
+    current_billed_amount: None,
+    current_unbilled_amount: None,
+    previous_unbilled_amount: None,
+    net_adjustment: draft.payload_json.as_ref().and_then(|payload| payload.get("net_adjustment")).and_then(|value| value.as_f64()),
+    payload_json: draft.payload_json.clone(),
+    created_at: draft.payload_json.as_ref().and_then(|payload| payload.get("created_at")).and_then(|value| value.as_str()).map(str::to_string),
+    updated_at: draft.payload_json.as_ref().and_then(|payload| payload.get("updated_at")).and_then(|value| value.as_str()).map(str::to_string),
+  }
+}
+
+fn apply_mobile_records_to_connection(
+  connection: &mut Connection,
+  account_id: &str,
+  device_id: &str,
+  records: &[MobileSyncRecordInput],
+) -> Result<(), AppError> {
+  ensure_runtime_schema(connection)?;
+  let tx = connection.unchecked_transaction()?;
+  for record in records {
+    apply_mobile_transaction_record(&tx, account_id, device_id, record)?;
+  }
+  tx.commit()?;
+  Ok(())
+}
+
+fn apply_cloud_drafts_to_connection(
+  connection: &mut Connection,
+  account_id: &str,
+  drafts: &[CloudMobileDraftInput],
+) -> Result<(), AppError> {
+  ensure_runtime_schema(connection)?;
+  let tx = connection.unchecked_transaction()?;
+  for draft in drafts {
+    let record = cloud_draft_as_mobile_record(draft);
+    let device_id = draft.device_id.as_deref().unwrap_or("worthtrace-cloud");
+    apply_mobile_transaction_record(&tx, account_id, device_id, &record)?;
+  }
+  tx.commit()?;
+  Ok(())
+}
+
 fn store_mobile_sync_records(
   connection: &mut Connection,
   input: MobileSyncPushInput,
@@ -1765,6 +2004,7 @@ fn store_mobile_sync_records(
       .unwrap_or("transaction")
       .trim()
       .to_string();
+    let operation = mobile_record_operation(&record);
     let payload_json = serde_json::to_string(&record)
       .map_err(|err| AppError::InvalidCsvValue(format!("手机同步数据无法保存：{err}")))?;
     if let Some((period_month, entries)) = mobile_asset_entries_from_payload(
@@ -1774,17 +2014,19 @@ fn store_mobile_sync_records(
     )? {
       asset_entry_batches.push((id.clone(), period_month, entries));
     }
+    apply_mobile_transaction_record(&tx, &expected_account_id, &device_id, &record)?;
     tx.execute(
       "
       insert into mobile_sync_inbox (
-        id, account_id, device_id, local_id, record_kind, transaction_type, transaction_date,
+        id, account_id, device_id, local_id, record_kind, operation, transaction_type, transaction_date,
         period_month, amount, currency, category, note, current_billed_amount,
         current_unbilled_amount, previous_unbilled_amount, net_adjustment, payload_json, sync_status
       )
-      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 'received')
+      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 'received')
       on conflict(device_id, local_id) do update set
         account_id = excluded.account_id,
         record_kind = excluded.record_kind,
+        operation = excluded.operation,
         transaction_type = excluded.transaction_type,
         transaction_date = excluded.transaction_date,
         period_month = excluded.period_month,
@@ -1797,10 +2039,8 @@ fn store_mobile_sync_records(
         previous_unbilled_amount = excluded.previous_unbilled_amount,
         net_adjustment = excluded.net_adjustment,
         payload_json = excluded.payload_json,
-        sync_status = case
-          when mobile_sync_inbox.sync_status = 'reviewed' then 'reviewed'
-          else 'received'
-        end,
+        sync_status = 'received',
+        reviewed_at = null,
         updated_at = current_timestamp
       ",
       params![
@@ -1809,6 +2049,7 @@ fn store_mobile_sync_records(
         device_id,
         local_id,
         record_kind,
+        operation,
         record.transaction_type,
         record.transaction_date,
         record.period_month,
@@ -1866,21 +2107,26 @@ fn import_cloud_mobile_drafts_into_connection(
     let payload_value = draft.payload_json.clone().unwrap_or_else(|| serde_json::json!({}));
     let payload_json = payload_value.to_string();
     let net_adjustment = payload_value.get("net_adjustment").and_then(|value| value.as_f64());
+    let mobile_record = cloud_draft_as_mobile_record(&draft);
+    let source_device_id = draft.device_id.as_deref().unwrap_or("worthtrace-cloud").to_string();
+    let operation = mobile_record_operation(&mobile_record);
     let record_kind = if draft.record_kind.trim().is_empty() {
       "transaction".to_string()
     } else {
-      draft.record_kind
+      draft.record_kind.clone()
     };
+    apply_mobile_transaction_record(&tx, &account_id, &source_device_id, &mobile_record)?;
     tx.execute(
       "
       insert into mobile_sync_inbox (
-        id, account_id, device_id, local_id, record_kind, transaction_type, transaction_date,
+        id, account_id, device_id, local_id, record_kind, operation, transaction_type, transaction_date,
         period_month, amount, currency, category, note, net_adjustment, payload_json, sync_status
       )
-      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'received')
+      values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 'received')
       on conflict(device_id, local_id) do update set
         account_id = excluded.account_id,
         record_kind = excluded.record_kind,
+        operation = excluded.operation,
         transaction_type = excluded.transaction_type,
         transaction_date = excluded.transaction_date,
         period_month = excluded.period_month,
@@ -1890,10 +2136,8 @@ fn import_cloud_mobile_drafts_into_connection(
         note = excluded.note,
         net_adjustment = excluded.net_adjustment,
         payload_json = excluded.payload_json,
-        sync_status = case
-          when mobile_sync_inbox.sync_status = 'reviewed' then 'reviewed'
-          else 'received'
-        end,
+        sync_status = 'received',
+        reviewed_at = null,
         updated_at = current_timestamp
       ",
       params![
@@ -1902,6 +2146,7 @@ fn import_cloud_mobile_drafts_into_connection(
         device_id,
         local_id,
         record_kind,
+        operation,
         draft.transaction_type,
         draft.transaction_date,
         draft.period_month,
@@ -1973,7 +2218,7 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
   )?;
   let mut statement = connection.prepare(
     "
-    select id, account_id, device_id, local_id, record_kind, transaction_type, transaction_date,
+    select id, account_id, device_id, local_id, record_kind, operation, transaction_type, transaction_date,
       period_month, amount, category, note, net_adjustment, sync_status, received_at
     from mobile_sync_inbox
     where (?1 is null or account_id = ?1)
@@ -1989,15 +2234,16 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
         device_id: row.get(2)?,
         local_id: row.get(3)?,
         record_kind: row.get(4)?,
-        transaction_type: row.get(5)?,
-        transaction_date: row.get(6)?,
-        period_month: row.get(7)?,
-        amount: row.get(8)?,
-        category: row.get(9)?,
-        note: row.get(10)?,
-        net_adjustment: row.get(11)?,
-        sync_status: row.get(12)?,
-        received_at: row.get(13)?,
+        operation: row.get(5)?,
+        transaction_type: row.get(6)?,
+        transaction_date: row.get(7)?,
+        period_month: row.get(8)?,
+        amount: row.get(9)?,
+        category: row.get(10)?,
+        note: row.get(11)?,
+        net_adjustment: row.get(12)?,
+        sync_status: row.get(13)?,
+        received_at: row.get(14)?,
       })
     })?
     .collect::<Result<Vec<_>, _>>()?;
@@ -2383,15 +2629,32 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
         }
       } else if method == "POST" && path == "/mobile-sync/push" {
         match serde_json::from_str::<MobileSyncPushInput>(&body) {
-          Ok(input) => match Connection::open(&work_db_path)
-            .map_err(AppError::from)
-            .and_then(|mut connection| {
-              ensure_mobile_sync_schema(&connection)?;
-              store_mobile_sync_records(&mut connection, input)
-            }) {
+          Ok(input) => {
+            let dashboard_input = input.clone();
+            match Connection::open(&work_db_path)
+              .map_err(AppError::from)
+              .and_then(|mut connection| {
+                ensure_mobile_sync_schema(&connection)?;
+                store_mobile_sync_records(&mut connection, input)
+              })
+              .and_then(|result| {
+                if work_db_path != dashboard_db_path {
+                  let account_id = dashboard_input.account_id.as_deref().unwrap_or("");
+                  let device_id = mobile_sync_device_id(dashboard_input.device_id.clone());
+                  let mut dashboard_connection = Connection::open(&dashboard_db_path)?;
+                  apply_mobile_records_to_connection(
+                    &mut dashboard_connection,
+                    account_id,
+                    &device_id,
+                    &dashboard_input.records,
+                  )?;
+                }
+                Ok(result)
+              }) {
               Ok(result) => http_json(&result),
               Err(err) => http_error("500 Internal Server Error", &err.to_string()),
-            },
+            }
+          }
           Err(err) => http_error("400 Bad Request", &format!("invalid sync payload: {err}")),
         }
       } else {
@@ -6284,6 +6547,7 @@ fn confirm_transactions(
     select count(*)
     from confirmed_transactions
     where period_month = ?1 and transaction_type = ?2
+      and source_kind <> 'mobile'
     ",
     params![period_month, transaction_type],
     |row| row.get(0),
@@ -6292,6 +6556,7 @@ fn confirm_transactions(
     "
     delete from confirmed_transactions
     where period_month = ?1 and transaction_type = ?2
+      and source_kind <> 'mobile'
     ",
     params![period_month, transaction_type],
   )?;
@@ -8373,9 +8638,16 @@ fn import_cloud_mobile_drafts(
   db: State<'_, Database>,
   security: State<'_, SecuritySession>,
 ) -> Result<MobileSyncPushResult, AppError> {
-  let mut connection = db.work_connection.lock().expect("database mutex poisoned");
-  ensure_unlocked(&connection, &security)?;
-  import_cloud_mobile_drafts_into_connection(&mut connection, drafts)
+  let dashboard_drafts = drafts.clone();
+  let mut work_connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&work_connection, &security)?;
+  let account_id = mobile_account_id(&work_connection)?;
+  let result = import_cloud_mobile_drafts_into_connection(&mut work_connection, drafts)?;
+  if db.split_databases {
+    let mut dashboard_connection = db.dashboard_connection.lock().expect("database mutex poisoned");
+    apply_cloud_drafts_to_connection(&mut dashboard_connection, &account_id, &dashboard_drafts)?;
+  }
+  Ok(result)
 }
 
 pub fn run() {
@@ -8447,4 +8719,98 @@ pub fn run() {
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn mobile_transaction(local_id: &str, operation: &str, date: &str, amount: f64) -> MobileSyncRecordInput {
+    MobileSyncRecordInput {
+      local_id: local_id.to_string(),
+      server_id: None,
+      record_kind: Some("transaction".to_string()),
+      operation: Some(operation.to_string()),
+      sync_status: Some("pending".to_string()),
+      transaction_type: Some("expense".to_string()),
+      amount: Some(amount),
+      currency: Some("CNY".to_string()),
+      category: Some("餐饮".to_string()),
+      transaction_date: Some(date.to_string()),
+      period_month: None,
+      note: Some("手机测试".to_string()),
+      current_billed_amount: None,
+      current_unbilled_amount: None,
+      previous_unbilled_amount: None,
+      net_adjustment: None,
+      payload_json: None,
+      created_at: None,
+      updated_at: Some(format!("{date}T12:00:00+08:00")),
+    }
+  }
+
+  #[test]
+  fn mobile_transaction_create_update_move_month_and_delete() {
+    let mut connection = Connection::open_in_memory().expect("open memory db");
+    connection.execute_batch(INITIAL_SCHEMA).expect("initial schema");
+    ensure_runtime_schema(&connection).expect("runtime schema");
+
+    apply_mobile_records_to_connection(
+      &mut connection,
+      "acct_test",
+      "device_test",
+      &[mobile_transaction("txn_1", "create", "2026-05-12", 20.0)],
+    )
+    .expect("create mobile transaction");
+    let may_total: f64 = connection
+      .query_row(
+        "select coalesce(sum(amount), 0) from confirmed_transactions where period_month = '2026-05'",
+        [],
+        |row| row.get(0),
+      )
+      .expect("read May total");
+    assert_eq!(may_total, 20.0);
+    let may_dashboard = dashboard_monthly_trends(&connection).expect("read May dashboard");
+    assert_eq!(may_dashboard.len(), 1);
+    assert_eq!(may_dashboard[0].period_month, "2026-05");
+    assert_eq!(may_dashboard[0].expense, 20.0);
+
+    apply_mobile_records_to_connection(
+      &mut connection,
+      "acct_test",
+      "device_test",
+      &[mobile_transaction("txn_1", "update", "2026-06-03", 35.0)],
+    )
+    .expect("update mobile transaction");
+    let totals: (f64, f64) = connection
+      .query_row(
+        "
+        select
+          coalesce(sum(case when period_month = '2026-05' then amount else 0 end), 0),
+          coalesce(sum(case when period_month = '2026-06' then amount else 0 end), 0)
+        from confirmed_transactions
+        ",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+      )
+      .expect("read moved totals");
+    assert_eq!(totals, (0.0, 35.0));
+    let june_dashboard = dashboard_monthly_trends(&connection).expect("read moved dashboard");
+    assert_eq!(june_dashboard.len(), 1);
+    assert_eq!(june_dashboard[0].period_month, "2026-06");
+    assert_eq!(june_dashboard[0].expense, 35.0);
+
+    apply_mobile_records_to_connection(
+      &mut connection,
+      "acct_test",
+      "device_test",
+      &[mobile_transaction("txn_1", "delete", "2026-06-03", 35.0)],
+    )
+    .expect("delete mobile transaction");
+    let remaining: i64 = connection
+      .query_row("select count(*) from confirmed_transactions", [], |row| row.get(0))
+      .expect("count remaining transactions");
+    assert_eq!(remaining, 0);
+    assert!(dashboard_monthly_trends(&connection).expect("read deleted dashboard").is_empty());
+  }
 }

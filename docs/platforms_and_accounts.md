@@ -128,7 +128,7 @@ mobile_dashboard_snapshots
 
 表用途：
 
-- `mobile_cloud_drafts`：手机记账草稿箱。手机写入，电脑拉取到本地收件箱后再确认入库。
+- `mobile_cloud_drafts`：手机记账变更箱。手机写入新增、修改、删除操作；电脑拉取后自动应用到本地统计。
 - `mobile_dashboard_snapshots`：电脑端已发布月报看板快照。电脑上传，手机读取，用于显示净资产、收支、资产配置、目标偏离等。
 
 相关文件：
@@ -187,7 +187,7 @@ docs/supabase_mobile_dashboard_snapshots.sql
 
 - 这是最重要的数据源。
 - GitHub、Vercel 不保存这个数据库。
-- 手机记账进入 Supabase 草稿箱后，需要电脑端拉取并确认，才会进入本地正式数据库。
+- 手机记账进入 Supabase 后，需要电脑端主动拉取；拉取成功即自动应用到本地正式数据库，并刷新已发布看板快照。
 - 新用户安装桌面 App 后，会在自己的电脑上生成自己的空数据库。
 
 ## Tauri / Rust / Cargo

@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.29";
+const MOBILE_APP_VERSION = "0.3.30";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -78,6 +78,8 @@ const categoryInput = document.querySelector("#categoryInput");
 const noteInput = document.querySelector("#noteInput");
 const bookMonthInput = document.querySelector("#bookMonthInput");
 const bookTodayButton = document.querySelector("#bookTodayButton");
+const bookMonthIncomeLabel = document.querySelector("#bookMonthIncomeLabel");
+const bookMonthExpenseLabel = document.querySelector("#bookMonthExpenseLabel");
 const bookMonthIncome = document.querySelector("#bookMonthIncome");
 const bookMonthExpense = document.querySelector("#bookMonthExpense");
 const openBookDialogButton = document.querySelector("#openBookDialogButton");
@@ -87,6 +89,7 @@ const bookMonthTitle = document.querySelector("#bookMonthTitle");
 const bookRecordTitle = document.querySelector("#bookRecordTitle");
 const cancelEditButton = document.querySelector("#cancelEditButton");
 const closeBookDialogButton = document.querySelector("#closeBookDialogButton");
+const deleteRecordButton = document.querySelector("#deleteRecordButton");
 const syncDialog = document.querySelector("#syncDialog");
 const syncDialogTitle = document.querySelector("#syncDialogTitle");
 const syncDialogText = document.querySelector("#syncDialogText");
@@ -301,7 +304,9 @@ bookForm.addEventListener("submit", async (event) => {
     local_id: editingRecord?.local_id || createLocalId("txn"),
     server_id: editingRecord?.server_id || null,
     record_kind: "transaction",
-    operation: editingRecord ? "update" : "create",
+    operation: editingRecord
+      ? (editingRecord.operation === "create" && !editingRecord.server_id ? "create" : "update")
+      : "create",
     sync_status: "pending",
     transaction_type: state.type,
     amount,
@@ -333,6 +338,9 @@ closeBookDialogButton.addEventListener("click", () => {
   clearBookEditForm();
   render();
   closeModal(bookDialog);
+});
+deleteRecordButton?.addEventListener("click", () => {
+  void deleteEditingRecord();
 });
 
 document.querySelector("#syncButton").addEventListener("click", showSyncDialog);
@@ -471,21 +479,31 @@ function pendingRecords() {
   return state.records.filter((record) => record.sync_status !== "synced" && (record.record_kind || "transaction") === "transaction");
 }
 
+function isDeletedRecord(record) {
+  return record.operation === "delete" || Boolean(record.deleted_at);
+}
+
+function transactionRecordsForMonth(month) {
+  return state.records.filter((record) => {
+    if ((record.record_kind || "transaction") !== "transaction" || isDeletedRecord(record)) return false;
+    if (record.transaction_type !== "income" && record.transaction_type !== "expense") return false;
+    return String(record.transaction_date || "").slice(0, 7) === month;
+  });
+}
+
 function render() {
   const pending = pendingRecords();
   const pendingSummary = summarizeRecords(pending);
-  const draftMonth = activeDraftMonthKey();
-  const draftMonthLabel = formatMonthShortLabel(draftMonth);
   updateAccessState();
   syncCount.textContent = String(pending.length);
   homePendingCount.textContent = `${pending.length} 条`;
-  setText("#homePendingLabel", `${draftMonthLabel}草稿待同步`);
+  setText("#homePendingLabel", "记账变更待同步");
   syncDot.classList.toggle("offline", !state.online);
   offlineBanner.hidden = state.online;
   syncCard.hidden = pending.length === 0;
-  syncCardTitle.textContent = pending.length ? `有 ${pending.length} 条 ${draftMonthLabel}草稿待同步` : "没有待同步记录";
+  syncCardTitle.textContent = pending.length ? `有 ${pending.length} 条记账变更待同步` : "没有待同步记录";
   syncCardText.textContent = state.online
-    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔。同步后进入云端草稿箱。`
+    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔${pendingSummary.deleteCount ? `，删除 ${pendingSummary.deleteCount} 笔` : ""}。同步后进入云端草稿箱。`
     : "离线记录会先保存在手机。恢复网络后同步到云端草稿箱。";
   privacyButton.innerHTML = state.privacy ? icons.eyeOff : icons.eye;
   privacyButton.setAttribute("aria-label", state.privacy ? "显示金额" : "隐藏金额");
@@ -515,7 +533,7 @@ function render() {
 function renderLocalRecords() {
   const month = activeDraftMonthKey();
   const monthLabel = formatMonthShortLabel(month);
-  const monthTransactions = state.records.filter((record) => (record.record_kind || "transaction") === "transaction" && String(record.transaction_date || "").startsWith(month));
+  const monthTransactions = transactionRecordsForMonth(month);
   const monthIncome = monthTransactions.filter((record) => record.transaction_type === "income");
   const monthExpense = monthTransactions.filter((record) => record.transaction_type === "expense");
   const monthCards = state.records.filter((record) => record.record_kind === "credit_card_adjustment" && (record.period_month || "").startsWith(month));
@@ -546,26 +564,26 @@ function showSyncDialog() {
   const pending = pendingRecords();
   const summary = summarizeRecords(pending);
   const draftMonthLabel = formatMonthShortLabel(activeDraftMonthKey());
-  const publishedMonthLabel = formatMonthShortLabel(mobileDashboardSnapshot.snapshotMonth);
-  if (syncDialogTitle) syncDialogTitle.textContent = `同步 ${draftMonthLabel}草稿`;
+  if (syncDialogTitle) syncDialogTitle.textContent = "同步记账变更";
   syncDialogText.innerHTML = pending.length
     ? `
       <div class="sync-summary-grid">
         <article><span>收入</span><strong>${summary.incomeCount} 笔</strong><small>${formatPlainMoney(summary.incomeAmount)}</small></article>
         <article><span>支出</span><strong>${summary.expenseCount} 笔</strong><small>${formatPlainMoney(summary.expenseAmount)}</small></article>
+        ${summary.deleteCount ? `<article><span>删除</span><strong>${summary.deleteCount} 笔</strong><small>同步后生效</small></article>` : ""}
       </div>
       <div class="sync-impact-list">
         <section>
           <b>同步后会影响</b>
-          <p>${draftMonthLabel}手机记账草稿。</p>
+          <p>新增、修改或删除记录对应月份的电脑统计。</p>
         </section>
         <section>
-          <b>暂不影响</b>
-          <p>${publishedMonthLabel}首页看板、资产总额、净资产、资产配置、正式健康看板和月报。</p>
+          <b>历史月份</b>
+          <p>已发布月份会重算收入、支出、储蓄率、支出结构和异常支出。</p>
         </section>
         <section>
           <b>下一步</b>
-          <p>电脑端确认 ${draftMonthLabel}收支并发布财务健康看板后，手机看板刷新。</p>
+          <p>电脑端收到变更后更新看板；账号同步需先在电脑端拉取。</p>
         </section>
       </div>
     `
@@ -885,8 +903,8 @@ function showCloudDialog() {
   }
   const signedIn = Boolean(cloudSession?.access_token);
   cloudDialogCopy.textContent = signedIn
-    ? "当前手机已登录账号同步。手机草稿会先进云端草稿箱；电脑端需要用同一账号拉取。"
-    : "同步后，手机草稿会进入云端草稿箱，电脑端再确认入库。";
+    ? "当前手机已登录账号同步。手机变更会先进云端；电脑端使用同一账号拉取后自动应用。"
+    : "同步后，手机记账变更会进入云端，电脑端拉取后自动应用并刷新看板。";
   cloudAccountDetail.hidden = !signedIn;
   cloudAccountDetail.innerHTML = signedIn
     ? `
@@ -1129,10 +1147,11 @@ async function syncPendingToDesktop() {
       };
     });
     await replaceRecords(state.records);
+    await loadMobileDashboardSnapshot();
     closeModal(syncDialog);
     render();
     void reportMobileStatus();
-    showToast(`已同步 ${result.accepted_count || 0} 条到电脑收件箱`);
+    showToast(`已同步 ${result.accepted_count || 0} 条到电脑并刷新看板`);
   } catch (err) {
     if (cloudSession && (await syncPendingToCloud(pending))) {
       closeModal(syncDialog);
@@ -1203,7 +1222,9 @@ function summarizeRecords(records) {
   return records.reduce(
     (summary, record) => {
       const kind = record.record_kind || "transaction";
-      if (kind === "credit_card_adjustment") {
+      if (isDeletedRecord(record)) {
+        summary.deleteCount += 1;
+      } else if (kind === "credit_card_adjustment") {
         summary.creditCardCount += 1;
         summary.creditCardNetAdjustment += Number(record.net_adjustment) || 0;
       } else if (record.transaction_type === "income") {
@@ -1215,7 +1236,7 @@ function summarizeRecords(records) {
       }
       return summary;
     },
-    { incomeCount: 0, incomeAmount: 0, expenseCount: 0, expenseAmount: 0, creditCardCount: 0, creditCardNetAdjustment: 0 }
+    { incomeCount: 0, incomeAmount: 0, expenseCount: 0, expenseAmount: 0, creditCardCount: 0, creditCardNetAdjustment: 0, deleteCount: 0 }
   );
 }
 
@@ -1322,6 +1343,9 @@ function renderTransactionsByDate(rows) {
 function renderBookTotals(incomeRows, expenseRows) {
   const incomeTotal = incomeRows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
   const expenseTotal = expenseRows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
+  const monthLabel = formatMonthShortLabel(activeDraftMonthKey());
+  if (bookMonthIncomeLabel) bookMonthIncomeLabel.textContent = `${monthLabel}收入`;
+  if (bookMonthExpenseLabel) bookMonthExpenseLabel.textContent = `${monthLabel}支出`;
   if (bookMonthIncome) {
     bookMonthIncome.dataset.value = formatPlainMoney(incomeTotal);
     bookMonthIncome.textContent = bookMonthIncome.dataset.value;
@@ -1893,6 +1917,7 @@ function renderBookMeta() {
   if (bookRecordTitle) bookRecordTitle.textContent = `${monthLabel}记账记录`;
   if (bookModeLabel) bookModeLabel.textContent = state.editingLocalId ? "修改记录" : "新增记录";
   if (cancelEditButton) cancelEditButton.hidden = !state.editingLocalId;
+  if (deleteRecordButton) deleteRecordButton.hidden = !state.editingLocalId;
 }
 
 function openBookDialog() {
@@ -1915,9 +1940,39 @@ function startEditingRecord(localId) {
 
 function clearBookEditForm() {
   state.editingLocalId = "";
+  if (deleteRecordButton) deleteRecordButton.hidden = true;
   amountInput.value = "";
   noteInput.value = "";
   dateInput.value = todayKey();
+}
+
+async function deleteEditingRecord() {
+  const record = state.records.find((item) => item.local_id === state.editingLocalId);
+  if (!record) return;
+  const label = `${record.transaction_date || "未填日期"} ${record.category || "未分类"} ${formatPlainMoney(record.amount)}`;
+  if (!window.confirm(`确认删除这笔记录？\n${label}\n\n已同步记录会把删除操作同步到电脑，并重算对应月份看板。`)) return;
+
+  const hasReachedServer = record.sync_status === "synced" || Boolean(record.server_id);
+  if (hasReachedServer) {
+    const now = new Date().toISOString();
+    const tombstone = {
+      ...record,
+      operation: "delete",
+      sync_status: "pending",
+      deleted_at: now,
+      updated_at: now
+    };
+    state.records = [tombstone, ...state.records.filter((item) => item.local_id !== record.local_id)];
+    await putRecord(tombstone);
+  } else {
+    state.records = state.records.filter((item) => item.local_id !== record.local_id);
+    await removeRecord(record.local_id);
+  }
+  clearBookEditForm();
+  closeModal(bookDialog);
+  render();
+  void reportMobileStatus();
+  showToast(hasReachedServer ? "已删除，等待同步到电脑" : "已删除");
 }
 
 function categoryIcon(category, type) {
@@ -2979,6 +3034,16 @@ async function putRecord(record) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(RECORD_STORE, "readwrite");
     tx.objectStore(RECORD_STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function removeRecord(localId) {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(RECORD_STORE, "readwrite");
+    tx.objectStore(RECORD_STORE).delete(localId);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });

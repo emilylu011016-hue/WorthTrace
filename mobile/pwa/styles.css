@@ -652,6 +652,12 @@ body.needs-unlock #syncButton {
   border-color: transparent;
 }
 
+.danger-button {
+  color: #9f302b;
+  border-color: color-mix(in srgb, #9f302b 36%, var(--line));
+  background: color-mix(in srgb, #9f302b 8%, var(--panel));
+}
+
 .section-title {
   display: flex;
   align-items: center;

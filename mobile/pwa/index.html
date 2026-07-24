@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.29" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.30" />
 </head>
 <body class="theme-champagne privacy-on needs-binding">
   <main class="mobile-shell">
@@ -130,11 +130,11 @@
         </div>
         <div class="book-total-grid">
           <article>
-            <span>本月收入</span>
+            <span id="bookMonthIncomeLabel">本月收入</span>
             <strong id="bookMonthIncome" class="money" data-value="CNY 0.00">••••••</strong>
           </article>
           <article>
-            <span>本月支出</span>
+            <span id="bookMonthExpenseLabel">本月支出</span>
             <strong id="bookMonthExpense" class="money" data-value="CNY 0.00">••••••</strong>
           </article>
         </div>
@@ -232,6 +232,7 @@
 
       <div class="dialog-actions">
         <button id="closeBookDialogButton" type="button">取消</button>
+        <button class="danger-button" id="deleteRecordButton" type="button" hidden>删除</button>
         <button class="save-button" type="submit">保存这一笔</button>
       </div>
     </form>
@@ -266,7 +267,7 @@
   <dialog id="cloudDialog">
     <form id="cloudForm">
       <h2>账号同步</h2>
-      <p id="cloudDialogCopy">同步后，手机草稿会进入云端草稿箱，电脑端再确认入库。</p>
+      <p id="cloudDialogCopy">同步后，手机记账变更会进入云端，电脑端拉取后自动应用。</p>
       <div class="binding-detail" id="cloudAccountDetail" hidden></div>
       <label class="pair-code-field" id="cloudEmailField">
         <span>邮箱</span>
@@ -343,6 +344,6 @@
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.3.29" type="module"></script>
+  <script src="./app.js?mobileVersion=0.3.30" type="module"></script>
 </body>
 </html>

@@ -281,6 +281,7 @@ type MobileSyncInboxRecord = {
   device_id: string;
   local_id: string;
   record_kind: string;
+  operation: string;
   transaction_type?: string | null;
   transaction_date?: string | null;
   period_month?: string | null;
@@ -2972,10 +2973,29 @@ export function App() {
         return;
       }
       await invoke("import_cloud_mobile_drafts", { drafts });
+      const refreshedSummary = await invoke<DashboardSeedSummary>("get_dashboard_seed_summary");
+      setSummary(refreshedSummary);
+      if (refreshedSummary.snapshot_month) {
+        try {
+          await upsertCloudDashboardSnapshot(
+            activeSession,
+            refreshedSummary.snapshot_month,
+            cloudDashboardPayload(refreshedSummary)
+          );
+        } catch (err) {
+          if (!isCloudTokenExpiredError(err)) throw err;
+          activeSession = await refreshRememberedCloudSession(activeSession);
+          await upsertCloudDashboardSnapshot(
+            activeSession,
+            refreshedSummary.snapshot_month,
+            cloudDashboardPayload(refreshedSummary)
+          );
+        }
+      }
       await markCloudDraftsPulled(activeSession, drafts.map((draft) => draft.id));
       await refreshMobileSyncSummary();
       setCloudDrafts([]);
-      setCloudMessage(`已拉取 ${drafts.length} 条云端草稿到电脑收件箱。`);
+      setCloudMessage(`已应用 ${drafts.length} 条手机记账变更，并刷新已发布看板。`);
     } catch (err) {
       setCloudMessage(`拉取失败：${String(err)}`);
     } finally {
@@ -2983,30 +3003,30 @@ export function App() {
     }
   }
 
-  function cloudDashboardPayload(): Record<string, unknown> {
-    const publishedTrend = (periodMonth: string) => (!summary.snapshot_month || periodMonth <= summary.snapshot_month) && periodMonth < currentMonth;
+  function cloudDashboardPayload(sourceSummary: DashboardSeedSummary = summary): Record<string, unknown> {
+    const publishedTrend = (periodMonth: string) => (!sourceSummary.snapshot_month || periodMonth <= sourceSummary.snapshot_month) && periodMonth < currentMonth;
     return {
-      snapshot_month: summary.snapshot_month,
-      target_saving_rate: summary.target_saving_rate,
-      asset_gross_value: summary.asset_gross_value,
-      credit_card_net_adjustment: summary.credit_card_net_adjustment,
-      net_worth: summary.net_worth,
-      investment_buy: summary.investment_buy,
-      investment_sell: summary.investment_sell,
-      investment_dividend: summary.investment_dividend,
-      monthly_trends: summary.monthly_trends.filter((item) => publishedTrend(item.period_month)),
-      expense_categories: summary.expense_categories,
-      expense_year_rank: summary.expense_year_rank,
-      expense_category_trends: summary.expense_category_trends.filter((item) => publishedTrend(item.period_month)),
-      asset_allocations: summary.asset_allocations,
-      investment_assets: summary.investment_assets,
-      investment_group_performances: summary.investment_group_performances,
-      investment_group_trends: summary.investment_group_trends.filter((item) => publishedTrend(item.period_month)),
-      investment_cashflow_calendar: summary.investment_cashflow_calendar,
-      asset_entry_items: summary.asset_entry_items,
-      dca_cashflows: summary.dca_cashflows,
-      portfolio_targets: summary.portfolio_targets,
-      spending_anomalies: summary.spending_anomalies
+      snapshot_month: sourceSummary.snapshot_month,
+      target_saving_rate: sourceSummary.target_saving_rate,
+      asset_gross_value: sourceSummary.asset_gross_value,
+      credit_card_net_adjustment: sourceSummary.credit_card_net_adjustment,
+      net_worth: sourceSummary.net_worth,
+      investment_buy: sourceSummary.investment_buy,
+      investment_sell: sourceSummary.investment_sell,
+      investment_dividend: sourceSummary.investment_dividend,
+      monthly_trends: sourceSummary.monthly_trends.filter((item) => publishedTrend(item.period_month)),
+      expense_categories: sourceSummary.expense_categories,
+      expense_year_rank: sourceSummary.expense_year_rank,
+      expense_category_trends: sourceSummary.expense_category_trends.filter((item) => publishedTrend(item.period_month)),
+      asset_allocations: sourceSummary.asset_allocations,
+      investment_assets: sourceSummary.investment_assets,
+      investment_group_performances: sourceSummary.investment_group_performances,
+      investment_group_trends: sourceSummary.investment_group_trends.filter((item) => publishedTrend(item.period_month)),
+      investment_cashflow_calendar: sourceSummary.investment_cashflow_calendar,
+      asset_entry_items: sourceSummary.asset_entry_items,
+      dca_cashflows: sourceSummary.dca_cashflows,
+      portfolio_targets: sourceSummary.portfolio_targets,
+      spending_anomalies: sourceSummary.spending_anomalies
     };
   }
 
@@ -5208,7 +5228,7 @@ export function App() {
           {settingsTab === "sync" ? (
             <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
               <p className="settings-copy">
-                同步后，手机草稿会进入云端草稿箱；电脑可把已发布月报看板同步到手机。
+                手机记账变更拉取后自动应用到电脑统计；已发布历史月份会刷新看板并回传手机。
               </p>
               {!cloudSyncConfigured() ? (
                 <div className="settings-warning">
@@ -5419,7 +5439,7 @@ export function App() {
             <section className="mobile-pairing-detail-card secondary-mobile-link-card">
               <span>跨网络账号同步</span>
               <b>手机与电脑登录同一账号</b>
-              <small>手机草稿会进入云端草稿箱；电脑端从“账号与同步”拉取并确认入库。该流程不依赖本地配对。</small>
+              <small>手机记账变更会进入云端；电脑端从“账号与同步”拉取后自动应用并刷新看板。该流程不依赖本地配对。</small>
             </section>
             {mobilePairingCopyMessage ? <p className="mobile-sync-message">{mobilePairingCopyMessage}</p> : null}
             <section className="mobile-device-list">
@@ -5618,10 +5638,11 @@ export function App() {
   }
 
   const mobileRecordLabel = (record: MobileSyncInboxRecord) => {
+    const operationLabel = record.operation === "delete" ? "删除" : record.operation === "update" ? "修改" : "新增";
     if (record.record_kind === "credit_card_adjustment") {
-      return `信用卡调整｜${record.period_month || selectedMonth}`;
+      return `${operationLabel}信用卡调整｜${record.period_month || selectedMonth}`;
     }
-    return `${record.transaction_type === "income" ? "收入" : "支出"}｜${record.transaction_date || ""}｜${record.category || "未分类"}`;
+    return `${operationLabel}${record.transaction_type === "income" ? "收入" : "支出"}｜${record.transaction_date || ""}｜${record.category || "未分类"}`;
   };
 
   const mobileRecordAmount = (record: MobileSyncInboxRecord) => {
