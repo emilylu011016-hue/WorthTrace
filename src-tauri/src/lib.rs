@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.3.30";
+const MOBILE_PWA_VERSION: &str = "0.3.31";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -3070,6 +3070,51 @@ fn set_step_status(
     params![period_month, step_key, if completed { 1 } else { 0 }],
   )?;
   Ok(())
+}
+
+fn reopen_monthly_analysis_for_connection(
+  connection: &Connection,
+  period_month: &str,
+) -> Result<MonthlyStepStatus, AppError> {
+  let generated: Option<String> = connection
+    .query_row(
+      "select status from monthly_closes where period_month = ?1",
+      params![period_month],
+      |row| row.get(0),
+    )
+    .optional()?;
+  if generated.is_none() {
+    return Err(AppError::InvalidCsvValue("这个月份还没有生成月报，不能修订".to_string()));
+  }
+
+  let tx = connection.unchecked_transaction()?;
+  for step_key in ["expense", "income", "assets", "creditCard", "final"] {
+    tx.execute(
+      "
+      insert into monthly_step_status (period_month, step_key, completed, completed_at, updated_at)
+      values (?1, ?2, 0, null, current_timestamp)
+      on conflict(period_month, step_key) do update set
+        completed = 0,
+        completed_at = null,
+        updated_at = current_timestamp
+      ",
+      params![period_month, step_key],
+    )?;
+  }
+  tx.execute(
+    "
+    insert into audit_logs (id, entity_type, entity_id, action, old_value_json, new_value_json)
+    values (?1, 'monthly_closes', ?2, 'reopen_monthly_analysis', ?3, ?4)
+    ",
+    params![
+      make_unique_id("audit", &format!("monthly_reopen|{period_month}")),
+      period_month,
+      serde_json::json!({ "status": generated }).to_string(),
+      serde_json::json!({ "status": "revising", "overwrite_on_regenerate": true }).to_string()
+    ],
+  )?;
+  tx.commit()?;
+  build_monthly_step_status(connection, period_month)
 }
 
 fn read_step_status(connection: &Connection, period_month: &str, step_key: &str) -> Result<bool, AppError> {
@@ -6707,6 +6752,17 @@ fn set_monthly_step_status(
   build_monthly_step_status(&connection, &period_month)
 }
 
+#[tauri::command]
+fn reopen_monthly_analysis(
+  period_month: String,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<MonthlyStepStatus, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  reopen_monthly_analysis_for_connection(&connection, &period_month)
+}
+
 fn fx_rate_record_for_key(
   connection: &Connection,
   key: &FxRateKeyInput,
@@ -8697,6 +8753,7 @@ pub fn run() {
       confirm_transactions,
       get_monthly_step_status,
       set_monthly_step_status,
+      reopen_monthly_analysis,
       list_fx_rates,
       save_fx_rate_cache,
       save_fx_rate_override,
@@ -8782,6 +8839,46 @@ mod tests {
       latest_completed_period_month(&connection).expect("latest completed month"),
       current_month
     );
+  }
+
+  #[test]
+  fn reopen_monthly_analysis_unlocks_editable_steps_without_removing_import() {
+    let connection = memory_connection();
+    connection
+      .execute(
+        "
+        insert into monthly_closes (id, period_month, close_date, status, version_no)
+        values ('close_reopen', '2026-07', '2026-07-31', 'generated', 1)
+        ",
+        [],
+      )
+      .expect("insert generated close");
+    for step_key in ["import", "expense", "income", "assets", "creditCard", "final"] {
+      connection
+        .execute(
+          "insert into monthly_step_status (period_month, step_key, completed) values ('2026-07', ?1, 1)",
+          params![step_key],
+        )
+        .expect("insert completed step");
+    }
+
+    let status = reopen_monthly_analysis_for_connection(&connection, "2026-07")
+      .expect("reopen generated month");
+
+    assert!(status.import);
+    assert!(!status.expense);
+    assert!(!status.income);
+    assert!(!status.assets);
+    assert!(!status.credit_card);
+    assert!(!status.final_done);
+    let audit_count: i64 = connection
+      .query_row(
+        "select count(*) from audit_logs where action = 'reopen_monthly_analysis'",
+        [],
+        |row| row.get(0),
+      )
+      .expect("read reopen audit");
+    assert_eq!(audit_count, 1);
   }
 
   fn mobile_transaction(local_id: &str, operation: &str, date: &str, amount: f64) -> MobileSyncRecordInput {

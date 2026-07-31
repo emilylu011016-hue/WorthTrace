@@ -1746,6 +1746,7 @@ export function App() {
   const [onboardingDraftHydrated, setOnboardingDraftHydrated] = useState(false);
   const [savingOnboarding, setSavingOnboarding] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState("2026-04");
+  const [monthlyRevisionMonth, setMonthlyRevisionMonth] = useState<string | null>(null);
   const [activeHealthSection, setActiveHealthSection] = useState<HealthSection>("总览");
   const [dashboardRange, setDashboardRange] = useState<DashboardRange>("今年以来");
   const [kpisExpanded, setKpisExpanded] = useState(false);
@@ -2592,16 +2593,34 @@ export function App() {
     setCompletedSteps({ import: true, expense: false, income: false, assets: false, creditCard: false, final: false });
   }
 
-	  async function loadDashboard() {
+  async function loadDashboard(preferredUpdateMonth?: string) {
 	    setSuccessBanner("财务健康看板读取已发布看板库；月底更新未生成月报前，不会同步到这里。");
 	    const result = await invoke<DashboardSeedSummary>("get_dashboard_seed_summary");
-	    setSummary(result);
+    setSummary(result);
     if (result.snapshot_month) {
-      applySelectedUpdateMonth(nextMonthlyUpdateMonth(result.snapshot_month, result));
+      applySelectedUpdateMonth(preferredUpdateMonth ?? nextMonthlyUpdateMonth(result.snapshot_month, result));
       setTemplatePreviewMonth(result.snapshot_month);
     }
 	    setLoadState("ready");
 	  }
+
+  async function startMonthlyRevision() {
+    const month = summary.snapshot_month;
+    if (!month) return;
+    setMonthlyMessage(`正在打开 ${month} 月报修订...`);
+    try {
+      const status = await invoke<MonthlyStepStatus>("reopen_monthly_analysis", { periodMonth: month });
+      setMonthlyRevisionMonth(month);
+      applySelectedUpdateMonth(month);
+      await loadReview(month, false);
+      applyMonthlyStatus(status);
+      setView("monthlyUpdate");
+      setSuccessBanner(`已打开 ${month} 月报修订。修改完成后重新生成，将覆盖原月报。`);
+      setMonthlyMessage(null);
+    } catch (err) {
+      setMonthlyMessage(`打开月报修订失败：${String(err)}`);
+    }
+  }
 
   function applyOnboardingStatus(status: OnboardingStatus) {
 	    const cleanTree = status.asset_category_tree?.length ? normalizeAssetCategoryTreeDefaults(status.asset_category_tree) : cloneAssetCategoryTree();
@@ -4564,7 +4583,7 @@ export function App() {
       setAssetItems((current) => current.map((asset) => ({ ...asset, confirmed: true })));
       const nextDcaFlows = await invoke<AssetCashflowItem[]>("get_generated_dca_cashflows", { periodMonth: selectedMonth });
       setDcaCashflows(nextDcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
-      await loadDashboard();
+      await loadDashboard(monthlyRevisionMonth ?? undefined);
       setSuccessBanner("资产录入已确认，月末市值和投资现金流已保存。");
       setMonthlyMessage("资产录入已确认。");
     } catch (err) {
@@ -5145,7 +5164,7 @@ export function App() {
         transactionType,
         items
       });
-      await loadDashboard();
+      await loadDashboard(monthlyRevisionMonth ?? undefined);
       setCompletedSteps((current) => ({ ...current, [transactionType]: true }));
       await loadMonthlyStatus(selectedMonth);
       setSuccessBanner(`${transactionType === "expense" ? "支出" : "收入"}确认成功，已写入本月数据。`);
@@ -8468,6 +8487,7 @@ export function App() {
                   applyMonthlyStatus(status);
                   const publishedSummary = await invoke<DashboardSeedSummary>("get_dashboard_seed_summary");
                   setSummary(publishedSummary);
+                  setMonthlyRevisionMonth(null);
                   setAnalysisGenerated(true);
                   setSuccessBanner("本月月报已生成。月底更新数据已发布到财务健康看板库。");
                   setMonthlyMessage(null);
@@ -9721,6 +9741,12 @@ export function App() {
             <h1>财务健康看板</h1>
             <span>仅显示已生成月报后的看板库数据。月底更新未发布前，不影响这里。</span>
           </div>
+          {summary.snapshot_month ? (
+            <button className="secondary-button compact" onClick={() => void startMonthlyRevision()} type="button">
+              <RefreshCcw size={16} />
+              修订 {summary.snapshot_month} 月报
+            </button>
+          ) : null}
         </div>
 
 	        <div className="health-tabs">
