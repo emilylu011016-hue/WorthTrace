@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.30";
+const MOBILE_APP_VERSION = "0.3.31";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -1447,17 +1447,17 @@ function previousMonthKey(monthKey = currentMonthKey()) {
 
 function isPublishedTrendMonth(periodMonth, snapshotMonth) {
   return Boolean(periodMonth)
-    && periodMonth < currentMonthKey()
+    && periodMonth <= currentMonthKey()
     && (!snapshotMonth || periodMonth <= snapshotMonth);
 }
 
 function resolvePublishedSnapshotMonth(data, snapshotMonthOverride = "") {
   const requestedMonth = snapshotMonthOverride || data.snapshot_month || "";
-  if (requestedMonth && requestedMonth < currentMonthKey()) return requestedMonth;
+  if (requestedMonth && requestedMonth <= currentMonthKey()) return requestedMonth;
   const trendMonths = Array.isArray(data.monthly_trends)
     ? data.monthly_trends
       .map((item) => item.period_month || "")
-      .filter((periodMonth) => periodMonth && periodMonth < currentMonthKey())
+      .filter((periodMonth) => periodMonth && periodMonth <= currentMonthKey())
       .sort((a, b) => a.localeCompare(b))
     : [];
   return trendMonths[trendMonths.length - 1] || previousMonthKey();

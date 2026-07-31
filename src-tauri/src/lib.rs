@@ -3090,7 +3090,7 @@ fn latest_completed_period_month(connection: &Connection) -> Result<String, AppE
       select max(period_month)
       from monthly_step_status
       where step_key = 'final' and completed = 1
-        and period_month < strftime('%Y-%m', 'now', 'localtime')
+        and period_month <= strftime('%Y-%m', 'now', 'localtime')
       ",
       [],
       |row| row.get::<_, Option<String>>(0),
@@ -3106,7 +3106,7 @@ fn latest_completed_period_month(connection: &Connection) -> Result<String, AppE
       select max(period_month)
       from monthly_closes
       where status in ('generated', 'historical_numbers_imported')
-        and period_month < strftime('%Y-%m', 'now', 'localtime')
+        and period_month <= strftime('%Y-%m', 'now', 'localtime')
       ",
       [],
       |row| row.get::<_, Option<String>>(0),
@@ -8725,6 +8725,65 @@ pub fn run() {
 mod tests {
   use super::*;
 
+  fn memory_connection() -> Connection {
+    let connection = Connection::open_in_memory().expect("open memory db");
+    connection.execute_batch(INITIAL_SCHEMA).expect("initial schema");
+    ensure_runtime_schema(&connection).expect("runtime schema");
+    connection
+  }
+
+  #[test]
+  fn latest_completed_period_month_includes_current_published_month() {
+    let connection = memory_connection();
+    let current_month: String = connection
+      .query_row("select strftime('%Y-%m', 'now', 'localtime')", [], |row| row.get(0))
+      .expect("read current month");
+    let future_month: String = connection
+      .query_row("select strftime('%Y-%m', 'now', 'localtime', '+1 month')", [], |row| row.get(0))
+      .expect("read future month");
+
+    connection
+      .execute(
+        "insert into monthly_step_status (period_month, step_key, completed) values (?1, 'final', 1)",
+        params![&current_month],
+      )
+      .expect("insert current final step");
+    connection
+      .execute(
+        "insert into monthly_step_status (period_month, step_key, completed) values (?1, 'final', 1)",
+        params![future_month],
+      )
+      .expect("insert future final step");
+
+    assert_eq!(
+      latest_completed_period_month(&connection).expect("latest completed month"),
+      current_month
+    );
+  }
+
+  #[test]
+  fn latest_completed_period_month_includes_current_generated_close() {
+    let connection = memory_connection();
+    let current_month: String = connection
+      .query_row("select strftime('%Y-%m', 'now', 'localtime')", [], |row| row.get(0))
+      .expect("read current month");
+
+    connection
+      .execute(
+        "
+        insert into monthly_closes (id, period_month, close_date, status, version_no)
+        values ('close_current', ?1, date('now', 'localtime'), 'generated', 1)
+        ",
+        params![&current_month],
+      )
+      .expect("insert current generated close");
+
+    assert_eq!(
+      latest_completed_period_month(&connection).expect("latest completed month"),
+      current_month
+    );
+  }
+
   fn mobile_transaction(local_id: &str, operation: &str, date: &str, amount: f64) -> MobileSyncRecordInput {
     MobileSyncRecordInput {
       local_id: local_id.to_string(),
@@ -8751,9 +8810,7 @@ mod tests {
 
   #[test]
   fn mobile_transaction_create_update_move_month_and_delete() {
-    let mut connection = Connection::open_in_memory().expect("open memory db");
-    connection.execute_batch(INITIAL_SCHEMA).expect("initial schema");
-    ensure_runtime_schema(&connection).expect("runtime schema");
+    let mut connection = memory_connection();
 
     apply_mobile_records_to_connection(
       &mut connection,

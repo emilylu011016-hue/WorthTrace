@@ -3004,7 +3004,7 @@ export function App() {
   }
 
   function cloudDashboardPayload(sourceSummary: DashboardSeedSummary = summary): Record<string, unknown> {
-    const publishedTrend = (periodMonth: string) => (!sourceSummary.snapshot_month || periodMonth <= sourceSummary.snapshot_month) && periodMonth < currentMonth;
+    const publishedTrend = (periodMonth: string) => (!sourceSummary.snapshot_month || periodMonth <= sourceSummary.snapshot_month) && periodMonth <= currentMonth;
     return {
       snapshot_month: sourceSummary.snapshot_month,
       target_saving_rate: sourceSummary.target_saving_rate,

@@ -1,0 +1,16 @@
+node_modules
+src-tauri/target
+dist
+dist-mobile
+backups
+database
+output
+releases
+.codex-runtime
+.playwright-cli
+.vercel
+worthtrace_video_v2.0
+*.sqlite3
+*.sqlite3-*
+*.db
+*.DS_Store
