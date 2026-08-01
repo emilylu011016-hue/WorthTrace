@@ -1,9 +1,9 @@
-const CACHE_NAME = "worthtrace-mobile-pwa-0.3.31";
+const CACHE_NAME = "worthtrace-mobile-pwa-0.3.32";
 const ASSETS = [
   "./",
-  "./index.html?mobileVersion=0.3.31",
-  "./styles.css?mobileVersion=0.3.31",
-  "./app.js?mobileVersion=0.3.31",
+  "./index.html",
+  "./styles.css",
+  "./app.js",
   "./manifest.webmanifest",
   "./logo-qianji-a.svg"
 ];
@@ -26,6 +26,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const isNavigation = event.request.mode === "navigate";
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -33,6 +34,15 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(async () => {
+        // The mobile link carries syncUrl/pairCode query parameters. They must
+        // not prevent the cached app shell from being used offline.
+        const cached = await caches.match(event.request, { ignoreSearch: true });
+        if (cached) return cached;
+        if (isNavigation) {
+          return caches.match("./index.html", { ignoreSearch: true });
+        }
+        return undefined;
+      })
   );
 });

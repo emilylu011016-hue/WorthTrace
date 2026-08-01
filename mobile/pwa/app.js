@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.31";
+const MOBILE_APP_VERSION = "0.3.32";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -409,10 +409,20 @@ document.querySelector("#mockSyncButton").addEventListener("click", async () => 
   await syncPendingToDesktop();
 });
 
-window.addEventListener("online", () => {
+window.addEventListener("online", async () => {
   state.online = true;
   render();
-  if (pendingRecords().length > 0) showSyncDialog();
+  const pending = pendingRecords();
+  if (pending.length === 0) return;
+  if (cloudSession?.access_token) {
+    try {
+      await syncPendingToCloud(pending);
+    } catch {
+      showSyncDialog();
+    }
+    return;
+  }
+  showSyncDialog();
 });
 
 window.addEventListener("offline", () => {
