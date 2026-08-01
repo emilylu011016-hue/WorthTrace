@@ -2437,8 +2437,8 @@ fn mobile_pairing_path(pairing_code: &str) -> String {
   format!("/index.html?mobileVersion={MOBILE_PWA_VERSION}&resetCache=1&pairCode={pairing_code}")
 }
 
-fn mobile_pairing_url(pairing_code: &str) -> String {
-  format!("http://{}:18742{}", mobile_sync_lan_ip(), mobile_pairing_path(pairing_code))
+fn mobile_pairing_url(_pairing_code: &str) -> String {
+  format!("https://worth-trace.vercel.app/?mobileVersion={MOBILE_PWA_VERSION}&resetCache=1")
 }
 
 fn mobile_pwa_response(path: &str) -> Option<Vec<u8>> {

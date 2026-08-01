@@ -41,8 +41,6 @@ import {
 } from "lucide-react";
 import { type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
-const MOBILE_PUBLIC_URL = "https://worth-trace.vercel.app";
-
 type PortfolioTargetSummary = {
   category: string;
   target_percent: number;
@@ -5428,7 +5426,7 @@ export function App() {
 
   const renderMobilePairingDialog = () => {
     if (!mobilePairingDialogOpen || !mobilePairingInfo?.enabled) return null;
-    const localMobileUrl = mobilePairingInfo.pairing_url || mobilePairingInfo.pairing_url_path;
+    const mobileUrl = mobilePairingInfo.pairing_url || mobilePairingInfo.pairing_url_path;
     return (
       <div className="settings-dialog-backdrop" role="presentation">
         <section aria-modal="true" className="settings-dialog mobile-pairing-dialog" role="dialog">
@@ -5442,30 +5440,24 @@ export function App() {
             </button>
           </div>
           <div className="mobile-pairing-dialog-body">
-            <p className="mobile-sync-copy">复制链接到手机浏览器打开，即可使用当前电脑内置的最新版手机界面，并自动连接这台电脑。</p>
+            <p className="mobile-sync-copy">复制链接到手机浏览器打开，登录同一账号即可使用手机端。手机可用流量或任意 Wi‑Fi，电脑 App 关闭后仍可操作。</p>
             <section className="mobile-pairing-detail-card">
-              <span>手机联动版 · v{mobilePairingInfo.mobile_app_version}</span>
-              <strong>{mobilePairingInfo.pairing_code}</strong>
-              <code>{localMobileUrl}</code>
+              <span>手机端 HTTPS 入口 · v{mobilePairingInfo.mobile_app_version}</span>
+              <code>{mobileUrl}</code>
               <button
                 className="primary-button compact mobile-link-copy-button"
-                onClick={() => void copyMobileLink(localMobileUrl, "手机联动链接已复制")}
+                onClick={() => void copyMobileLink(mobileUrl, "手机链接已复制")}
                 type="button"
               >
                 <Copy size={15} />
-                复制手机联动链接
+                复制手机链接
               </button>
-              <small>手机和电脑需连接同一 Wi-Fi，电脑 App 需保持打开。首次打开后可从浏览器菜单“添加到主屏幕”。</small>
+              <small>首次打开时需要联网登录；之后可从浏览器菜单“添加到主屏幕”。离线记录会保存在手机，恢复联网后自动同步。</small>
             </section>
             <section className="mobile-pairing-detail-card secondary-mobile-link-card">
               <span>跨网络账号同步</span>
               <b>手机与电脑登录同一账号</b>
-              <small>手机记账变更会进入云端；电脑端从“账号与同步”拉取后自动应用并刷新看板。该流程不依赖本地配对。</small>
-            </section>
-            <section className="mobile-pairing-detail-card secondary-mobile-link-card">
-              <span>电脑关闭后使用</span>
-              <b><a href={MOBILE_PUBLIC_URL} target="_blank" rel="noreferrer">打开线上手机端</a></b>
-              <small>请使用 HTTPS 网址登录同一账号。这个入口支持手机离线打开和记账；恢复联网后同步到云端。上面的局域网链接只在电脑 App 保持打开时可用。</small>
+              <small>手机记账变更会进入云端；电脑端从“账号与同步”拉取后自动应用并刷新看板。该流程不依赖电脑在线。</small>
             </section>
             {mobilePairingCopyMessage ? <p className="mobile-sync-message">{mobilePairingCopyMessage}</p> : null}
             <section className="mobile-device-list">
