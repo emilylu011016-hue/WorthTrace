@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.32" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.34" />
 </head>
 <body class="theme-champagne privacy-on needs-binding">
   <main class="mobile-shell">
@@ -119,6 +119,29 @@
       <div class="mobile-health-content" id="dashboardHealthContent"></div>
     </section>
 
+    <section class="view" data-view="spending">
+      <div class="section-title compact-title spending-title">
+        <h2>当月花费状况</h2>
+      </div>
+      <div class="spending-segmented" role="group" aria-label="收支类型">
+        <button class="active" data-spending-type="expense" type="button">支出</button>
+        <button data-spending-type="income" type="button">收入</button>
+      </div>
+      <div class="spending-segmented spending-period-tabs" role="group" aria-label="统计周期">
+        <button data-spending-period="week" type="button">周</button>
+        <button class="active" data-spending-period="month" type="button">月</button>
+        <button data-spending-period="year" type="button">年</button>
+      </div>
+      <div class="spending-period-picker" id="spendingPeriodPicker" aria-label="选择统计期间"></div>
+      <article class="spending-summary-card">
+        <div><span id="spendingTotalLabel">本月支出</span><strong id="spendingTotal" class="money" data-value="CNY 0.00">••••••</strong></div>
+        <div><span id="spendingAverageLabel">日均支出</span><strong id="spendingAverage" class="money" data-value="CNY 0.00">••••••</strong></div>
+      </article>
+      <div class="spending-chart-card" id="spendingChart"></div>
+      <div class="section-title compact-title"><h2 id="spendingRankingTitle">支出排行榜</h2><span id="spendingRankingHint">按分类汇总</span></div>
+      <div class="spending-ranking" id="spendingRanking"></div>
+    </section>
+
     <section class="view active" data-view="book">
       <section class="book-overview">
         <div class="book-month-row">
@@ -188,6 +211,7 @@
 
     <nav class="bottom-nav" aria-label="底部导航">
       <button class="active" data-nav="book" type="button">记账</button>
+      <button data-nav="spending" type="button">花费</button>
       <button data-nav="dashboard" type="button">财务健康</button>
     </nav>
   </main>
@@ -344,6 +368,6 @@
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.3.32" type="module"></script>
+  <script src="./app.js?mobileVersion=0.3.34" type="module"></script>
 </body>
 </html>

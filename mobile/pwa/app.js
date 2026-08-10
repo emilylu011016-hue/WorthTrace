@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.32";
+const MOBILE_APP_VERSION = "0.3.34";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -55,6 +55,9 @@ const state = {
   dashboardSection: "总览",
   dashboardRange: "今年以来",
   bookMonth: currentMonthKey(),
+  spendingType: "expense",
+  spendingPeriod: "month",
+  spendingAnchor: todayKey(),
   editingLocalId: ""
 };
 
@@ -149,6 +152,9 @@ const dashboardSectionTabs = document.querySelector("#dashboardSectionTabs");
 const dashboardRangeTabs = document.querySelector("#dashboardRangeTabs");
 const dashboardHealthContent = document.querySelector("#dashboardHealthContent");
 const dashboardDataStamp = document.querySelector("#dashboardDataStamp");
+const spendingPeriodPicker = document.querySelector("#spendingPeriodPicker");
+const spendingChart = document.querySelector("#spendingChart");
+const spendingRanking = document.querySelector("#spendingRanking");
 let toastTimer = null;
 let pendingCategoryType = "expense";
 
@@ -209,6 +215,25 @@ dashboardRangeTabs?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-dashboard-range]");
   if (!button) return;
   state.dashboardRange = button.dataset.dashboardRange;
+  render();
+});
+document.querySelectorAll("[data-spending-type]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.spendingType = button.dataset.spendingType;
+    render();
+  });
+});
+document.querySelectorAll("[data-spending-period]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.spendingPeriod = button.dataset.spendingPeriod;
+    state.spendingAnchor = todayKey();
+    render();
+  });
+});
+spendingPeriodPicker?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-spending-anchor]");
+  if (!button) return;
+  state.spendingAnchor = button.dataset.spendingAnchor;
   render();
 });
 
@@ -463,7 +488,8 @@ function navigate(view) {
   });
   pageTitle.textContent = {
     book: "记一笔",
-    dashboard: "财务健康看板"
+    dashboard: "财务健康看板",
+    spending: "当月花费状况"
   }[view] || "记一笔";
 }
 
@@ -501,6 +527,156 @@ function transactionRecordsForMonth(month) {
   });
 }
 
+function dateFromKey(value) {
+  const [year, month, day] = String(value || todayKey()).split("-").map(Number);
+  return new Date(year || 1970, (month || 1) - 1, day || 1);
+}
+
+function dateKey(value) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function shiftDate(value, days) {
+  const next = dateFromKey(value);
+  next.setDate(next.getDate() + days);
+  return dateKey(next);
+}
+
+function spendingPeriodBounds() {
+  const anchor = dateFromKey(state.spendingAnchor);
+  let start = new Date(anchor);
+  if (state.spendingPeriod === "week") {
+    const mondayOffset = (anchor.getDay() + 6) % 7;
+    start.setDate(anchor.getDate() - mondayOffset);
+  } else if (state.spendingPeriod === "month") {
+    start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  } else {
+    start = new Date(anchor.getFullYear(), 0, 1);
+  }
+  const days = state.spendingPeriod === "week"
+    ? 7
+    : state.spendingPeriod === "month"
+      ? new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()
+      : new Date(start.getFullYear(), 11, 31).getDate() + 1;
+  const end = new Date(start);
+  if (state.spendingPeriod === "year") end.setFullYear(end.getFullYear() + 1);
+  else end.setDate(end.getDate() + days);
+  return { start, end, days };
+}
+
+function spendingPeriodLabel() {
+  const { start, end } = spendingPeriodBounds();
+  if (state.spendingPeriod === "week") {
+    const lastDay = new Date(end);
+    lastDay.setDate(lastDay.getDate() - 1);
+    return `${start.getMonth() + 1}/${start.getDate()}–${lastDay.getMonth() + 1}/${lastDay.getDate()}`;
+  }
+  if (state.spendingPeriod === "month") return `${start.getFullYear()}年${start.getMonth() + 1}月`;
+  return `${start.getFullYear()}年`;
+}
+
+function spendingPeriodChoices() {
+  const options = [];
+  for (let offset = -2; offset <= 2; offset += 1) {
+    const anchor = dateFromKey(state.spendingAnchor);
+    if (state.spendingPeriod === "week") anchor.setDate(anchor.getDate() + offset * 7);
+    if (state.spendingPeriod === "month") anchor.setMonth(anchor.getMonth() + offset);
+    if (state.spendingPeriod === "year") anchor.setFullYear(anchor.getFullYear() + offset);
+    const key = dateKey(anchor);
+    const selected = offset === 0;
+    options.push(`<button class="${selected ? "active" : ""}" data-spending-anchor="${key}" type="button">${escapeHtml(spendingLabelFor(key))}</button>`);
+  }
+  return options.join("");
+}
+
+function spendingLabelFor(key) {
+  const date = dateFromKey(key);
+  if (state.spendingPeriod === "week") return `${date.getMonth() + 1}/${date.getDate()}`;
+  if (state.spendingPeriod === "month") return `${date.getMonth() + 1}月`;
+  return `${date.getFullYear()}`;
+}
+
+function recordsForSpendingPeriod() {
+  const { start, end } = spendingPeriodBounds();
+  const startKey = dateKey(start);
+  const endKey = dateKey(end);
+  return state.records.filter((record) => {
+    if ((record.record_kind || "transaction") !== "transaction" || isDeletedRecord(record)) return false;
+    if (record.transaction_type !== state.spendingType) return false;
+    const value = String(record.transaction_date || "");
+    return value >= startKey && value < endKey;
+  });
+}
+
+function spendingBuckets(records) {
+  const { start, days } = spendingPeriodBounds();
+  const count = state.spendingPeriod === "year" ? 12 : days;
+  const buckets = Array.from({ length: count }, (_, index) => ({ label: "", amount: 0 }));
+  records.forEach((record) => {
+    const date = dateFromKey(record.transaction_date);
+    const index = state.spendingPeriod === "year"
+      ? date.getMonth()
+      : Math.round((date - start) / 86400000);
+    if (buckets[index]) buckets[index].amount += Number(record.amount) || 0;
+  });
+  buckets.forEach((bucket, index) => {
+    if (state.spendingPeriod === "year") bucket.label = `${index + 1}月`;
+    else if (state.spendingPeriod === "week") bucket.label = `${index + 1}`;
+    else bucket.label = `${index + 1}`;
+  });
+  return buckets;
+}
+
+function renderSpendingLineChart(buckets) {
+  const width = 360;
+  const height = 210;
+  const left = 28;
+  const right = 12;
+  const top = 24;
+  const bottom = 32;
+  const max = Math.max(...buckets.map((item) => item.amount), 1);
+  const x = (index) => buckets.length === 1 ? width / 2 : left + index * ((width - left - right) / (buckets.length - 1));
+  const y = (amount) => top + (height - top - bottom) * (1 - amount / max);
+  const points = buckets.map((item, index) => `${x(index)},${y(item.amount)}`).join(" ");
+  const step = buckets.length > 18 ? 5 : 1;
+  return `<div class="spending-chart-heading"><b>${escapeHtml(spendingPeriodLabel())}</b><span>${state.spendingType === "expense" ? "支出趋势" : "收入趋势"}</span></div>
+    <svg class="mobile-svg-chart spending-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${state.spendingType === "expense" ? "支出" : "收入"}折线图">
+      <line x1="${left}" y1="${top}" x2="${width - right}" y2="${top}"/><line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}"/>
+      <polyline points="${points}"/>
+      ${buckets.map((item, index) => index % step === 0 ? `<circle cx="${x(index)}" cy="${y(item.amount)}" r="3.5"><title>${escapeHtml(item.label)}：${formatPlainMoney(item.amount)}</title></circle><text x="${x(index)}" y="${height - 10}" text-anchor="middle">${escapeHtml(item.label)}</text>` : "").join("")}
+      <text class="chart-value-label" x="${width - right}" y="${Math.max(14, y(max) - 8)}" text-anchor="end">${state.privacy ? "•••" : chartMoneyShort(max)}</text>
+    </svg>`;
+}
+
+function renderSpendingDashboard() {
+  if (!spendingChart || !spendingRanking) return;
+  const records = recordsForSpendingPeriod();
+  const total = records.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
+  const { days } = spendingPeriodBounds();
+  const average = total / (state.spendingPeriod === "year" ? 12 : days);
+  const typeLabel = state.spendingType === "expense" ? "支出" : "收入";
+  document.querySelectorAll("[data-spending-type]").forEach((button) => button.classList.toggle("active", button.dataset.spendingType === state.spendingType));
+  document.querySelectorAll("[data-spending-period]").forEach((button) => button.classList.toggle("active", button.dataset.spendingPeriod === state.spendingPeriod));
+  if (spendingPeriodPicker) spendingPeriodPicker.innerHTML = spendingPeriodChoices();
+  setText("#spendingTotalLabel", `本期${typeLabel}`);
+  setText("#spendingAverageLabel", state.spendingPeriod === "year" ? `月均${typeLabel}` : state.spendingPeriod === "week" ? `日均${typeLabel}` : `日均${typeLabel}`);
+  setMoney("#spendingTotal", total);
+  setMoney("#spendingAverage", average);
+  spendingChart.innerHTML = renderSpendingLineChart(spendingBuckets(records));
+  setText("#spendingRankingTitle", `${typeLabel}排行榜`);
+  setText("#spendingRankingHint", `${records.length} 笔 · 按分类汇总`);
+  const categoryTotals = records.reduce((map, record) => {
+    const category = record.category || "未分类";
+    map[category] = (map[category] || 0) + (Number(record.amount) || 0);
+    return map;
+  }, {});
+  const ranking = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
+  const max = ranking[0]?.[1] || 1;
+  spendingRanking.innerHTML = ranking.length
+    ? ranking.map(([category, amount], index) => `<div class="spending-ranking-row"><span class="spending-rank">${index + 1}</span><span class="spending-category"><b>${escapeHtml(category)}</b><i style="--w:${Math.max(4, amount / max * 100)}%"></i></span><strong class="money" data-value="${formatPlainMoney(amount)}">${state.privacy ? "••••••" : formatPlainMoney(amount)}</strong></div>`).join("")
+    : `<div class="health-empty">本期暂无${typeLabel}记录。新增一笔后，这里会实时更新。</div>`;
+}
+
 function render() {
   const pending = pendingRecords();
   const pendingSummary = summarizeRecords(pending);
@@ -529,8 +705,8 @@ function render() {
   renderMayAnomalies();
   renderDashboardModules();
   renderHealthDashboard();
+  renderSpendingDashboard();
   document.querySelectorAll(".money").forEach((node) => {
-    if (node.closest("[data-view='book']")) return;
     node.textContent = state.privacy ? "••••••" : node.dataset.value;
   });
   document.querySelectorAll(".percent").forEach((node) => {
@@ -1252,7 +1428,7 @@ function summarizeRecords(records) {
 
 function renderTransactionGroup(title, rows, type) {
   const total = rows.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
-  const statusText = rows.length ? `${rows.length} 笔 · 合计 ${formatPlainMoney(total)}` : "0 笔";
+  const statusText = rows.length ? `${rows.length} 笔 · 合计 ${privacyMoney(total)}` : "0 笔";
   return `
     <section class="draft-group">
       <header>
@@ -1289,7 +1465,7 @@ function draftEntryButton(section, label, count, amount) {
     <button class="draft-entry${active}" data-draft-section="${section}" type="button">
       <span>${label}</span>
       <strong>${count} ${section === "credit" ? "条" : "笔"}</strong>
-      <small>${formatPlainMoney(amount)}</small>
+      <small>${privacyMoney(amount)}</small>
     </button>
   `;
 }
@@ -1303,7 +1479,7 @@ function renderTransactionRow(record, type) {
     <button class="draft-row draft-row-button${active}" data-edit-record="${escapeHtml(record.local_id)}" type="button">
       <span class="draft-date">${formatDayLabel(record.transaction_date || "")}</span>
       <span class="draft-category"><i>${icon}</i><b>${escapeHtml(record.note || record.category || "未分类")}</b><small>${escapeHtml(record.category || "未分类")} · ${escapeHtml(status)}</small></span>
-      <span>${sign}${formatPlainMoney(record.amount).replace("CNY ", "")}</span>
+      <span>${sign}${state.privacy ? "••••••" : formatPlainMoney(record.amount).replace("CNY ", "")}</span>
     </button>
   `;
 }
@@ -1336,8 +1512,8 @@ function renderTransactionsByDate(rows) {
   return Array.from(groups.entries()).map(([date, records]) => {
     const summary = summarizeRecords(records);
     const parts = [];
-    if (summary.incomeAmount) parts.push(`收入 ${formatPlainMoney(summary.incomeAmount).replace("CNY ", "")}`);
-    if (summary.expenseAmount) parts.push(`支出 ${formatPlainMoney(summary.expenseAmount).replace("CNY ", "")}`);
+    if (summary.incomeAmount) parts.push(`收入 ${state.privacy ? "••••••" : formatPlainMoney(summary.incomeAmount).replace("CNY ", "")}`);
+    if (summary.expenseAmount) parts.push(`支出 ${state.privacy ? "••••••" : formatPlainMoney(summary.expenseAmount).replace("CNY ", "")}`);
     return `
       <section class="book-day-group">
         <header>
@@ -1358,11 +1534,11 @@ function renderBookTotals(incomeRows, expenseRows) {
   if (bookMonthExpenseLabel) bookMonthExpenseLabel.textContent = `${monthLabel}支出`;
   if (bookMonthIncome) {
     bookMonthIncome.dataset.value = formatPlainMoney(incomeTotal);
-    bookMonthIncome.textContent = bookMonthIncome.dataset.value;
+    bookMonthIncome.textContent = state.privacy ? "••••••" : bookMonthIncome.dataset.value;
   }
   if (bookMonthExpense) {
     bookMonthExpense.dataset.value = formatPlainMoney(expenseTotal);
-    bookMonthExpense.textContent = bookMonthExpense.dataset.value;
+    bookMonthExpense.textContent = state.privacy ? "••••••" : bookMonthExpense.dataset.value;
   }
   if (bookMonthInput && bookMonthInput.value !== state.bookMonth) {
     bookMonthInput.value = state.bookMonth;

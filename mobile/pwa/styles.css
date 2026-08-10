@@ -2387,7 +2387,7 @@ button.list-row:active {
   right: max(14px, env(safe-area-inset-right));
   bottom: max(14px, env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   width: min(402px, calc(100% - 28px));
   margin: 0 auto;
@@ -2431,6 +2431,188 @@ button.list-row:active {
 
 .bottom-nav button:active {
   transform: scale(0.97);
+}
+
+.spending-title {
+  align-items: center;
+}
+
+.spending-segmented {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin: 12px 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.spending-segmented button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 14px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.spending-segmented button.active {
+  color: var(--paper);
+  background: var(--graphite);
+}
+
+.spending-period-tabs {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 8px;
+}
+
+.spending-period-picker {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  margin: 14px 0;
+  padding: 5px 0;
+}
+
+.spending-period-picker button {
+  min-height: 34px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+}
+
+.spending-period-picker button.active {
+  border-bottom-color: var(--graphite);
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.spending-summary-card {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--graphite);
+  color: var(--paper);
+  box-shadow: 0 16px 30px var(--shadow);
+}
+
+.spending-summary-card span,
+.spending-summary-card strong {
+  display: block;
+}
+
+.spending-summary-card span {
+  margin-bottom: 8px;
+  color: color-mix(in srgb, var(--paper) 68%, transparent);
+  font-size: 11px;
+}
+
+.spending-summary-card strong {
+  overflow-wrap: anywhere;
+  font-size: 20px;
+}
+
+.spending-chart-card {
+  margin: 14px 0 22px;
+  padding: 14px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--panel);
+}
+
+.spending-chart-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.spending-chart-heading b {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.spending-line-chart {
+  min-height: 190px;
+  background: transparent;
+}
+
+.spending-line-chart polyline {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.spending-line-chart circle {
+  fill: var(--paper);
+  stroke: var(--gold);
+  stroke-width: 2;
+}
+
+.spending-ranking {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 100px;
+}
+
+.spending-ranking-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 68px;
+  border-bottom: 1px solid var(--line);
+}
+
+.spending-rank {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--paper);
+  background: var(--gold);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.spending-category {
+  min-width: 0;
+}
+
+.spending-category b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.spending-category i {
+  display: block;
+  width: var(--w);
+  height: 7px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold), var(--green));
+}
+
+.spending-ranking-row strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 850;
 }
 
 dialog {
