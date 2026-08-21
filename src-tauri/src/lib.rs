@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.3.35";
+const MOBILE_PWA_VERSION: &str = "0.3.36";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -2361,7 +2361,30 @@ fn mobile_transaction_details(
       and ct.include_in_stats = 1
       and ct.confirmation_status = 'confirmed'
       and ct.transaction_type in ('expense', 'income')
-    order by ct.transaction_date desc, ct.created_at desc
+    union all
+    select
+      rt.transaction_date,
+      case when rt.raw_type = '支出' then 'expense' else 'income' end,
+      abs(rt.amount),
+      coalesce(rt.currency, 'CNY'),
+      coalesce(c.name, rt.raw_category, '未分类'),
+      coalesce(rt.raw_account, ''),
+      coalesce(rt.note, '')
+    from raw_transactions rt
+    left join categories c on c.id = rt.standard_category_id
+    where substr(rt.transaction_date, 1, 7) > ?1
+      and rt.raw_type in ('支出', '收入')
+      and (
+        coalesce(rt.potential_duplicate, 0) = 0
+        or rt.duplicate_review_status in ('keep_both', 'not_duplicate', 'exclude_other')
+      )
+      and not exists (
+        select 1
+        from confirmed_transactions existing
+        where existing.raw_transaction_id = rt.id
+          and existing.confirmation_status = 'confirmed'
+      )
+    order by transaction_date desc
     ",
   )?;
   let rows = statement

@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.35";
+const MOBILE_APP_VERSION = "0.3.36";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -709,16 +709,18 @@ function renderSpendingDashboard() {
   const ranking = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
   const max = ranking[0]?.[1] || 1;
   spendingRanking.innerHTML = ranking.length
-    ? ranking.map(([category, amount], index) => `<button class="spending-ranking-row" data-spending-category="${escapeHtml(category)}" type="button"><span class="spending-rank">${index + 1}</span><span class="spending-category"><b>${escapeHtml(category)}</b><i style="--w:${Math.max(4, amount / max * 100)}%"></i></span><strong class="money" data-value="${formatPlainMoney(amount)}">${state.privacy ? "••••••" : formatPlainMoney(amount)}</strong></button>`).join("")
+    ? ranking.map(([category, amount], index) => {
+      const categoryRecords = records.filter((record) => (record.category || "未分类") === category);
+      const isOpen = state.spendingCategory === category;
+      const details = isOpen
+        ? `<div class="spending-inline-details">${categoryRecords.map((record) => `<article class="spending-detail-row"><div><b>${escapeHtml(record.transaction_date || "")}</b><span>${escapeHtml(record.account || "未填写账户")}</span></div><strong class="money" data-value="${formatPlainMoney(Number(record.amount) || 0)}">${state.privacy ? "••••••" : formatPlainMoney(Number(record.amount) || 0)}</strong><small>${escapeHtml(record.note || "无备注")}</small></article>`).join("")}</div>`
+        : "";
+      return `<div class="spending-ranking-group"><button class="spending-ranking-row" data-spending-category="${escapeHtml(category)}" type="button"><span class="spending-rank">${index + 1}</span><span class="spending-category"><b>${escapeHtml(category)}</b><i style="--w:${Math.max(4, amount / max * 100)}%"></i></span><strong class="money" data-value="${formatPlainMoney(amount)}">${state.privacy ? "••••••" : formatPlainMoney(amount)}</strong></button>${details}</div>`;
+    }).join("")
     : `<div class="health-empty">本期暂无${typeLabel}记录。新增一笔后，这里会实时更新。</div>`;
-  const detailRows = state.spendingCategory
-    ? records.filter((record) => (record.category || "未分类") === state.spendingCategory)
-    : [];
   if (spendingCategoryDetails) {
-    spendingCategoryDetails.hidden = detailRows.length === 0;
-    spendingCategoryDetails.innerHTML = detailRows.length
-      ? `<div class="section-title compact-title"><h3>${escapeHtml(state.spendingCategory)}明细</h3><button class="text-button" data-clear-spending-category type="button">收起</button></div>${detailRows.map((record) => `<article class="spending-detail-row"><div><b>${escapeHtml(record.transaction_date || "")}</b><span>${escapeHtml(record.account || "未填写账户")}</span></div><strong class="money" data-value="${formatPlainMoney(Number(record.amount) || 0)}">${state.privacy ? "••••••" : formatPlainMoney(Number(record.amount) || 0)}</strong><small>${escapeHtml(record.note || "无备注")}</small></article>`).join("")}`
-      : "";
+    spendingCategoryDetails.hidden = true;
+    spendingCategoryDetails.innerHTML = "";
   }
 }
 

@@ -2469,15 +2469,24 @@ button.list-row:active {
 }
 
 .spending-period-picker {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
   margin: 14px 0;
-  padding: 5px 0;
+  padding: 5px 24px;
+}
+
+.spending-period-picker::-webkit-scrollbar {
+  display: none;
 }
 
 .spending-period-picker button {
+  flex: 0 0 64px;
   min-height: 34px;
+  scroll-snap-align: center;
   border: 0;
   border-bottom: 2px solid transparent;
   color: var(--muted);
@@ -2566,6 +2575,10 @@ button.list-row:active {
   margin-bottom: 100px;
 }
 
+.spending-ranking-group {
+  border-bottom: 1px solid var(--line);
+}
+
 .spending-ranking-row {
   width: 100%;
   padding: 0;
@@ -2579,7 +2592,7 @@ button.list-row:active {
   gap: 10px;
   align-items: center;
   min-height: 68px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 0;
 }
 
 .spending-ranking-row:hover,
@@ -2593,6 +2606,12 @@ button.list-row:active {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--paper);
+}
+
+.spending-inline-details {
+  margin: 0 12px 12px 34px;
+  padding: 0 12px;
+  border-left: 2px solid var(--gold);
 }
 
 .spending-category-details .section-title {
