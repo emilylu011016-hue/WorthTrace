@@ -2567,12 +2567,68 @@ button.list-row:active {
 }
 
 .spending-ranking-row {
+  width: 100%;
+  padding: 0;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  text-align: left;
+  cursor: pointer;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   min-height: 68px;
   border-bottom: 1px solid var(--line);
+}
+
+.spending-ranking-row:hover,
+.spending-ranking-row:focus-visible {
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+}
+
+.spending-category-details {
+  margin: 18px 0 100px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+}
+
+.spending-category-details .section-title {
+  margin-top: 0;
+}
+
+.spending-category-details h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.spending-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.spending-detail-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.spending-detail-row span,
+.spending-detail-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.spending-detail-row strong {
+  align-self: center;
+}
+
+.spending-detail-row small {
+  grid-column: 1 / -1;
 }
 
 .spending-rank {

@@ -6596,6 +6596,19 @@ body {
 }
 
 /* Final monthly-update rail guard: the quick module navigator must stay as a right-side floating rail. */
+.system-prepaid-asset {
+  border-color: #b9a77a;
+  background: #fffaf0;
+}
+
+.system-prepaid-asset .asset-classification-grid,
+.system-prepaid-asset .asset-flow-editor,
+.system-prepaid-asset > div > .asset-compact-header > button:first-of-type,
+.system-prepaid-asset > div > .asset-compact-header > button:last-of-type {
+  pointer-events: none;
+  opacity: 0.65;
+}
+
 .monthly-workspace .monthly-quick-nav {
   position: fixed !important;
   top: 50% !important;

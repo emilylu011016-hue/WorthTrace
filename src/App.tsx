@@ -80,6 +80,16 @@ type CategoryMonthAmount = {
   amount: number;
 };
 
+type MobileTransactionDetail = {
+  transaction_date: string;
+  transaction_type: "expense" | "income";
+  amount: number;
+  currency: string;
+  category: string;
+  account: string;
+  note: string;
+};
+
 type AssetAllocationBreakdown = {
   category: string;
   amount: number;
@@ -183,6 +193,7 @@ type DashboardSeedSummary = {
   monthly_trends: MonthlyTrend[];
   expense_categories: CategoryBreakdown[];
   expense_category_trends: CategoryMonthAmount[];
+  transaction_details: MobileTransactionDetail[];
   income_categories: CategoryBreakdown[];
   expense_year_rank: CategoryBreakdown[];
   income_year_rank: CategoryBreakdown[];
@@ -1441,6 +1452,7 @@ const fallbackSummary: DashboardSeedSummary = {
   monthly_trends: [],
   expense_categories: [],
   expense_category_trends: [],
+  transaction_details: [],
   income_categories: [],
   expense_year_rank: [],
   income_year_rank: [],
@@ -3037,6 +3049,7 @@ export function App() {
       expense_categories: sourceSummary.expense_categories,
       expense_year_rank: sourceSummary.expense_year_rank,
       expense_category_trends: sourceSummary.expense_category_trends.filter((item) => publishedTrend(item.period_month)),
+      transaction_details: sourceSummary.transaction_details,
       asset_allocations: sourceSummary.asset_allocations,
       investment_assets: sourceSummary.investment_assets,
       investment_group_performances: sourceSummary.investment_group_performances,
@@ -7790,6 +7803,7 @@ export function App() {
         ) : null}
         <div className="asset-table">
           {assetItems.map((asset) => {
+            const isPrepaidExpenseAsset = asset.id === "asset_prepaid_expenses";
             const currentDcaFlows = dcaFlowsForAsset(asset);
             const selectedDcaFlow = selectedDcaFlowForAsset(asset);
             const assetExpanded = expandedAssetIds[asset.id] ?? !asset.confirmed;
@@ -7799,12 +7813,13 @@ export function App() {
             const clearedWithoutSellIssue = assetClearedWithoutSellIssue(asset, Boolean(clearedWithoutSellOverrides[asset.id]));
             const clearedWithDcaOn = assetMonthStatus(asset) === "cleared" && Boolean(asset.is_dca);
             return (
-            <div className={`asset-row ${asset.confirmed ? "done" : ""} ${assetExpanded ? "" : "collapsed"}`} data-asset-id={asset.id} key={asset.id}>
+            <div className={`asset-row ${asset.confirmed ? "done" : ""} ${assetExpanded ? "" : "collapsed"} ${isPrepaidExpenseAsset ? "system-prepaid-asset" : ""}`} data-asset-id={asset.id} key={asset.id}>
               <div>
                 <div className="asset-compact-header">
                   <div className="asset-title-stack">
                     <input
                       value={asset.name}
+                      readOnly={isPrepaidExpenseAsset}
                       onChange={(event) => setAssetItems((current) => current.map((item) => (item.id === asset.id ? { ...item, confirmed: false, name: event.target.value } : item)))}
                       aria-label="资产名称"
                     />

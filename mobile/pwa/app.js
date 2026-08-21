@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.34";
+const MOBILE_APP_VERSION = "0.3.35";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -58,6 +58,7 @@ const state = {
   spendingType: "expense",
   spendingPeriod: "month",
   spendingAnchor: todayKey(),
+  spendingCategory: "",
   editingLocalId: ""
 };
 
@@ -155,6 +156,7 @@ const dashboardDataStamp = document.querySelector("#dashboardDataStamp");
 const spendingPeriodPicker = document.querySelector("#spendingPeriodPicker");
 const spendingChart = document.querySelector("#spendingChart");
 const spendingRanking = document.querySelector("#spendingRanking");
+const spendingCategoryDetails = document.querySelector("#spendingCategoryDetails");
 let toastTimer = null;
 let pendingCategoryType = "expense";
 
@@ -234,6 +236,17 @@ spendingPeriodPicker?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-spending-anchor]");
   if (!button) return;
   state.spendingAnchor = button.dataset.spendingAnchor;
+  render();
+});
+spendingRanking?.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-spending-category]");
+  if (!row) return;
+  state.spendingCategory = row.dataset.spendingCategory || "";
+  render();
+});
+spendingCategoryDetails?.addEventListener("click", (event) => {
+  if (!event.target.closest("[data-clear-spending-category]")) return;
+  state.spendingCategory = "";
   render();
 });
 
@@ -576,6 +589,15 @@ function spendingPeriodLabel() {
 }
 
 function spendingPeriodChoices() {
+  if (state.spendingPeriod === "month") {
+    const months = new Set([currentMonthKey(), ...(mobileDashboardSnapshot.transactionDetails || []).map((item) => String(item.transaction_date || "").slice(0, 7))]);
+    if (state.spendingAnchor) months.add(String(state.spendingAnchor).slice(0, 7));
+    return [...months]
+      .filter((month) => /^\d{4}-\d{2}$/.test(month))
+      .sort((a, b) => b.localeCompare(a))
+      .map((month) => `<button class="${String(state.spendingAnchor).slice(0, 7) === month ? "active" : ""}" data-spending-anchor="${month}-01" type="button">${escapeHtml(spendingLabelFor(`${month}-01`))}</button>`)
+      .join("");
+  }
   const options = [];
   for (let offset = -2; offset <= 2; offset += 1) {
     const anchor = dateFromKey(state.spendingAnchor);
@@ -600,7 +622,21 @@ function recordsForSpendingPeriod() {
   const { start, end } = spendingPeriodBounds();
   const startKey = dateKey(start);
   const endKey = dateKey(end);
-  return state.records.filter((record) => {
+  const dashboardRecords = (mobileDashboardSnapshot.transactionDetails || []).map((record) => ({
+    ...record,
+    record_kind: "transaction",
+    sync_status: "synced",
+    local_id: `dashboard-${record.transaction_date}-${record.transaction_type}-${record.category}-${record.amount}`
+  }));
+  const mergedRecords = [...dashboardRecords, ...state.records];
+  const seen = new Set();
+  const records = mergedRecords.filter((record) => {
+    const key = [record.transaction_date, record.transaction_type, record.amount, record.category || "未分类", record.note || ""].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return records.filter((record) => {
     if ((record.record_kind || "transaction") !== "transaction" || isDeletedRecord(record)) return false;
     if (record.transaction_type !== state.spendingType) return false;
     const value = String(record.transaction_date || "");
@@ -673,8 +709,17 @@ function renderSpendingDashboard() {
   const ranking = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
   const max = ranking[0]?.[1] || 1;
   spendingRanking.innerHTML = ranking.length
-    ? ranking.map(([category, amount], index) => `<div class="spending-ranking-row"><span class="spending-rank">${index + 1}</span><span class="spending-category"><b>${escapeHtml(category)}</b><i style="--w:${Math.max(4, amount / max * 100)}%"></i></span><strong class="money" data-value="${formatPlainMoney(amount)}">${state.privacy ? "••••••" : formatPlainMoney(amount)}</strong></div>`).join("")
+    ? ranking.map(([category, amount], index) => `<button class="spending-ranking-row" data-spending-category="${escapeHtml(category)}" type="button"><span class="spending-rank">${index + 1}</span><span class="spending-category"><b>${escapeHtml(category)}</b><i style="--w:${Math.max(4, amount / max * 100)}%"></i></span><strong class="money" data-value="${formatPlainMoney(amount)}">${state.privacy ? "••••••" : formatPlainMoney(amount)}</strong></button>`).join("")
     : `<div class="health-empty">本期暂无${typeLabel}记录。新增一笔后，这里会实时更新。</div>`;
+  const detailRows = state.spendingCategory
+    ? records.filter((record) => (record.category || "未分类") === state.spendingCategory)
+    : [];
+  if (spendingCategoryDetails) {
+    spendingCategoryDetails.hidden = detailRows.length === 0;
+    spendingCategoryDetails.innerHTML = detailRows.length
+      ? `<div class="section-title compact-title"><h3>${escapeHtml(state.spendingCategory)}明细</h3><button class="text-button" data-clear-spending-category type="button">收起</button></div>${detailRows.map((record) => `<article class="spending-detail-row"><div><b>${escapeHtml(record.transaction_date || "")}</b><span>${escapeHtml(record.account || "未填写账户")}</span></div><strong class="money" data-value="${formatPlainMoney(Number(record.amount) || 0)}">${state.privacy ? "••••••" : formatPlainMoney(Number(record.amount) || 0)}</strong><small>${escapeHtml(record.note || "无备注")}</small></article>`).join("")}`
+      : "";
+  }
 }
 
 function render() {
@@ -1772,6 +1817,17 @@ function normalizeDashboardSnapshot(data, snapshotMonthOverride = "") {
       }))
         .filter((item) => isPublishedTrendMonth(item.periodMonth, snapshotMonth))
       : [],
+    transactionDetails: Array.isArray(data.transaction_details)
+      ? data.transaction_details.map((item) => ({
+        transaction_date: item.transaction_date || "",
+        transaction_type: item.transaction_type === "income" ? "income" : "expense",
+        amount: Number(item.amount) || 0,
+        currency: item.currency || "CNY",
+        category: item.category || "未分类",
+        account: item.account || "",
+        note: item.note || ""
+      }))
+      : [],
     spendingAnomalies: Array.isArray(data.spending_anomalies)
       ? data.spending_anomalies.map((item) => ({
         transactionDate: item.transaction_date || "",
@@ -1837,6 +1893,7 @@ function makeEmptyDashboardSnapshot() {
     expenseCategories: [],
     expenseYearRank: [],
     expenseCategoryTrends: [],
+    transactionDetails: [],
     spendingAnomalies: [],
     investmentAssets: [],
     investmentGroupPerformances: [],

@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.3.34";
+const MOBILE_PWA_VERSION: &str = "0.3.35";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -219,6 +219,17 @@ struct MobileCategoryMonthAmount {
 }
 
 #[derive(Serialize)]
+struct MobileTransactionDetail {
+  transaction_date: String,
+  transaction_type: String,
+  amount: f64,
+  currency: String,
+  category: String,
+  account: String,
+  note: String,
+}
+
+#[derive(Serialize)]
 struct MobileDashboardSnapshot {
   snapshot_month: String,
   target_saving_rate: f64,
@@ -232,6 +243,7 @@ struct MobileDashboardSnapshot {
   expense_categories: Vec<CategoryBreakdown>,
   expense_year_rank: Vec<CategoryBreakdown>,
   expense_category_trends: Vec<MobileCategoryMonthAmount>,
+  transaction_details: Vec<MobileTransactionDetail>,
   asset_allocations: Vec<MobileAssetAllocation>,
   investment_assets: Vec<InvestmentAssetPerformance>,
   investment_group_performances: Vec<InvestmentGroupPerformance>,
@@ -295,6 +307,7 @@ struct DashboardSeedSummary {
   monthly_trends: Vec<MonthlyTrend>,
   expense_categories: Vec<CategoryBreakdown>,
   expense_category_trends: Vec<MobileCategoryMonthAmount>,
+  transaction_details: Vec<MobileTransactionDetail>,
   income_categories: Vec<CategoryBreakdown>,
   expense_year_rank: Vec<CategoryBreakdown>,
   income_year_rank: Vec<CategoryBreakdown>,
@@ -1184,7 +1197,73 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
   )?;
   seed_default_content_templates(connection)?;
   normalize_builtin_asset_category_labels(connection)?;
+  ensure_prepaid_expense_asset(connection)?;
   Ok(())
+}
+
+const PREPAID_EXPENSE_ASSET_ID: &str = "asset_prepaid_expenses";
+
+fn ensure_prepaid_expense_asset(connection: &Connection) -> Result<(), AppError> {
+  connection.execute(
+    "
+    insert into assets (
+      id, name, asset_type, main_asset_category_id, sub_asset_category_id,
+      currency, platform, is_dca, status, note, monthly_update_managed
+    )
+    values (?1, '预花费', 'cash', 'asset_cat_cash', 'asset_sub_receivable', 'CNY', '系统', 0, 'active', '系统自动计算：未来月份已记账支出', 1)
+    on conflict(id) do update set
+      name = '预花费',
+      asset_type = 'cash',
+      main_asset_category_id = 'asset_cat_cash',
+      sub_asset_category_id = 'asset_sub_receivable',
+      currency = 'CNY',
+      platform = '系统',
+      status = 'active',
+      note = '系统自动计算：未来月份已记账支出',
+      monthly_update_managed = 1,
+      updated_at = current_timestamp
+    ",
+    params![PREPAID_EXPENSE_ASSET_ID],
+  )?;
+  Ok(())
+}
+
+fn prepaid_expense_amount_cny(connection: &Connection, period_month: &str) -> Result<f64, AppError> {
+  let mut statement = connection.prepare(
+    "
+    select transaction_date, amount, coalesce(currency, 'CNY')
+    from raw_transactions
+    where raw_type = '支出'
+      and substr(transaction_date, 1, 7) > ?1
+      and (
+        coalesce(potential_duplicate, 0) = 0
+        or duplicate_review_status in ('keep_both', 'not_duplicate', 'exclude_other')
+      )
+    ",
+  )?;
+  let rows = statement.query_map(params![period_month], |row| {
+    Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, String>(2)?))
+  })?;
+  let mut total = 0.0;
+  for row in rows {
+    let (date, amount, currency) = row?;
+    let rate = if currency == "CNY" {
+      1.0
+    } else {
+      fx_rate_record_for_key(
+        connection,
+        &FxRateKeyInput {
+          rate_date: date.clone(),
+          from_currency: currency,
+          to_currency: "CNY".to_string(),
+        },
+      )?
+      .rate
+      .unwrap_or(1.0)
+    };
+    total += amount.abs() * rate;
+  }
+  Ok(total)
 }
 
 fn normalize_builtin_asset_category_labels(connection: &Connection) -> Result<(), AppError> {
@@ -2261,6 +2340,46 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
   })
 }
 
+fn mobile_transaction_details(
+  connection: &Connection,
+  snapshot_month: &str,
+) -> Result<Vec<MobileTransactionDetail>, AppError> {
+  let mut statement = connection.prepare(
+    "
+    select
+      ct.transaction_date,
+      ct.transaction_type,
+      ct.amount,
+      coalesce(ct.currency, 'CNY'),
+      coalesce(c.name, ct.raw_category_snapshot, '未分类'),
+      coalesce(rt.raw_account, ''),
+      coalesce(ct.note, '')
+    from confirmed_transactions ct
+    left join categories c on c.id = ct.category_id
+    left join raw_transactions rt on rt.id = ct.raw_transaction_id
+    where ct.period_month <= ?1
+      and ct.include_in_stats = 1
+      and ct.confirmation_status = 'confirmed'
+      and ct.transaction_type in ('expense', 'income')
+    order by ct.transaction_date desc, ct.created_at desc
+    ",
+  )?;
+  let rows = statement
+    .query_map(params![snapshot_month], |row| {
+      Ok(MobileTransactionDetail {
+        transaction_date: row.get(0)?,
+        transaction_type: row.get(1)?,
+        amount: row.get(2)?,
+        currency: row.get(3)?,
+        category: row.get(4)?,
+        account: row.get(5)?,
+        note: row.get(6)?,
+      })
+    })?
+    .collect::<Result<Vec<_>, _>>()?;
+  Ok(rows)
+}
+
 fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashboardSnapshot, AppError> {
   ensure_runtime_schema(connection)?;
   let snapshot_month = latest_completed_period_month(connection)?;
@@ -2316,6 +2435,7 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
   let expense_categories = category_breakdown(connection, &snapshot_month, "expense")?;
   let expense_year_rank = category_year_rank(connection, &snapshot_month, "expense")?;
   let expense_category_trends = category_month_amounts(connection, &snapshot_month, "expense")?;
+  let transaction_details = mobile_transaction_details(connection, &snapshot_month)?;
   let mut statement = connection.prepare(
     "
     select
@@ -2368,6 +2488,7 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
     expense_categories,
     expense_year_rank,
     expense_category_trends,
+    transaction_details,
     asset_allocations,
     investment_assets,
     investment_group_performances,
@@ -7318,6 +7439,12 @@ fn next_period_month(period_month: &str) -> String {
 fn asset_entry_items_for_connection(connection: &Connection, period_month: &str) -> Result<Vec<AssetEntryItem>, AppError> {
   let previous_month = latest_monthly_update_run_before(connection, period_month)?
     .unwrap_or_default();
+  let prepaid_amount = prepaid_expense_amount_cny(connection, period_month)?;
+  let previous_prepaid_amount = if previous_month.is_empty() {
+    0.0
+  } else {
+    prepaid_expense_amount_cny(connection, &previous_month)?
+  };
   let mut statement = connection.prepare(
     "
     select
@@ -7390,6 +7517,14 @@ fn asset_entry_items_for_connection(connection: &Connection, period_month: &str)
     .collect::<Result<Vec<_>, _>>()?;
   drop(statement);
   for item in rows.iter_mut() {
+    if item.id == PREPAID_EXPENSE_ASSET_ID {
+      item.month_end_amount = prepaid_amount;
+      item.previous_month_amount = previous_prepaid_amount;
+      item.month_status = "held".to_string();
+      item.previous_month_status = "held".to_string();
+      item.confirmed = true;
+      item.note = Some("系统自动计算：当前月份之后已记账的支出".to_string());
+    }
     item.dca_plans = asset_dca_plans(connection, &item.id)?;
     if !item.dca_plans.is_empty() {
       item.is_dca = true;
@@ -7441,6 +7576,7 @@ fn reset_asset_month_entries(
       monthly_update_managed = 0,
       updated_at = current_timestamp
     where coalesce(monthly_update_managed, 0) = 1
+      and id <> 'asset_prepaid_expenses'
       and id not in (
         select distinct mas.asset_id
         from monthly_asset_snapshots mas
@@ -7657,10 +7793,14 @@ fn save_asset_month_entries_for_connection(
   period_month: &str,
   entries: &[AssetMonthEntryInput],
 ) -> Result<MonthlyStepStatus, AppError> {
+  let prepaid_amount = prepaid_expense_amount_cny(connection, period_month)?;
   let tx = connection.transaction()?;
   let snapshot_date = month_end_date(&period_month);
 
   for entry in entries.iter() {
+    let is_prepaid_expense = entry.asset_id == PREPAID_EXPENSE_ASSET_ID;
+    let effective_month_end_amount = if is_prepaid_expense { prepaid_amount } else { entry.month_end_amount };
+    let effective_amount_cny = if is_prepaid_expense { prepaid_amount } else { entry.amount_cny };
     if let Some(name) = entry.name.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
       tx.execute(
         "
@@ -7778,10 +7918,10 @@ fn save_asset_month_entries_for_connection(
       "asset_snapshot",
       &format!("{}|{}|v1", entry.asset_id, period_month),
     );
-    let snapshot_amount_cny = if entry.amount_cny.abs() > 0.000_001 {
-      entry.amount_cny
+    let snapshot_amount_cny = if effective_amount_cny.abs() > 0.000_001 {
+      effective_amount_cny
     } else {
-      entry.month_end_amount * entry.fx_rate_to_cny
+      effective_month_end_amount * entry.fx_rate_to_cny
     };
     tx.execute(
       "
@@ -7805,7 +7945,7 @@ fn save_asset_month_entries_for_connection(
         entry.asset_id,
         &period_month,
         snapshot_date,
-        entry.month_end_amount,
+        effective_month_end_amount,
         entry.currency,
         entry.fx_rate_to_cny,
         snapshot_amount_cny,
@@ -8503,6 +8643,7 @@ fn get_dashboard_seed_summary(
     .and_then(|item| item.investment_return_rate);
   let expense_categories = category_breakdown(&connection, &snapshot_month, "expense")?;
   let expense_category_trends = category_month_amounts(&connection, &snapshot_month, "expense")?;
+  let transaction_details = mobile_transaction_details(&connection, &snapshot_month)?;
   let income_categories = category_breakdown(&connection, &snapshot_month, "income")?;
   let expense_year_rank = category_year_rank(&connection, &snapshot_month, "expense")?;
   let income_year_rank = category_year_rank(&connection, &snapshot_month, "income")?;
@@ -8598,6 +8739,7 @@ fn get_dashboard_seed_summary(
     monthly_trends,
     expense_categories,
     expense_category_trends,
+    transaction_details,
     income_categories,
     expense_year_rank,
     income_year_rank,
