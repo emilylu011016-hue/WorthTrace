@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.36";
+const MOBILE_APP_VERSION = "0.3.37";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -241,7 +241,8 @@ spendingPeriodPicker?.addEventListener("click", (event) => {
 spendingRanking?.addEventListener("click", (event) => {
   const row = event.target.closest("[data-spending-category]");
   if (!row) return;
-  state.spendingCategory = row.dataset.spendingCategory || "";
+  const category = row.dataset.spendingCategory || "";
+  state.spendingCategory = state.spendingCategory === category ? "" : category;
   render();
 });
 spendingCategoryDetails?.addEventListener("click", (event) => {
@@ -590,11 +591,25 @@ function spendingPeriodLabel() {
 
 function spendingPeriodChoices() {
   if (state.spendingPeriod === "month") {
-    const months = new Set([currentMonthKey(), ...(mobileDashboardSnapshot.transactionDetails || []).map((item) => String(item.transaction_date || "").slice(0, 7))]);
-    if (state.spendingAnchor) months.add(String(state.spendingAnchor).slice(0, 7));
-    return [...months]
-      .filter((month) => /^\d{4}-\d{2}$/.test(month))
-      .sort((a, b) => b.localeCompare(a))
+    const records = [
+      ...(mobileDashboardSnapshot.transactionDetails || []),
+      ...state.records
+    ];
+    const knownMonths = records
+      .filter((record) => (record.record_kind || "transaction") === "transaction" && !isDeletedRecord(record))
+      .map((record) => String(record.transaction_date || "").slice(0, 7))
+      .filter((month) => /^\d{4}-\d{2}$/.test(month));
+    knownMonths.push(currentMonthKey(), String(state.spendingAnchor || "").slice(0, 7));
+    const validMonths = knownMonths.filter((month) => /^\d{4}-\d{2}$/.test(month)).sort();
+    if (!validMonths.length) return "";
+    const first = dateFromKey(`${validMonths[0]}-01`);
+    const last = dateFromKey(`${validMonths[validMonths.length - 1]}-01`);
+    const months = [];
+    for (const cursor = new Date(last); cursor >= first; cursor.setMonth(cursor.getMonth() - 1)) {
+      const month = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+      months.push(month);
+    }
+    return months
       .map((month) => `<button class="${String(state.spendingAnchor).slice(0, 7) === month ? "active" : ""}" data-spending-anchor="${month}-01" type="button">${escapeHtml(spendingLabelFor(`${month}-01`))}</button>`)
       .join("");
   }

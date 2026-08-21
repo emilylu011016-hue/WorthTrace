@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.3.36";
+const MOBILE_PWA_VERSION: &str = "0.3.37";
 
 struct Database {
   work_connection: Mutex<Connection>,

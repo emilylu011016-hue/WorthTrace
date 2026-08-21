@@ -770,7 +770,7 @@ dependencies = [
 
 [[package]]
 name = "financial-planning"
-version = "2.7.15"
+version = "2.7.16"
 dependencies = [
  "anyhow",
  "hex",
