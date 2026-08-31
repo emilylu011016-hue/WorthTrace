@@ -404,6 +404,8 @@ type TransactionReviewRow = {
   include_in_stats?: boolean;
   adjustment_reason?: string;
   is_editing?: boolean;
+  source_kind?: string;
+  confirmed_transaction_id?: string | null;
 };
 
 type CategorySummary = {
@@ -433,6 +435,8 @@ type ConfirmTransactionInput = {
   include_in_stats: boolean;
   note: string | null;
   adjustment_reason: string | null;
+  source_kind?: string;
+  confirmed_transaction_id?: string | null;
 };
 
 type CurrencyCode = "CNY" | "USD" | "JPY" | "OTHER";
@@ -5160,7 +5164,7 @@ export function App() {
       return;
     }
     const items: ConfirmTransactionInput[] = review.rows.map((row) => ({
-      raw_transaction_id: row.id.startsWith("manual-") ? null : row.id,
+      raw_transaction_id: row.id.startsWith("manual-") || row.source_kind === "mobile" ? null : row.id,
       transaction_date: row.transaction_date,
       transaction_type: transactionType,
       amount: convertAmount(row.amount, row.transaction_date, row.currency ?? "CNY", "CNY") ?? 0,
@@ -5169,7 +5173,9 @@ export function App() {
       raw_category_snapshot: row.raw_category,
       include_in_stats: row.include_in_stats ?? true,
       note: row.note,
-      adjustment_reason: row.adjustment_reason ?? null
+      adjustment_reason: row.adjustment_reason ?? null,
+      source_kind: row.source_kind,
+      confirmed_transaction_id: row.confirmed_transaction_id ?? null
     }));
     try {
       const result = await invoke<{ confirmed_count: number; included_amount: number }>("confirm_transactions", {
