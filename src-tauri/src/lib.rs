@@ -521,6 +521,9 @@ struct TransactionReviewRow {
   note: String,
   potential_duplicate: bool,
   duplicate_review_status: String,
+  include_in_stats: bool,
+  source_kind: String,
+  confirmed_transaction_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -562,6 +565,8 @@ struct ConfirmTransactionInput {
   include_in_stats: bool,
   note: Option<String>,
   adjustment_reason: Option<String>,
+  source_kind: Option<String>,
+  confirmed_transaction_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -4469,7 +4474,19 @@ fn is_china_public_holiday(date: &str) -> bool {
 
 fn build_monthly_step_status(connection: &Connection, period_month: &str) -> Result<MonthlyStepStatus, AppError> {
   let imported_count: i64 = connection.query_row(
-    "select count(*) from raw_transactions where substr(transaction_date, 1, 7) = ?1",
+    "
+    select count(*)
+    from (
+      select 1 from raw_transactions where substr(transaction_date, 1, 7) = ?1
+      union all
+      select 1
+      from confirmed_transactions
+      where period_month = ?1
+        and source_kind in ('mobile', 'manual')
+        and raw_transaction_id is null
+        and confirmation_status = 'confirmed'
+    )
+    ",
     params![period_month],
     |row| row.get(0),
   )?;
@@ -6497,18 +6514,47 @@ fn get_transaction_review(
       rt.raw_account,
       rt.amount,
       rt.currency,
-      coalesce(rt.note, ''),
+      coalesce(rt.note, '') as note,
       rt.potential_duplicate,
-      coalesce(rt.duplicate_review_status, 'pending')
+      coalesce(rt.duplicate_review_status, 'pending') as duplicate_review_status,
+      1 as include_in_stats,
+      'raw' as source_kind,
+      null as confirmed_transaction_id,
+      rt.source_row_no as sort_order
     from raw_transactions rt
     left join categories c on c.id = rt.standard_category_id
     where substr(rt.transaction_date, 1, 7) = ?1
       and rt.raw_type = ?2
-    order by rt.transaction_date, rt.source_row_no
+    union all
+    select
+      ct.id,
+      ct.transaction_date,
+      case when ct.transaction_type = 'expense' then '支出' else '收入' end as raw_type,
+      coalesce(ct.raw_category_snapshot, '') as raw_category,
+      ct.category_id,
+      c.name,
+      '' as raw_account,
+      ct.amount,
+      ct.currency,
+      coalesce(ct.note, '') as note,
+      0 as potential_duplicate,
+      'not_duplicate' as duplicate_review_status,
+      ct.include_in_stats as include_in_stats,
+      ct.source_kind,
+      ct.id as confirmed_transaction_id,
+      0 as sort_order
+    from confirmed_transactions ct
+    left join categories c on c.id = ct.category_id
+    where ct.period_month = ?1
+      and ct.transaction_type = ?3
+      and ct.source_kind in ('mobile', 'manual')
+      and ct.raw_transaction_id is null
+      and ct.confirmation_status = 'confirmed'
+    order by transaction_date, sort_order
     ",
   )?;
   let rows = statement
-    .query_map(params![period_month, raw_type], |row| {
+    .query_map(params![period_month, raw_type, &transaction_type], |row| {
       Ok(TransactionReviewRow {
         id: row.get(0)?,
         transaction_date: row.get(1)?,
@@ -6523,6 +6569,9 @@ fn get_transaction_review(
         note: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
         potential_duplicate: row.get::<_, i64>(10)? == 1,
         duplicate_review_status: row.get(11)?,
+        include_in_stats: row.get::<_, i64>(12)? == 1,
+        source_kind: row.get(13)?,
+        confirmed_transaction_id: row.get(14)?,
       })
     })?
     .collect::<Result<Vec<_>, _>>()?;
@@ -6530,20 +6579,38 @@ fn get_transaction_review(
   let mut summary_statement = connection.prepare(
     "
     select
-      rt.standard_category_id,
-      coalesce(c.name, rt.raw_category, '未分类') as category_name,
-      coalesce(sum(rt.amount), 0) as amount,
+      standard_category_id,
+      category_name,
+      coalesce(sum(amount), 0) as amount,
       count(*) as row_count
-    from raw_transactions rt
-    left join categories c on c.id = rt.standard_category_id
-    where substr(rt.transaction_date, 1, 7) = ?1
-      and rt.raw_type = ?2
-    group by rt.standard_category_id, category_name
+    from (
+      select
+        rt.standard_category_id,
+        coalesce(c.name, rt.raw_category, '未分类') as category_name,
+        rt.amount
+      from raw_transactions rt
+      left join categories c on c.id = rt.standard_category_id
+      where substr(rt.transaction_date, 1, 7) = ?1
+        and rt.raw_type = ?2
+      union all
+      select
+        ct.category_id as standard_category_id,
+        coalesce(c.name, ct.raw_category_snapshot, '未分类') as category_name,
+        ct.amount
+      from confirmed_transactions ct
+      left join categories c on c.id = ct.category_id
+      where ct.period_month = ?1
+        and ct.transaction_type = ?3
+        and ct.source_kind in ('mobile', 'manual')
+        and ct.raw_transaction_id is null
+        and ct.confirmation_status = 'confirmed'
+    )
+    group by standard_category_id, category_name
     order by amount desc
     ",
   )?;
   let summary = summary_statement
-    .query_map(params![period_month, raw_type], |row| {
+    .query_map(params![period_month, raw_type, &transaction_type], |row| {
       Ok(CategorySummary {
         category_id: row.get(0)?,
         category_name: row.get(1)?,
@@ -6731,12 +6798,17 @@ fn confirm_transactions(
   let mut connection = db.work_connection.lock().expect("database mutex poisoned");
   ensure_unlocked(&connection, &security)?;
   let tx = connection.transaction()?;
+  let mobile_ids: Vec<String> = items
+    .iter()
+    .filter(|item| item.source_kind.as_deref() == Some("mobile") && item.confirmed_transaction_id.is_some())
+    .map(|item| item.confirmed_transaction_id.clone().unwrap())
+    .collect();
   let previous_count: i64 = tx.query_row(
     "
     select count(*)
     from confirmed_transactions
     where period_month = ?1 and transaction_type = ?2
-      and source_kind <> 'mobile'
+      and source_kind in ('shark_csv', 'manual')
     ",
     params![period_month, transaction_type],
     |row| row.get(0),
@@ -6745,10 +6817,25 @@ fn confirm_transactions(
     "
     delete from confirmed_transactions
     where period_month = ?1 and transaction_type = ?2
-      and source_kind <> 'mobile'
+      and source_kind in ('shark_csv', 'manual')
     ",
     params![period_month, transaction_type],
   )?;
+  let existing_mobile_ids: Vec<String> = tx
+    .prepare(
+      "
+      select id
+      from confirmed_transactions
+      where period_month = ?1 and transaction_type = ?2 and source_kind = 'mobile'
+      ",
+    )?
+    .query_map(params![period_month, transaction_type], |row| row.get(0))?
+    .collect::<Result<Vec<_>, _>>()?;
+  for id in existing_mobile_ids {
+    if !mobile_ids.contains(&id) {
+      tx.execute("delete from confirmed_transactions where id = ?1", params![id])?;
+    }
+  }
 
   let mut confirmed_count = 0_i64;
   let mut included_amount = 0.0_f64;
@@ -6758,6 +6845,85 @@ fn confirm_transactions(
         "确认日期不属于月份 {}: {}",
         period_month, item.transaction_date
       )));
+    }
+    let is_mobile_update = item.source_kind.as_deref() == Some("mobile")
+      && item.confirmed_transaction_id.is_some();
+    let confirmation_status = if item.include_in_stats {
+      "confirmed"
+    } else {
+      "excluded"
+    };
+    let adjustment_reason = item.adjustment_reason.clone().unwrap_or_default();
+    if is_mobile_update {
+      let mobile_id = item.confirmed_transaction_id.clone().unwrap();
+      tx.execute(
+        "
+        update confirmed_transactions
+        set transaction_date = ?1,
+            amount = ?2,
+            currency = ?3,
+            category_id = ?4,
+            raw_category_snapshot = ?5,
+            include_in_stats = ?6,
+            confirmation_status = ?7,
+            adjustment_reason = ?8,
+            note = ?9,
+            updated_at = current_timestamp
+        where id = ?10 and source_kind = 'mobile'
+        ",
+        params![
+          item.transaction_date,
+          item.amount.abs(),
+          item.currency,
+          item.category_id,
+          item.raw_category_snapshot,
+          if item.include_in_stats { 1 } else { 0 },
+          confirmation_status,
+          if adjustment_reason.is_empty() && !item.include_in_stats {
+            "用户排除"
+          } else {
+            &adjustment_reason
+          },
+          item.note,
+          mobile_id
+        ],
+      )?;
+      let should_audit = !adjustment_reason.is_empty()
+        || !item.include_in_stats
+        || item.raw_transaction_id.is_some();
+      if should_audit {
+        let new_value_json = serde_json::json!({
+          "period_month": period_month,
+          "transaction_type": transaction_type,
+          "raw_transaction_id": item.raw_transaction_id,
+          "transaction_date": item.transaction_date,
+          "amount": item.amount.abs(),
+          "currency": item.currency,
+          "category_id": item.category_id,
+          "include_in_stats": item.include_in_stats,
+          "note": item.note,
+          "adjustment_reason": adjustment_reason,
+          "source_kind": "mobile",
+          "confirmed_transaction_id": item.confirmed_transaction_id
+        })
+        .to_string();
+        tx.execute(
+          "
+          insert into audit_logs (id, entity_type, entity_id, action, old_value_json, new_value_json)
+          values (?1, 'confirmed_transactions', ?2, 'mobile_confirm_update', null, ?3)
+          ",
+          params![
+            make_unique_id("audit", &format!("mobile_update|{}|{}|{}", mobile_id, index, new_value_json)),
+            mobile_id,
+            new_value_json
+          ],
+        )?;
+      }
+      confirmed_count += 1;
+      if item.include_in_stats {
+        included_amount += item.amount.abs();
+      }
+      continue;
     }
     let source_kind = if item.raw_transaction_id.is_some() {
       "shark_csv"
@@ -6775,12 +6941,6 @@ fn confirm_transactions(
       item.note.clone().unwrap_or_default()
     );
     let id = make_id("confirmed", &seed);
-    let confirmation_status = if item.include_in_stats {
-      "confirmed"
-    } else {
-      "excluded"
-    };
-    let adjustment_reason = item.adjustment_reason.clone().unwrap_or_default();
     tx.execute(
       "
       insert into confirmed_transactions (
