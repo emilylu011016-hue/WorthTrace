@@ -599,6 +599,7 @@ struct AssetEntryItem {
   previous_month_status: String,
   confirmed: bool,
   dca_plans: Vec<DcaPlanItem>,
+  cashflows: Vec<AssetCashflowItem>,
 }
 
 #[derive(Serialize)]
@@ -716,6 +717,28 @@ struct AssetMonthEntryInput {
   #[serde(default)]
   amount_cny: f64,
   cashflows: Vec<AssetCashflowInput>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AssetCashflowItem {
+  id: String,
+  asset_id: String,
+  asset_name: Option<String>,
+  flow_date: String,
+  flow_type: String,
+  amount: f64,
+  currency: String,
+  #[serde(default = "default_fx_rate")]
+  fx_rate_to_cny: f64,
+  #[serde(default)]
+  amount_cny: f64,
+  source_kind: String,
+  dca_plan_id: Option<String>,
+  note: Option<String>,
+  #[serde(default)]
+  included: bool,
+  #[serde(default)]
+  confirmed: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1207,6 +1230,9 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
 }
 
 const PREPAID_EXPENSE_ASSET_ID: &str = "asset_prepaid_expenses";
+// 这些资产是用户早期手动创建的“提前消费/买票”跟踪资产，现在由系统自动预花费资产替代，
+// 因此在月度更新资产录入列表中隐藏，避免与 PREPAID_EXPENSE_ASSET_ID 重复出现。
+const HIDDEN_PREPAID_EXPENSE_ASSET_IDS: &[&str] = &["asset_9ccf00da30d6326fc1c83046"];
 
 fn ensure_prepaid_expense_asset(connection: &Connection) -> Result<(), AppError> {
   connection.execute(
@@ -1233,40 +1259,89 @@ fn ensure_prepaid_expense_asset(connection: &Connection) -> Result<(), AppError>
   Ok(())
 }
 
-fn prepaid_expense_amount_cny(connection: &Connection, period_month: &str) -> Result<f64, AppError> {
+#[derive(Clone)]
+struct PrepaidExpenseDetail {
+  id: String,
+  transaction_date: String,
+  amount: f64,
+  currency: String,
+  category_name: String,
+  note: String,
+}
+
+fn prepaid_expense_details_for_connection(
+  connection: &Connection,
+  period_month: &str,
+) -> Result<Vec<PrepaidExpenseDetail>, AppError> {
   let mut statement = connection.prepare(
     "
-    select transaction_date, amount, coalesce(currency, 'CNY')
-    from raw_transactions
-    where raw_type = '支出'
-      and substr(transaction_date, 1, 7) > ?1
+    select
+      'raw_' || rt.id,
+      rt.transaction_date,
+      rt.amount,
+      coalesce(rt.currency, 'CNY'),
+      coalesce(c.name, rt.raw_category, '未分类'),
+      coalesce(rt.note, '')
+    from raw_transactions rt
+    left join categories c on c.id = rt.standard_category_id
+    where rt.raw_type = '支出'
+      and substr(rt.transaction_date, 1, 7) > ?1
       and (
-        coalesce(potential_duplicate, 0) = 0
-        or duplicate_review_status in ('keep_both', 'not_duplicate', 'exclude_other')
+        coalesce(rt.potential_duplicate, 0) = 0
+        or rt.duplicate_review_status in ('keep_both', 'not_duplicate', 'exclude_other')
       )
+    union all
+    select
+      ct.id,
+      ct.transaction_date,
+      ct.amount,
+      coalesce(ct.currency, 'CNY'),
+      coalesce(c.name, ct.raw_category_snapshot, '未分类'),
+      coalesce(ct.note, '')
+    from confirmed_transactions ct
+    left join categories c on c.id = ct.category_id
+    where ct.transaction_type = 'expense'
+      and substr(ct.transaction_date, 1, 7) > ?1
+      and ct.source_kind in ('mobile', 'manual')
+      and ct.raw_transaction_id is null
+      and ct.confirmation_status = 'confirmed'
+    order by transaction_date
     ",
   )?;
-  let rows = statement.query_map(params![period_month], |row| {
-    Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, String>(2)?))
-  })?;
+  let rows = statement
+    .query_map(params![period_month], |row| {
+      Ok(PrepaidExpenseDetail {
+        id: row.get(0)?,
+        transaction_date: row.get(1)?,
+        amount: row.get(2)?,
+        currency: row.get(3)?,
+        category_name: row.get(4)?,
+        note: row.get(5)?,
+      })
+    })?
+    .collect::<Result<Vec<_>, _>>()?;
+  Ok(rows)
+}
+
+fn prepaid_expense_amount_cny(connection: &Connection, period_month: &str) -> Result<f64, AppError> {
+  let details = prepaid_expense_details_for_connection(connection, period_month)?;
   let mut total = 0.0;
-  for row in rows {
-    let (date, amount, currency) = row?;
-    let rate = if currency == "CNY" {
+  for detail in details {
+    let rate = if detail.currency == "CNY" {
       1.0
     } else {
       fx_rate_record_for_key(
         connection,
         &FxRateKeyInput {
-          rate_date: date.clone(),
-          from_currency: currency,
+          rate_date: detail.transaction_date.clone(),
+          from_currency: detail.currency,
           to_currency: "CNY".to_string(),
         },
       )?
       .rate
       .unwrap_or(1.0)
     };
-    total += amount.abs() * rate;
+    total += detail.amount.abs() * rate;
   }
   Ok(total)
 }
@@ -7628,7 +7703,17 @@ fn asset_entry_items_for_connection(connection: &Connection, period_month: &str)
   } else {
     prepaid_expense_amount_cny(connection, &previous_month)?
   };
-  let mut statement = connection.prepare(
+  let hidden_ids_sql = HIDDEN_PREPAID_EXPENSE_ASSET_IDS
+    .iter()
+    .map(|id| format!("'{}'", id.replace('\'', "''")))
+    .collect::<Vec<_>>()
+    .join(",");
+  let hidden_ids_predicate = if hidden_ids_sql.is_empty() {
+    String::new()
+  } else {
+    format!("and a.id not in ({hidden_ids_sql})")
+  };
+  let sql = format!(
     "
     select
       a.id,
@@ -7668,10 +7753,12 @@ fn asset_entry_items_for_connection(connection: &Connection, period_month: &str)
       and prev_mas.version_no = 1
     where a.status = 'active'
       and coalesce(a.monthly_update_managed, 0) = 1
+      {hidden_ids_predicate}
     group by a.id
     order by main.sort_order, sub.sort_order, a.name
-    ",
-  )?;
+    "
+  );
+  let mut statement = connection.prepare(&sql)?;
   let mut rows = statement
     .query_map(params![period_month, previous_month], |row| {
       Ok(AssetEntryItem {
@@ -7695,10 +7782,12 @@ fn asset_entry_items_for_connection(connection: &Connection, period_month: &str)
         previous_month_status: row.get(17)?,
         confirmed: row.get::<_, i64>(18)? == 1,
         dca_plans: Vec::new(),
+        cashflows: Vec::new(),
       })
     })?
     .collect::<Result<Vec<_>, _>>()?;
   drop(statement);
+  let prepaid_details = prepaid_expense_details_for_connection(connection, period_month)?;
   for item in rows.iter_mut() {
     if item.id == PREPAID_EXPENSE_ASSET_ID {
       item.month_end_amount = prepaid_amount;
@@ -7707,6 +7796,42 @@ fn asset_entry_items_for_connection(connection: &Connection, period_month: &str)
       item.previous_month_status = "held".to_string();
       item.confirmed = true;
       item.note = Some("系统自动计算：当前月份之后已记账的支出".to_string());
+      item.cashflows = prepaid_details
+        .iter()
+        .map(|detail| {
+          let rate = if detail.currency == "CNY" {
+            1.0
+          } else {
+            fx_rate_record_for_key(
+              connection,
+              &FxRateKeyInput {
+                rate_date: detail.transaction_date.clone(),
+                from_currency: detail.currency.clone(),
+                to_currency: "CNY".to_string(),
+              },
+            )
+            .ok()
+            .and_then(|record| record.rate)
+            .unwrap_or(1.0)
+          };
+          AssetCashflowItem {
+            id: detail.id.clone(),
+            asset_id: item.id.clone(),
+            asset_name: Some(item.name.clone()),
+            flow_date: detail.transaction_date.clone(),
+            flow_type: "buy".to_string(),
+            amount: detail.amount.abs(),
+            currency: detail.currency.clone(),
+            fx_rate_to_cny: rate,
+            amount_cny: detail.amount.abs() * rate,
+            source_kind: "prepaid_expense".to_string(),
+            dca_plan_id: None,
+            note: Some(format!("{}｜{}", detail.category_name, detail.note).trim_end_matches("｜").to_string()),
+            included: true,
+            confirmed: true,
+          }
+        })
+        .collect();
     }
     item.dca_plans = asset_dca_plans(connection, &item.id)?;
     if !item.dca_plans.is_empty() {
@@ -7949,6 +8074,7 @@ fn create_asset(
         previous_month_status: row.get(17)?,
         confirmed: false,
         dca_plans: Vec::new(),
+        cashflows: Vec::new(),
       })
     },
   )?;
@@ -7977,6 +8103,7 @@ fn save_asset_month_entries_for_connection(
   entries: &[AssetMonthEntryInput],
 ) -> Result<MonthlyStepStatus, AppError> {
   let prepaid_amount = prepaid_expense_amount_cny(connection, period_month)?;
+  let prepaid_details = prepaid_expense_details_for_connection(connection, period_month)?;
   let tx = connection.transaction()?;
   let snapshot_date = month_end_date(&period_month);
 
@@ -8145,6 +8272,73 @@ fn save_asset_month_entries_for_connection(
       ",
       params![entry.asset_id, period_month],
     )?;
+
+    if is_prepaid_expense {
+      tx.execute(
+        "
+        delete from investment_cashflows
+        where asset_id = ?1
+          and period_month = ?2
+          and source_kind = 'prepaid_expense'
+        ",
+        params![entry.asset_id, period_month],
+      )?;
+      for detail in prepaid_details.iter() {
+        let rate = if detail.currency == "CNY" {
+          1.0
+        } else {
+          fx_rate_record_for_key(
+            &tx,
+            &FxRateKeyInput {
+              rate_date: detail.transaction_date.clone(),
+              from_currency: detail.currency.clone(),
+              to_currency: "CNY".to_string(),
+            },
+          )?
+          .rate
+          .unwrap_or(1.0)
+        };
+        let flow_id = make_id(
+          "cashflow",
+          &format!(
+            "{}|{}|{}|{}|{}|prepaid_expense",
+            entry.asset_id,
+            period_month,
+            detail.transaction_date,
+            detail.amount,
+            detail.id
+          ),
+        );
+        tx.execute(
+          "
+          insert into investment_cashflows (
+            id, asset_id, period_month, flow_date, flow_type, amount,
+            currency, fx_rate_to_cny, amount_cny, source_kind, dca_plan_id, note
+          )
+          values (?1, ?2, ?3, ?4, 'buy', ?5, ?6, ?7, ?8, 'prepaid_expense', null, ?9)
+          on conflict(id) do update set
+            flow_date = excluded.flow_date,
+            amount = excluded.amount,
+            currency = excluded.currency,
+            fx_rate_to_cny = excluded.fx_rate_to_cny,
+            amount_cny = excluded.amount_cny,
+            note = excluded.note,
+            updated_at = current_timestamp
+          ",
+          params![
+            flow_id,
+            entry.asset_id,
+            period_month,
+            detail.transaction_date,
+            detail.amount.abs(),
+            detail.currency,
+            rate,
+            detail.amount.abs() * rate,
+            Some(format!("{}｜{}", detail.category_name, detail.note).trim_end_matches("｜").to_string())
+          ],
+        )?;
+      }
+    }
 
     let flow_date = format!("{}-28", period_month);
     let mut cashflows = entry.cashflows.clone();

@@ -3182,33 +3182,40 @@ export function App() {
   }
 
   async function loadReview(month = selectedMonth, applyStatus = true) {
-    const [expense, income, assets, dcaFlows, cards, status] = await Promise.all([
-      invoke<TransactionReview>("get_transaction_review", { periodMonth: month, transactionType: "expense" }),
-      invoke<TransactionReview>("get_transaction_review", { periodMonth: month, transactionType: "income" }),
-      invoke<AssetEntryItem[]>("get_asset_entry_items", { periodMonth: month }),
-      invoke<AssetCashflowItem[]>("get_generated_dca_cashflows", { periodMonth: month }),
-      invoke<CreditCardEntry[]>("get_credit_card_entries", { periodMonth: month }),
-      invoke<MonthlyStepStatus>("get_monthly_step_status", { periodMonth: month })
-    ]);
-    const expenseRows = expense.rows.map((row) => ({ ...row, include_in_stats: row.include_in_stats ?? true }));
-    const incomeRows = income.rows.map((row) => ({ ...row, include_in_stats: row.include_in_stats ?? true }));
-    setExpenseReview({
-      ...expense,
-      rows: expenseRows.map((row) => ({ ...row, currency: row.currency ?? "CNY" }))
-    });
-    setIncomeReview({
-      ...income,
-      rows: incomeRows.map((row) => ({ ...row, currency: row.currency ?? "CNY" }))
-    });
-    setDetailExpanded({
-      expense: hasReviewAnomaly(expenseRows),
-      income: hasReviewAnomaly(incomeRows)
-    });
-    setAssetItems(normalizeAssetEntryItems(assets));
-    setDcaCashflows(dcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
-    setCreditCards(cards);
-    if (applyStatus) {
-      applyMonthlyStatus(status);
+    try {
+      const [expense, income, assets, dcaFlows, cards, status] = await Promise.all([
+        invoke<TransactionReview>("get_transaction_review", { periodMonth: month, transactionType: "expense" }),
+        invoke<TransactionReview>("get_transaction_review", { periodMonth: month, transactionType: "income" }),
+        invoke<AssetEntryItem[]>("get_asset_entry_items", { periodMonth: month }),
+        invoke<AssetCashflowItem[]>("get_generated_dca_cashflows", { periodMonth: month }),
+        invoke<CreditCardEntry[]>("get_credit_card_entries", { periodMonth: month }),
+        invoke<MonthlyStepStatus>("get_monthly_step_status", { periodMonth: month })
+      ]);
+      console.log("[loadReview] loaded", month, "expense", expense.rows.length, "income", income.rows.length, "assets", assets.length);
+      const expenseRows = expense.rows.map((row) => ({ ...row, include_in_stats: row.include_in_stats ?? true }));
+      const incomeRows = income.rows.map((row) => ({ ...row, include_in_stats: row.include_in_stats ?? true }));
+      setExpenseReview({
+        ...expense,
+        rows: expenseRows.map((row) => ({ ...row, currency: row.currency ?? "CNY" }))
+      });
+      setIncomeReview({
+        ...income,
+        rows: incomeRows.map((row) => ({ ...row, currency: row.currency ?? "CNY" }))
+      });
+      setDetailExpanded({
+        expense: hasReviewAnomaly(expenseRows),
+        income: hasReviewAnomaly(incomeRows)
+      });
+      setAssetItems(normalizeAssetEntryItems(assets));
+      setDcaCashflows(dcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
+      setCreditCards(cards);
+      if (applyStatus) {
+        applyMonthlyStatus(status);
+      }
+    } catch (err) {
+      console.error("[loadReview] failed", month, err);
+      const detail = err instanceof Error ? err.message : String(err);
+      setMonthlyMessage(`加载月度更新数据失败：${detail}`);
     }
   }
 
