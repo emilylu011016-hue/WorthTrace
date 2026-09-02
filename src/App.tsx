@@ -304,7 +304,7 @@ type MobileSyncInboxRecord = {
   received_at: string;
 };
 
-type SyncTab = "sync" | "password" | "reset";
+type SyncTab = "sync" | "password" | "categories" | "reset";
 
 function friendlyCloudAuthError(error: unknown, mode: "signin" | "signup") {
   const text = String(error || "").replace(/^Error:\s*/, "").trim();
@@ -808,68 +808,65 @@ const assetTypeOptions = [
   ["gold", "黄金"],
   ["receivable", "应收"],
   ["insurance", "保险/养老金"],
+  ["real_estate", "房产/不动产"],
   ["liability", "负债"],
   ["other", "其他"]
 ];
 
 const assetTopOptions = [
   ["asset_cat_cash", "现金"],
-  ["asset_cat_us_equity", "全球资产"],
-  ["asset_cat_dividend_low_vol", "红利低波"],
+  ["asset_cat_us_equity", "海外权益"],
+  ["asset_cat_a_share", "A股权益"],
   ["asset_cat_bond", "债券"],
   ["asset_cat_gold", "黄金"],
-  ["asset_cat_a_share", "A股权益"],
+  ["asset_cat_real_estate", "房产/不动产"],
   ["asset_cat_other", "其他"]
 ];
 
 const fundCategoryOptions = [
   ["asset_sub_us_market", "美股"],
   ["asset_sub_hk_market", "港股"],
-  ["asset_sub_emerging_market", "新兴市场"]
-];
-
-const usEquityCategoryOptions = [
-  ["asset_sub_sp500", "标普"],
-  ["asset_sub_nasdaq", "纳斯达克"]
+  ["asset_sub_emerging_market", "新兴市场"],
+  ["asset_sub_developed_market", "发达市场"]
 ];
 
 const cashCategoryOptions = [
   ["asset_sub_bank_payment", "银行/支付账户"],
-  ["asset_sub_money_market_cash", "货币现金"],
-  ["asset_sub_receivable", "应收押金"]
+  ["asset_sub_money_market_cash", "货币基金"],
+  ["asset_sub_liquid_cash", "活钱/备用金"]
 ];
 
 const mainAllocationOptions = [
   ["asset_cat_cash", "现金"],
-  ["asset_cat_us_equity", "全球资产"],
-  ["asset_cat_dividend_low_vol", "红利低波"],
+  ["asset_cat_us_equity", "海外权益"],
+  ["asset_cat_a_share", "A股权益"],
   ["asset_cat_bond", "债券"],
   ["asset_cat_gold", "黄金"],
-  ["asset_cat_a_share", "A股权益"],
+  ["asset_cat_real_estate", "房产/不动产"],
   ["asset_cat_other", "其他"]
 ];
 
 const subAllocationOptions: Record<string, string[][]> = {
   asset_cat_us_equity: fundCategoryOptions,
   asset_cat_cash: cashCategoryOptions,
-  asset_cat_dividend_low_vol: [
-    ["asset_sub_dividend", "红利"],
-    ["asset_sub_low_vol", "低波"]
+  asset_cat_a_share: [
+    ["asset_sub_a_share_broad", "宽基"],
+    ["asset_sub_a_share_sector_active", "行业/主动"],
+    ["asset_sub_dividend_low_vol", "红利低波"]
   ],
   asset_cat_bond: [
-    ["asset_sub_short_bond", "短债"],
+    ["asset_sub_treasury_bond", "国债"],
     ["asset_sub_pure_bond", "纯债"],
-    ["asset_sub_treasury_bond", "国债"]
+    ["asset_sub_short_bond", "短债"],
+    ["asset_sub_convertible_bond", "可转债"]
   ],
   asset_cat_gold: [
     ["asset_sub_gold_etf", "黄金ETF"]
   ],
-  asset_cat_a_share: [
-    ["asset_sub_a_share_broad", "宽基"],
-    ["asset_sub_a_share_sector_active", "行业/主动"]
-  ],
+  asset_cat_real_estate: [],
   asset_cat_other: [
     ["asset_sub_insurance_pension", "保险/养老金"],
+    ["asset_sub_receivable", "应收押金"],
     ["asset_sub_uncategorized", "未分类"]
   ]
 };
@@ -880,41 +877,37 @@ const defaultAssetCategoryTree: AssetCategoryNode[] = [
     label: "现金",
     children: [
       { id: "asset_sub_bank_payment", label: "银行/支付账户", children: [] },
-      { id: "asset_sub_money_market_cash", label: "货币现金", children: [] },
-      { id: "asset_sub_receivable", label: "应收押金", children: [] }
+      { id: "asset_sub_money_market_cash", label: "货币基金", children: [] },
+      { id: "asset_sub_liquid_cash", label: "活钱/备用金", children: [] }
     ]
   },
   {
     id: "asset_cat_us_equity",
-    label: "全球资产",
+    label: "海外权益",
     children: [
-      {
-        id: "asset_sub_us_market",
-        label: "美股",
-        children: [
-          { id: "asset_sub_sp500", label: "标普", children: [] },
-          { id: "asset_sub_nasdaq", label: "纳斯达克", children: [] }
-        ]
-      },
+      { id: "asset_sub_us_market", label: "美股", children: [] },
       { id: "asset_sub_hk_market", label: "港股", children: [] },
-      { id: "asset_sub_emerging_market", label: "新兴市场", children: [] }
+      { id: "asset_sub_emerging_market", label: "新兴市场", children: [] },
+      { id: "asset_sub_developed_market", label: "发达市场", children: [] }
     ]
   },
   {
-    id: "asset_cat_dividend_low_vol",
-    label: "红利低波",
+    id: "asset_cat_a_share",
+    label: "A股权益",
     children: [
-      { id: "asset_sub_dividend", label: "红利", children: [] },
-      { id: "asset_sub_low_vol", label: "低波", children: [] }
+      { id: "asset_sub_a_share_broad", label: "宽基", children: [] },
+      { id: "asset_sub_a_share_sector_active", label: "行业/主动", children: [] },
+      { id: "asset_sub_dividend_low_vol", label: "红利低波", children: [] }
     ]
   },
   {
     id: "asset_cat_bond",
     label: "债券",
     children: [
-      { id: "asset_sub_short_bond", label: "短债", children: [] },
+      { id: "asset_sub_treasury_bond", label: "国债", children: [] },
       { id: "asset_sub_pure_bond", label: "纯债", children: [] },
-      { id: "asset_sub_treasury_bond", label: "国债", children: [] }
+      { id: "asset_sub_short_bond", label: "短债", children: [] },
+      { id: "asset_sub_convertible_bond", label: "可转债", children: [] }
     ]
   },
   {
@@ -925,18 +918,16 @@ const defaultAssetCategoryTree: AssetCategoryNode[] = [
     ]
   },
   {
-    id: "asset_cat_a_share",
-    label: "A股权益",
-    children: [
-      { id: "asset_sub_a_share_broad", label: "宽基", children: [] },
-      { id: "asset_sub_a_share_sector_active", label: "行业/主动", children: [] }
-    ]
+    id: "asset_cat_real_estate",
+    label: "房产/不动产",
+    children: []
   },
   {
     id: "asset_cat_other",
     label: "其他",
     children: [
       { id: "asset_sub_insurance_pension", label: "保险/养老金", children: [] },
+      { id: "asset_sub_receivable", label: "应收押金", children: [] },
       { id: "asset_sub_uncategorized", label: "未分类", children: [] }
     ]
   }
@@ -1014,9 +1005,7 @@ function resolveAssetClassification(input: {
   const subCategoryId =
     mainCategoryId === "asset_cat_cash"
       ? input.cashCategory
-      : input.fundCategory === "asset_sub_us_market"
-        ? input.usEquityCategory || "asset_sub_nasdaq"
-        : input.fundCategory;
+      : input.usEquityCategory || input.fundCategory;
   return {
     assetType: assetTypeForCategory(mainCategoryId, subCategoryId),
     mainCategoryId,
@@ -1039,7 +1028,7 @@ function classificationForAsset(asset: AssetEntryItem, tree: AssetCategoryNode[]
           ? subParent?.id ?? ""
           : subCategoryId || (subOptionsForMain(mainCategoryId)[0]?.[0] ?? ""),
     cashCategory: mainCategoryId === "asset_cat_cash" ? asset.sub_asset_category_id ?? "asset_sub_bank_payment" : "asset_sub_bank_payment",
-    usEquityCategory: nestedUnderMain ? subCategoryId : "asset_sub_sp500"
+    usEquityCategory: nestedUnderMain ? subCategoryId : ""
   };
 }
 
@@ -1158,7 +1147,7 @@ function normalizeAssetCategoryTreeDefaults(tree: AssetCategoryNode[] = defaultA
     clonedGlobal.children.some((child) => child.id === "asset_sub_sp500") &&
     clonedGlobal.children.some((child) => child.id === "asset_sub_nasdaq");
   if (isFlatGlobal && clonedGlobal && defaultGlobal) {
-    clonedGlobal.label = "全球资产";
+    clonedGlobal.label = "海外权益";
     clonedGlobal.children = defaultGlobal.children;
   }
   return cloned;
@@ -1206,8 +1195,7 @@ function assetCategoryPathIds(nodes: AssetCategoryNode[], id: string): string[] 
       if (item.id === id) return nextPath;
       const found = visit(item.children ?? [], nextPath);
       if (found) return found;
-    }
-    return null;
+    }    return null;
   };
   return visit(nodes, []) ?? [];
 }
@@ -1222,6 +1210,32 @@ function assetCategoryPathOptions(nodes: AssetCategoryNode[]) {
   };
   visit(nodes);
   return rows;
+}
+
+function subtreeAssetCategoryIds(node: AssetCategoryNode | null): Set<string> {
+  const ids = new Set<string>();
+  if (!node) return ids;
+  const walk = (item: AssetCategoryNode) => {
+    ids.add(item.id);
+    (item.children ?? []).forEach(walk);
+  };
+  walk(node);
+  return ids;
+}
+
+function validateAssetCategoryTree(tree: AssetCategoryNode[]): string | null {
+  const walk = (nodes: AssetCategoryNode[], siblingLabels: Set<string>): string | null => {
+    for (const node of nodes) {
+      const label = node.label.trim();
+      if (!label) return "分类名称不能为空，请填写后再保存。";
+      if (siblingLabels.has(label)) return `同级分类「${label}」重复，请改名后再保存。`;
+      siblingLabels.add(label);
+      const childError = walk(node.children ?? [], new Set());
+      if (childError) return childError;
+    }
+    return null;
+  };
+  return walk(tree, new Set());
 }
 
 function normalizeDashboardCustomSettings(
@@ -1303,6 +1317,7 @@ function assetTypeForCategory(mainCategoryId: string, subCategoryId?: string | n
   if (mainCategoryId === "asset_cat_cash") return "cash_account";
   if (mainCategoryId === "asset_cat_gold") return "gold";
   if (mainCategoryId === "asset_cat_bond") return "bond_fund";
+  if (mainCategoryId === "asset_cat_real_estate") return "real_estate";
   if (subCategoryId === "asset_sub_insurance_pension" || combined.includes("保险") || combined.includes("养老金")) return "insurance";
   if (subCategoryId === "asset_sub_liability" || combined.includes("负债") || combined.includes("贷款")) return "liability";
   if (combined.includes("股票")) return "stock";
@@ -1335,7 +1350,7 @@ function blankOnboardingAsset(): OnboardingAssetDraft {
     topCategory: "asset_cat_cash",
     fundCategory: "asset_sub_us_market",
     cashCategory: "asset_sub_bank_payment",
-    usEquityCategory: "asset_sub_sp500",
+    usEquityCategory: "",
     currency: "CNY",
     platform: "",
     tags: "",
@@ -1736,7 +1751,12 @@ export function App() {
   const [cloudSignupSuggested, setCloudSignupSuggested] = useState(false);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudDrafts, setCloudDrafts] = useState<CloudDraft[]>([]);
-  const [view, setView] = useState<AppView>(browserPreviewSummary ? "healthDashboard" : "home");
+  const previewStartView = (() => {
+    if (!browserPreviewSummary || typeof window === "undefined") return "healthDashboard";
+    const params = new URLSearchParams(window.location.search);
+    return params.get("view") === "home" ? "home" : "healthDashboard";
+  })();
+  const [view, setView] = useState<AppView>(browserPreviewSummary ? previewStartView : "home");
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [onboardingSavingRate, setOnboardingSavingRate] = useState("30");
@@ -1770,7 +1790,7 @@ export function App() {
   const [dashboardDetail, setDashboardDetail] = useState<string | null>(null);
   const [dashboardTooltip, setDashboardTooltip] = useState<DashboardTooltipState>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null);
-  const [selectedReturnGroup, setSelectedReturnGroup] = useState("全球资产");
+  const [selectedReturnGroup, setSelectedReturnGroup] = useState("海外权益");
   const effectiveOnboardingStep = view === "preferences" ? ([0, 2, 3][onboardingStep] ?? 0) : onboardingStep;
   const [dashboardTheme, setDashboardTheme] = useState<DashboardTheme>(() => {
     const savedTheme = window.localStorage.getItem("financial-planning-dashboard-theme");
@@ -1816,7 +1836,7 @@ export function App() {
     topCategory: "asset_cat_cash",
     fundCategory: "asset_sub_us_market",
     cashCategory: "asset_sub_bank_payment",
-    usEquityCategory: "asset_sub_sp500",
+    usEquityCategory: "",
     currency: "CNY",
     platform: "支付宝",
     tags: "",
@@ -3687,7 +3707,7 @@ export function App() {
         topCategory: "asset_cat_cash",
         fundCategory: "asset_sub_us_market",
         cashCategory: "asset_sub_bank_payment",
-        usEquityCategory: "asset_sub_sp500",
+        usEquityCategory: "",
         currency: "CNY",
         platform: "支付宝",
         tags: "",
@@ -3785,6 +3805,99 @@ export function App() {
 	    });
 	    setOnboardingTargets((current) => current.filter((target) => target.category_id !== id && target.parent_category_id !== id));
 	    setOnboardingMessage("分类已删除；如果资产正在使用这个分类，请重新选择。");
+	  }
+
+	  function deleteAssetCategoryGuarded(id: string) {
+	    const node = findAssetCategoryNode(assetCategoryTree, id);
+	    const ids = subtreeAssetCategoryIds(node);
+	    const usedBy = assetItems.filter((asset) =>
+	      (asset.main_asset_category_id && ids.has(asset.main_asset_category_id)) ||
+	      (asset.sub_asset_category_id && ids.has(asset.sub_asset_category_id))
+	    );
+	    if (usedBy.length > 0) {
+	      setSettingsMessage(`「${node?.label ?? id}」及其子分类正在被 ${usedBy.map((asset) => asset.name).join("、")} 使用，不能删除。`);
+	      return;
+	    }
+	    deleteAssetCategory(id);
+	    setSettingsMessage("分类已删除；点「保存分类」后生效。");
+	  }
+
+	  async function handleSaveCategoryTree() {
+	    setSettingsMessage(null);
+	    const validationError = validateAssetCategoryTree(assetCategoryTree);
+	    if (validationError) {
+	      setSettingsMessage(validationError);
+	      return;
+	    }
+	    setSettingsBusy(true);
+	    try {
+	      await invoke("save_asset_category_tree", { tree: assetCategoryTree });
+	      await refreshOnboardingStatus();
+	      await loadDashboard();
+	      setSettingsMessage("分类已保存，月底更新和财务看板会立即使用新分类。");
+	    } catch (err) {
+	      setSettingsMessage(String(err));
+	    } finally {
+	      setSettingsBusy(false);
+	    }
+	  }
+
+	  function renderCategoryManagerBody(onDeleteCategory: (id: string) => void) {
+	    return (
+	      <>
+	        <div className="category-manager-toolbar">
+	          <span>可以改名、新增或删除分类；最多支持三级。删除后记得点「保存分类」生效。</span>
+	          <button className="secondary-button compact" onClick={() => addAssetCategory(null)} type="button">
+	            <Plus size={14} />
+	            新增一级
+	          </button>
+	        </div>
+	        <div className="category-tree-editor">
+	          {assetCategoryTree.map((top) => (
+	            <div className="category-tree-node top" key={top.id}>
+	              <div className="category-tree-row">
+	                <span>一级</span>
+	                <input
+	                  lang="zh-CN"
+	                  spellCheck={false}
+	                  value={top.label}
+	                  onChange={(event) => renameAssetCategory(top.id, event.target.value)}
+	                />
+	                <button className="link-button" onClick={() => addAssetCategory(top.id)} type="button">新增二级</button>
+	                <button className="link-button danger-link" onClick={() => onDeleteCategory(top.id)} type="button">删除</button>
+	              </div>
+	              {top.children.map((child) => (
+	                <div className="category-tree-node child" key={child.id}>
+	                  <div className="category-tree-row">
+	                    <span>子类</span>
+	                    <input
+	                      lang="zh-CN"
+	                      spellCheck={false}
+	                      value={child.label}
+	                      onChange={(event) => renameAssetCategory(child.id, event.target.value)}
+	                    />
+	                    <button className="link-button" onClick={() => addAssetCategory(child.id)} type="button">新增三级</button>
+	                    <button className="link-button danger-link" onClick={() => onDeleteCategory(child.id)} type="button">删除</button>
+	                  </div>
+	                  {child.children.map((grandchild) => (
+	                    <div className="category-tree-row grandchild" key={grandchild.id}>
+	                      <span>子子类</span>
+	                      <input
+	                        lang="zh-CN"
+	                        spellCheck={false}
+	                        value={grandchild.label}
+	                        onChange={(event) => renameAssetCategory(grandchild.id, event.target.value)}
+	                      />
+	                      <button className="link-button danger-link" onClick={() => onDeleteCategory(grandchild.id)} type="button">删除</button>
+	                    </div>
+	                  ))}
+	                </div>
+	              ))}
+	            </div>
+	          ))}
+	        </div>
+	      </>
+	    );
 	  }
 
 	  function updateOnboardingAssetDcaPlan(index: number, patch: Partial<DcaPlanDraft>) {
@@ -5265,6 +5378,16 @@ export function App() {
             <button className={settingsTab === "password" ? "active" : ""} onClick={() => setSettingsTab("password")} type="button">
               {passwordMode === "modify" ? "修改密码" : "设置密码"}
             </button>
+            <button
+              className={settingsTab === "categories" ? "active" : ""}
+              onClick={() => {
+	                setSettingsTab("categories");
+	                setSettingsMessage(null);
+	              }}
+              type="button"
+            >
+              资产分类
+            </button>
             <button className={settingsTab === "reset" ? "active danger-tab" : "danger-tab"} onClick={() => setSettingsTab("reset")} type="button">
               初始化重置账号
             </button>
@@ -5400,6 +5523,28 @@ export function App() {
                   type="submit"
                 >
                   {settingsBusy ? "保存中..." : "确认保存"}
+                </button>
+              </div>
+            </form>
+          ) : settingsTab === "categories" ? (
+            <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
+              <p className="settings-copy">
+                管理资产分类，最多支持三级。保存后，月底更新录入和财务看板会立即使用新分类；被资产使用的分类不能删除。
+              </p>
+              {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
+              <details className="onboarding-category-manager" open>
+                <summary className="category-manager-header">
+                  <div>
+                    <strong>资产分类设置</strong>
+                    <span>{assetCategoryTree.length} 个主类。</span>
+                  </div>
+                  <span className="category-manager-caret">收起</span>
+                </summary>
+                {renderCategoryManagerBody((id) => deleteAssetCategoryGuarded(id))}
+              </details>
+              <div className="row-actions">
+                <button className="primary-button compact" disabled={settingsBusy} onClick={() => void handleSaveCategoryTree()} type="button">
+                  {settingsBusy ? "保存中..." : "保存分类"}
                 </button>
               </div>
             </form>
@@ -5544,7 +5689,7 @@ export function App() {
           {isDemoEnvironment ? <div className="environment-badge demo-badge">Demo 演示版</div> : null}
           <p className="eyebrow">Security</p>
           <h1>设置文档密码</h1>
-          <p className="auth-copy">密码用于保护本地财务数据。系统只保存加盐哈希，不保存明文。也可以先跳过，之后从右上角“设置”里补设。</p>
+          <p className="auth-copy">这个密码只用来锁住你电脑上的这份财务数据，不会上传到任何地方。也可以先跳过，之后从右上角“设置”里补设。</p>
           <form className="auth-form" onSubmit={handleSetPassword}>
             <label>
               密码
@@ -5851,15 +5996,12 @@ export function App() {
 
       return (
     <>
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <p className="eyebrow">Personal Finance Space</p>
+      <section className="home-hero">
+        <div className="home-hero-main">
+          <p className="home-eyebrow">钱迹 WorthTrace · 个人财务工作台</p>
           <h1>个人财务记录与分析空间</h1>
-          <p>
-            把每月收支、资产和投资记录整理成清晰的长期趋势。
-          </p>
-          <p className="hero-subcopy">
-            更新一次，看清一次变化。
+          <p className="home-lede">
+            把每月收支、资产和投资记录，整理成一条看得懂的长期轨迹。
           </p>
           <div className="hero-actions">
             <button
@@ -5881,46 +6023,56 @@ export function App() {
             </button>
           </div>
         </div>
+        <div className="home-hero-meta">
+          <div className="home-meta-block">
+            <span>当前已更新</span>
+            <strong>{monthLabel(summary.snapshot_month)}</strong>
+          </div>
+          <div className="home-meta-block">
+            <span>下次更新</span>
+            <strong>{dateLabel(nextUpdateDate)}</strong>
+          </div>
+        </div>
       </section>
 
-      <section className="entry-grid">
-        <button className="entry-card" onClick={() => void openMonthlyUpdate()} type="button">
-          <div className="entry-icon">
-            <RefreshCcw size={22} />
-          </div>
-          <span>月底财务信息更新</span>
-          <p>导入账单，确认收支，补齐资产和信用卡口径。</p>
-          <ArrowRight size={18} />
-        </button>
-	        <button className="entry-card" onClick={() => setView("healthDashboard")} type="button">
-	          <div className="entry-icon">
-	            <BarChart3 size={22} />
-	          </div>
-	          <span>财务健康看板</span>
-	          <p>查看收支储蓄、资产配置、投资表现和月报。</p>
-	          <ArrowRight size={18} />
-	        </button>
-	        <button className="entry-card" onClick={() => setView("contentTemplates")} type="button">
-	          <div className="entry-icon">
-	            <Edit3 size={22} />
-          </div>
-          <span>内容模板设置</span>
-          <p>管理分析说明和导出 HTML 的文案模板。</p>
-          <ArrowRight size={18} />
-        </button>
-        <article className="entry-card reminder-card">
-          <div className="entry-icon">
-            <AlertCircle size={22} />
-          </div>
-          <span>本月提醒</span>
-          <ul className="reminder-list">
+      <section className="home-body">
+        <nav className="home-nav">
+          <p className="home-nav-title">工作台</p>
+          <button className="home-nav-item" onClick={() => void openMonthlyUpdate()} type="button">
+            <RefreshCcw size={16} />
+            <span>
+              <strong>月底财务信息更新</strong>
+              <small>导入账单，确认收支，补齐资产和信用卡口径。</small>
+            </span>
+            <ArrowRight size={15} />
+          </button>
+          <button className="home-nav-item" onClick={() => setView("healthDashboard")} type="button">
+            <BarChart3 size={16} />
+            <span>
+              <strong>财务健康看板</strong>
+              <small>查看收支储蓄、资产配置、投资表现和月报。</small>
+            </span>
+            <ArrowRight size={15} />
+          </button>
+          <button className="home-nav-item" onClick={() => setView("contentTemplates")} type="button">
+            <Edit3 size={16} />
+            <span>
+              <strong>内容模板设置</strong>
+              <small>管理分析说明和导出 HTML 的文案模板。</small>
+            </span>
+            <ArrowRight size={15} />
+          </button>
+        </nav>
+        <aside className="home-aside">
+          <p className="home-nav-title">本月提醒</p>
+          <ul className="home-reminder-list">
             <li>当前已经更新到 {monthLabel(summary.snapshot_month)}。</li>
             <li>已录入 {monthLabel(recordStartMonth)} 到 {monthLabel(summary.snapshot_month)} 的数据。</li>
             <li>{dateLabel(nextUpdateDate)} 需要更新当月内容。</li>
             <li>确认鲨鱼账单后再进入资产录入。</li>
             <li>隐私模式可隐藏所有金额。</li>
           </ul>
-        </article>
+        </aside>
       </section>
     </>
       );
@@ -6110,66 +6262,16 @@ export function App() {
 	                      <summary className="category-manager-header">
 	                        <div>
 	                          <strong>资产分类设置</strong>
-	                          <span>{assetCategoryTree.length} 个主类；需要自定义时再展开。</span>
+	                          <span>{assetCategoryTree.length} 个主类；可改名、新增二级/三级或删除。</span>
 	                        </div>
 	                        <span className="category-manager-caret">展开</span>
 	                      </summary>
-	                      <div className="category-manager-toolbar">
-	                        <span>可以改名、新增或删除默认分类。新增后下方立刻可选。</span>
-	                        <button className="secondary-button compact" onClick={() => addAssetCategory(null)} type="button">
-	                          <Plus size={14} />
-	                          新增一级
-	                        </button>
-	                      </div>
-	                      <div className="category-tree-editor">
-	                        {assetCategoryTree.map((top) => (
-	                          <div className="category-tree-node top" key={top.id}>
-	                            <div className="category-tree-row">
-	                              <span>一级</span>
-	                              <input
-	                                lang="zh-CN"
-	                                spellCheck={false}
-	                                value={top.label}
-	                                onChange={(event) => renameAssetCategory(top.id, event.target.value)}
-	                              />
-	                              <button className="link-button" onClick={() => addAssetCategory(top.id)} type="button">新增一级</button>
-	                              <button className="link-button danger-link" onClick={() => deleteAssetCategory(top.id)} type="button">删除</button>
-	                            </div>
-	                            {top.children.map((child) => (
-	                              <div className="category-tree-node child" key={child.id}>
-	                                <div className="category-tree-row">
-	                                  <span>子类</span>
-	                                  <input
-	                                    lang="zh-CN"
-	                                    spellCheck={false}
-	                                    value={child.label}
-	                                    onChange={(event) => renameAssetCategory(child.id, event.target.value)}
-	                                  />
-	                                  <button className="link-button" onClick={() => addAssetCategory(child.id)} type="button">新增子类</button>
-	                                  <button className="link-button danger-link" onClick={() => deleteAssetCategory(child.id)} type="button">删除</button>
-	                                </div>
-	                                {child.children.map((grandchild) => (
-	                                  <div className="category-tree-row grandchild" key={grandchild.id}>
-	                                    <span>子子类</span>
-	                                    <input
-	                                      lang="zh-CN"
-	                                      spellCheck={false}
-	                                      value={grandchild.label}
-	                                      onChange={(event) => renameAssetCategory(grandchild.id, event.target.value)}
-	                                    />
-	                                    <button className="link-button danger-link" onClick={() => deleteAssetCategory(grandchild.id)} type="button">删除</button>
-	                                  </div>
-	                                ))}
-	                              </div>
-	                            ))}
-	                          </div>
-	                        ))}
-	                      </div>
+	                      {renderCategoryManagerBody((id) => deleteAssetCategory(id))}
 	                    </details>
 	                    <div className="onboarding-form-grid">
 	                      <label>
 	                        资产名称
-	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.name} onChange={(event) => updateOnboardingAssetDraft({ name: event.target.value })} placeholder="例如：全球资产基金 A" />
+	                        <input lang="zh-CN" spellCheck={false} value={onboardingAssetDraft.name} onChange={(event) => updateOnboardingAssetDraft({ name: event.target.value })} placeholder="例如：海外权益基金 A" />
 	                      </label>
 	                      <label>
 	                        一级类型
@@ -8619,7 +8721,7 @@ export function App() {
       .filter(Boolean)
       .slice(0, 3)
       .join("、");
-    const returnGroupOrder = ["全球资产", "红利低波", "债券", "黄金", "A股权益", "其他"];
+    const returnGroupOrder = ["海外权益", "A股权益", "债券", "黄金", "房产/不动产", "其他"];
     const investmentTrendGroupNames = new Set(
       summary.investment_group_trends
         .filter((item) => hasInvestmentGroupData(item))
