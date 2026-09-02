@@ -919,6 +919,9 @@ fn open_database(path: PathBuf) -> Result<Connection, AppError> {
   connection.execute_batch(INITIAL_SCHEMA)?;
   ensure_runtime_schema(&connection)?;
   connection.execute_batch(INITIAL_SEED)?;
+  seed_default_content_templates(&connection)?;
+  normalize_builtin_asset_category_labels(&connection)?;
+  ensure_prepaid_expense_asset(&connection)?;
   Ok(connection)
 }
 
@@ -1223,9 +1226,6 @@ fn ensure_runtime_schema(connection: &Connection) -> Result<(), AppError> {
     ",
     [],
   )?;
-  seed_default_content_templates(connection)?;
-  normalize_builtin_asset_category_labels(connection)?;
-  ensure_prepaid_expense_asset(connection)?;
   Ok(())
 }
 
@@ -1348,15 +1348,11 @@ fn prepaid_expense_amount_cny(connection: &Connection, period_month: &str) -> Re
 
 fn normalize_builtin_asset_category_labels(connection: &Connection) -> Result<(), AppError> {
   let categories = [
-    ("asset_cat_us_equity", "全球资产", None, "main", 50_i64, 1_i64),
-    ("asset_sub_us_market", "美股", Some("asset_cat_us_equity"), "sub", 60_i64, 1_i64),
-    ("asset_sub_sp500", "标普", Some("asset_sub_us_market"), "sub", 61_i64, 1_i64),
-    ("asset_sub_nasdaq", "纳斯达克", Some("asset_sub_us_market"), "sub", 62_i64, 1_i64),
-    ("asset_sub_hk_market", "港股", Some("asset_cat_us_equity"), "sub", 70_i64, 1_i64),
-    ("asset_sub_emerging_market", "新兴市场", Some("asset_cat_us_equity"), "sub", 80_i64, 1_i64),
-    ("asset_sub_us_tech", "科技", Some("asset_cat_us_equity"), "sub", 81_i64, 0_i64),
-    ("asset_sub_info_tech", "信息科技", Some("asset_cat_us_equity"), "sub", 82_i64, 0_i64),
-    ("asset_sub_other_us", "其他美股", Some("asset_cat_us_equity"), "sub", 83_i64, 0_i64),
+    ("asset_cat_us_equity", "海外权益", None, "main", 20_i64, 1_i64),
+    ("asset_sub_us_market", "美股", Some("asset_cat_us_equity"), "sub", 21_i64, 1_i64),
+    ("asset_sub_hk_market", "港股", Some("asset_cat_us_equity"), "sub", 22_i64, 1_i64),
+    ("asset_sub_emerging_market", "新兴市场", Some("asset_cat_us_equity"), "sub", 23_i64, 1_i64),
+    ("asset_sub_money_market_cash", "货币基金", Some("asset_cat_cash"), "sub", 12_i64, 1_i64),
   ];
   for (id, label, parent_id, level, sort_order, is_active) in categories {
     connection.execute(
@@ -1373,10 +1369,19 @@ fn normalize_builtin_asset_category_labels(connection: &Connection) -> Result<()
       params![id, label, parent_id, level, sort_order, is_active],
     )?;
   }
+  // 旧美股三级分类：已废弃，若存在则停用并把资产迁到美股子类。
+  connection.execute(
+    "
+    update asset_categories
+    set is_active = 0
+    where id in ('asset_sub_us_tech', 'asset_sub_info_tech', 'asset_sub_other_us')
+    ",
+    [],
+  )?;
   connection.execute(
     "
     update assets
-    set sub_asset_category_id = 'asset_sub_nasdaq',
+    set sub_asset_category_id = 'asset_sub_us_market',
       updated_at = current_timestamp
     where sub_asset_category_id in ('asset_sub_us_tech', 'asset_sub_info_tech')
     ",
@@ -4746,41 +4751,37 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       label: "现金".to_string(),
       children: vec![
         OnboardingAssetCategoryInput { id: "asset_sub_bank_payment".to_string(), label: "银行/支付账户".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_money_market_cash".to_string(), label: "货币现金".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_receivable".to_string(), label: "应收押金".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_money_market_cash".to_string(), label: "货币基金".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_liquid_cash".to_string(), label: "活钱/备用金".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
       id: "asset_cat_us_equity".to_string(),
-      label: "全球资产".to_string(),
+      label: "海外权益".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput {
-          id: "asset_sub_us_market".to_string(),
-          label: "美股".to_string(),
-          children: vec![
-            OnboardingAssetCategoryInput { id: "asset_sub_sp500".to_string(), label: "标普".to_string(), children: vec![] },
-            OnboardingAssetCategoryInput { id: "asset_sub_nasdaq".to_string(), label: "纳斯达克".to_string(), children: vec![] },
-          ],
-        },
+        OnboardingAssetCategoryInput { id: "asset_sub_us_market".to_string(), label: "美股".to_string(), children: vec![] },
         OnboardingAssetCategoryInput { id: "asset_sub_hk_market".to_string(), label: "港股".to_string(), children: vec![] },
         OnboardingAssetCategoryInput { id: "asset_sub_emerging_market".to_string(), label: "新兴市场".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_developed_market".to_string(), label: "发达市场".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
-      id: "asset_cat_dividend_low_vol".to_string(),
-      label: "红利低波".to_string(),
+      id: "asset_cat_a_share".to_string(),
+      label: "A股权益".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_dividend".to_string(), label: "红利".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_low_vol".to_string(), label: "低波".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_a_share_broad".to_string(), label: "宽基".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_a_share_sector_active".to_string(), label: "行业/主动".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_dividend_low_vol".to_string(), label: "红利低波".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
       id: "asset_cat_bond".to_string(),
       label: "债券".to_string(),
       children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_short_bond".to_string(), label: "短债".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_pure_bond".to_string(), label: "纯债".to_string(), children: vec![] },
         OnboardingAssetCategoryInput { id: "asset_sub_treasury_bond".to_string(), label: "国债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_pure_bond".to_string(), label: "纯债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_short_bond".to_string(), label: "短债".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_convertible_bond".to_string(), label: "可转债".to_string(), children: vec![] },
       ],
     },
     OnboardingAssetCategoryInput {
@@ -4791,18 +4792,16 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
       ],
     },
     OnboardingAssetCategoryInput {
-      id: "asset_cat_a_share".to_string(),
-      label: "A股权益".to_string(),
-      children: vec![
-        OnboardingAssetCategoryInput { id: "asset_sub_a_share_broad".to_string(), label: "宽基".to_string(), children: vec![] },
-        OnboardingAssetCategoryInput { id: "asset_sub_a_share_sector_active".to_string(), label: "行业/主动".to_string(), children: vec![] },
-      ],
+      id: "asset_cat_real_estate".to_string(),
+      label: "房产/不动产".to_string(),
+      children: vec![],
     },
     OnboardingAssetCategoryInput {
       id: "asset_cat_other".to_string(),
       label: "其他".to_string(),
       children: vec![
         OnboardingAssetCategoryInput { id: "asset_sub_insurance_pension".to_string(), label: "保险/养老金".to_string(), children: vec![] },
+        OnboardingAssetCategoryInput { id: "asset_sub_receivable".to_string(), label: "应收押金".to_string(), children: vec![] },
         OnboardingAssetCategoryInput { id: "asset_sub_uncategorized".to_string(), label: "未分类".to_string(), children: vec![] },
       ],
     },
@@ -4812,13 +4811,14 @@ fn default_asset_category_tree() -> Vec<OnboardingAssetCategoryInput> {
 fn normalize_asset_category_tree_labels(mut tree: Vec<OnboardingAssetCategoryInput>) -> Vec<OnboardingAssetCategoryInput> {
   fn normalize_node(node: &mut OnboardingAssetCategoryInput) {
     node.label = match node.id.as_str() {
-      "asset_cat_us_equity" => "全球资产".to_string(),
+      "asset_cat_us_equity" => "海外权益".to_string(),
       "asset_sub_us_market" => "美股".to_string(),
       "asset_sub_sp500" => "标普".to_string(),
       "asset_sub_nasdaq" => "纳斯达克".to_string(),
       "asset_sub_hk_market" => "港股".to_string(),
       "asset_sub_emerging_market" => "新兴市场".to_string(),
       "asset_sub_us_tech" => "科技".to_string(),
+      "asset_sub_money_market_cash" => "货币基金".to_string(),
       _ => node.label.clone(),
     };
     for child in node.children.iter_mut() {
@@ -5045,7 +5045,7 @@ fn read_onboarding_status(connection: &Connection) -> Result<OnboardingStatus, A
       (select count(*) from monthly_asset_snapshots) +
       (select count(*) from investment_cashflows) +
       (select count(*) from monthly_credit_card_entries) +
-      (select count(*) from assets where coalesce(monthly_update_managed, 0) = 1)
+      (select count(*) from assets where coalesce(monthly_update_managed, 0) = 1 and id <> 'asset_prepaid_expenses')
     ",
     [],
     |row| row.get(0),
@@ -5910,6 +5910,81 @@ fn save_onboarding(
   }
 
   read_onboarding_status(&work_connection)
+}
+
+fn collect_asset_category_ids(nodes: &[OnboardingAssetCategoryInput], ids: &mut std::collections::HashSet<String>) {
+  for node in nodes {
+    ids.insert(node.id.clone());
+    collect_asset_category_ids(&node.children, ids);
+  }
+}
+
+fn ensure_referenced_asset_categories(
+  connection: &Connection,
+  tree: &[OnboardingAssetCategoryInput],
+) -> Result<(), AppError> {
+  let mut tree_ids = std::collections::HashSet::new();
+  collect_asset_category_ids(tree, &mut tree_ids);
+  let mut statement = connection.prepare(
+    "select name, main_asset_category_id, sub_asset_category_id from assets",
+  )?;
+  let rows = statement.query_map([], |row| {
+    Ok((
+      row.get::<_, String>(0)?,
+      row.get::<_, String>(1)?,
+      row.get::<_, Option<String>>(2)?,
+    ))
+  })?;
+  let mut blocked_assets: Vec<String> = Vec::new();
+  for row in rows {
+    let (name, main_id, sub_id) = row?;
+    if !tree_ids.contains(&main_id) || sub_id.as_ref().map_or(false, |id| !tree_ids.contains(id)) {
+      blocked_assets.push(name);
+    }
+  }
+  if !blocked_assets.is_empty() {
+    return Err(AppError::InvalidCsvValue(format!(
+      "以下资产正在使用被移除的分类，请先到月底更新里调整资产分类：{}",
+      blocked_assets.join("、")
+    )));
+  }
+  Ok(())
+}
+
+fn save_asset_category_tree_to_connection(
+  connection: &mut Connection,
+  tree: &[OnboardingAssetCategoryInput],
+) -> Result<(), AppError> {
+  ensure_referenced_asset_categories(connection, tree)?;
+  let tx = connection.transaction()?;
+  tx.execute(
+    "
+    insert into app_settings (key, value_json, updated_at)
+    values ('asset_category_tree', ?1, current_timestamp)
+    on conflict(key) do update set value_json = excluded.value_json, updated_at = excluded.updated_at
+    ",
+    params![serde_json::to_string(tree).unwrap_or_else(|_| "[]".to_string())],
+  )?;
+  sync_asset_category_tree(&tx, tree)?;
+  tx.commit()?;
+  Ok(())
+}
+
+#[tauri::command]
+fn save_asset_category_tree(
+  tree: Vec<OnboardingAssetCategoryInput>,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<(), AppError> {
+  let mut work_connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&work_connection, &security)?;
+  save_asset_category_tree_to_connection(&mut work_connection, &tree)?;
+
+  if db.split_databases {
+    let mut dashboard_connection = db.dashboard_connection.lock().expect("database mutex poisoned");
+    save_asset_category_tree_to_connection(&mut dashboard_connection, &tree)?;
+  }
+  Ok(())
 }
 
 #[tauri::command]
@@ -9255,6 +9330,7 @@ pub fn run() {
       set_privacy_mode,
       get_onboarding_status,
       save_onboarding,
+      save_asset_category_tree,
       reset_demo_onboarding,
       list_content_templates,
       save_content_template,
