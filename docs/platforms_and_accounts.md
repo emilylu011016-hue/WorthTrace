@@ -11,6 +11,7 @@
 | Vercel | 托管手机端 PWA 网址 | 手机用户 | 否，前端只访问 Supabase |
 | Supabase | 账号登录、云端草稿箱、云端看板快照 | 手机端和电脑端 | 是，存手机草稿和看板快照 |
 | Resend | Supabase 登录验证邮件发送 | 注册 / 验证邮箱用户 | 否 |
+| Cloudflare | 域名注册与 DNS、验证成功页托管 | 注册 / 验证邮箱用户 | 否 |
 | 本地 SQLite | 电脑端正式财务数据库 | 桌面 App | 是，核心正式数据 |
 | Tauri | 桌面 App 框架 | 开发 / 打包 | 否 |
 | React / Vite | 桌面前端和手机 PWA 前端 | 开发 / 构建 | 否 |
@@ -148,6 +149,8 @@ docs/supabase_mobile_dashboard_snapshots.sql
 
 注意：
 
+- Supabase Authentication 需要开启 "Confirm email"：注册后用户必须点击邮件里的验证链接才能登录；桌面端和手机端都已处理“待验证”状态和重发验证邮件。
+- Supabase Site URL 配置为 `https://worthtrace.org`：验证/找回密码链接点完后跳转到该页面。该页面是仓库 `web/index.html`（“邮箱验证成功”静态页），托管在 Cloudflare Workers（项目 `worthtrace-verify`），与 Resend 共用同一域名。
 - 如果电脑端提示 `JWT expired`，说明登录 token 过期。当前版本已加自动刷新；如果仍失败，退出账号后重新登录。
 - 如果手机资产显示 0，通常说明电脑端还没有点击“同步看板到手机”，或手机仍在使用旧 PWA 缓存。
 
@@ -160,15 +163,34 @@ docs/supabase_mobile_dashboard_snapshots.sql
 
 当前使用方式：
 
-- Resend 作为 Supabase 的邮件发送服务。
-- Gmail 测试可收到邮件。
-- 163 邮箱之前出现过收不到验证邮件的问题。
+- Resend 作为 Supabase 的邮件发送服务（Supabase 后台 Authentication → Emails → SMTP Settings 里配置）。
+- 发信域名：`worthtrace.org`（已验证），发件地址 `noreply@worthtrace.org`；DNS（DKIM/SPF/DMARC）托管在 Cloudflare。
+- 曾用 `onboarding@resend.dev` 测试域名发信：该域名只能发给账号所有者本人，其他收件人一律 403——这就是过去“Gmail 能收到、163 收不到”的第一层原因，已通过自有域名解决。
 
 注意：
 
 - Resend 不保存 WorthTrace 财务数据。
-- 如果验证邮件收不到，先检查垃圾邮件，再确认 Supabase SMTP / Resend 配置。
-- 免费额度和发信限制需要在 Resend 后台查看。
+- 如果验证邮件收不到，先检查垃圾邮件，再确认 Resend 域名验证状态和 Supabase SMTP 配置。
+- **已知遗留问题（2026-09）**：163 等国内邮箱可能对新注册域名（`worthtrace.org`）的邮件静默拦截——Resend 返回发送成功（200），但用户收不到，垃圾箱也没有。这是收件方对新域名无发信信誉的默认策略，只能靠时间养信誉，短期内无法通过配置解决。验收和真实用户注册时建议优先用 Gmail；163 用户收不到时可先换邮箱注册。
+- 免费额度和发信限制需要在 Resend 后台查看；Supabase 侧每小时发信上限在 Authentication → Rate Limits 里调整。
+
+## Cloudflare
+
+用途：
+
+- 注册并托管域名 `worthtrace.org`（Registrar + DNS，自动续费按年）。
+- 托管 Resend 发信所需的 DNS 记录：DKIM（`resend._domainkey`）、两条发信 CNAME（`rsend` / `send`，必须 DNS only，不能走代理）、DMARC（`_dmarc`）。改动这些记录会导致 Resend 域名验证失效、验证邮件发不出。
+- 托管"邮箱验证成功"静态页（仓库 `web/index.html`，Workers 项目 `worthtrace-verify`，自定义域名 `worthtrace.org`）。
+
+当前使用方式：
+
+- Supabase URL Configuration 的 Site URL = `https://worthtrace.org`：注册验证 / 找回密码链接点完后跳转到该页面。
+- 验证邮件链接点击后若显示 "otp_expired / Email link is invalid or has expired"，多为 Gmail 安全扫描或重复点击导致 token 被消耗；账号通常已完成验证，直接尝试登录即可。
+
+注意：
+
+- Cloudflare 不保存 WorthTrace 财务数据。
+- 域名到期前记得续费（Cloudflare 会邮件提醒）；域名失效会导致验证落地页和发信域名同时失效。
 
 ## 本地 SQLite
 

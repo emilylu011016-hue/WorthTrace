@@ -83,6 +83,28 @@
 - `v1.0.1`：小修复。
 - `v1.1.0`：新功能发布。
 
+## 自动更新（Tauri Updater）
+
+桌面端通过 Tauri 2 官方 Updater 从 GitHub Release 自动更新。旧版 App 启动时检查 `https://github.com/emilylu011016-hue/WorthTrace/releases/latest/download/latest.json`，发现新版本则下载带签名的更新包，校验 Ed25519 签名后安装并重启。
+
+### 发布新版本的步骤
+
+1. 同步 bump 三处版本号：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`。
+2. 合并到 `main` 后打 tag：`v<版本号>`（例如 `v2.9.1`）。
+3. push tag 触发 `.github/workflows/release.yml`：CI 构建 macOS arm64/Intel 和 Windows，生成 `.sig` 签名和 updater 构件（`.app.tar.gz` / NSIS），自动创建 GitHub Release 并上传 `latest.json`。
+4. 用户侧旧版 App 自动检查更新，下载、校验、安装、重启。
+
+### GitHub 仓库需要配置的 Secrets
+
+- `TAURI_SIGNING_PRIVATE_KEY`：Ed25519 签名私钥（本机生成于 `src-tauri/keys/tauri-updater.key`，该目录已 gitignore，不进 Git）。
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码。当前密钥未设密码，此项可留空；若将来给私钥设密码，必须在此配置。
+
+### 注意事项
+
+- 私钥丢失或更换后，所有旧版本 App 都无法验证新更新包；换密钥必须同时更新 `src-tauri/tauri.conf.json` 里的 `plugins.updater.pubkey` 并让用户手动重装一次。
+- 老版本（没有 updater 代码的版本）不会自动更新，必须手动从 GitHub Release 下载一次带 updater 的新版本安装包。
+- 私钥只存在本机和 GitHub Secrets，不得提交进 Git，不得写进文档或聊天记录以外的共享位置。
+
 ## 推荐说法
 
 - “打开测试版 APP，我要验收并修改这个功能。”

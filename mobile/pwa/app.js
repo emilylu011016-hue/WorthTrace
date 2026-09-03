@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.37";
+const MOBILE_APP_VERSION = "0.3.38";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -1167,10 +1167,10 @@ function showCloudDialog() {
   cloudPasswordInput.type = "password";
   cloudPasswordToggle.textContent = "显示";
   cloudResendButton.hidden = true;
-  cloudSignupButton.hidden = true;
+  cloudSignupButton.hidden = signedIn;
   cloudLogoutButton.hidden = !signedIn;
   cloudLoginSubmitButton.hidden = signedIn;
-  cloudHint.textContent = signedIn ? "账号同步已开启。" : "输入邮箱和密码登录。密码区分大小写。";
+  cloudHint.textContent = signedIn ? "账号同步已开启。" : "输入邮箱和云账号密码登录，密码区分大小写。";
   openModal(cloudDialog);
   if (!signedIn) cloudEmailInput.focus();
 }
@@ -1265,7 +1265,7 @@ async function cloudAuth(mode) {
     const session = await response.json();
     if (!session?.access_token) {
       cloudHint.textContent = mode === "signup"
-        ? "账号注册已提交。请先打开邮箱完成验证，验证后回到这里登录。"
+        ? "账号注册已提交。请先打开邮箱点击链接完成验证（验证前无法登录），验证后回到这里登录。如未收到请检查垃圾邮件，或点重发验证邮件再试。"
         : "登录失败，请检查邮箱、密码或邮箱验证状态。";
       cloudResendButton.hidden = !shouldShowResendConfirmation(cloudHint.textContent);
       if (mode === "signup") {
@@ -1280,11 +1280,10 @@ async function cloudAuth(mode) {
     const message = friendlyAuthError(err, mode);
     if (mode === "signin") {
       cloudHint.textContent = message;
-      cloudSignupButton.hidden = !message.includes("新邮箱");
-      cloudResendButton.hidden = false;
+      cloudResendButton.hidden = !shouldShowResendConfirmation(message);
     } else {
       cloudHint.textContent = message;
-      cloudSignupButton.hidden = true;
+      cloudSignupButton.hidden = false;
       cloudResendButton.hidden = !email;
     }
   } finally {

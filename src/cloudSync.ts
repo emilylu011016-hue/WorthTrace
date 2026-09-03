@@ -68,7 +68,11 @@ export async function cloudSignIn(email: string, password: string): Promise<Clou
   return response.json();
 }
 
-export async function cloudSignUp(email: string, password: string): Promise<CloudSession> {
+export type CloudSignupResult =
+  | { confirmationRequired: true }
+  | { confirmationRequired: false; session: CloudSession };
+
+export async function cloudSignUp(email: string, password: string): Promise<CloudSignupResult> {
   if (!cloudSyncConfigured()) {
     throw new Error("云同步还没有配置完成。");
   }
@@ -80,7 +84,25 @@ export async function cloudSignUp(email: string, password: string): Promise<Clou
   if (!response.ok) {
     throw new Error(await response.text());
   }
-  return response.json();
+  const data = await response.json();
+  if (!data?.access_token) {
+    return { confirmationRequired: true };
+  }
+  return { confirmationRequired: false, session: data as CloudSession };
+}
+
+export async function cloudResendConfirmationEmail(email: string): Promise<void> {
+  if (!cloudSyncConfigured()) {
+    throw new Error("云同步还没有配置完成。");
+  }
+  const response = await fetch(`${CLOUD_SYNC_URL}/auth/v1/resend`, {
+    method: "POST",
+    headers: cloudHeaders(),
+    body: JSON.stringify({ type: "signup", email })
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
 }
 
 export async function cloudRefreshSession(session: CloudSession): Promise<CloudSession> {
