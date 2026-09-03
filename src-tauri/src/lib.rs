@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.3.37";
+const MOBILE_PWA_VERSION: &str = "0.3.38";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -9303,6 +9303,8 @@ fn import_cloud_mobile_drafts(
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
+    .plugin(tauri_plugin_process::init())
     .setup(|app| {
       let work_db_path = work_database_path(app)?;
       let dashboard_db_path = dashboard_database_path(&work_db_path)?;

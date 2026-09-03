@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   cloudSignIn,
   cloudSignUp,
+  cloudResendConfirmationEmail,
   cloudRefreshSession,
   cloudSyncConfigured,
   isCloudTokenExpiredError,
@@ -18,6 +21,7 @@ import {
   BarChart3,
   CheckCircle2,
   ChevronLeft,
+  Cloud,
   Copy,
   Database,
   Edit3,
@@ -1749,8 +1753,15 @@ export function App() {
   const [cloudPassword, setCloudPassword] = useState("");
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
   const [cloudSignupSuggested, setCloudSignupSuggested] = useState(false);
+  const [cloudConfirmationPending, setCloudConfirmationPending] = useState(false);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudDrafts, setCloudDrafts] = useState<CloudDraft[]>([]);
+  const [cloudSetupSkipped, setCloudSetupSkipped] = useState(
+    () => window.localStorage.getItem("worthtrace-cloud-setup-skipped-v1") === "1"
+  );
+  const [appUpdate, setAppUpdate] = useState<{ version: string; update: Update } | null>(null);
+  const [updateDownload, setUpdateDownload] = useState<{ percent: number | null } | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const previewStartView = (() => {
     if (!browserPreviewSummary || typeof window === "undefined") return "healthDashboard";
     const params = new URLSearchParams(window.location.search);
@@ -1897,6 +1908,12 @@ export function App() {
       onboardingStatus &&
       !onboardingStatus.completed
   );
+  const shouldShowCloudSetup = Boolean(
+    security?.unlocked &&
+      onboardingStatus &&
+      !onboardingStatus.completed &&
+      !cloudSetupSkipped
+  );
 
   useEffect(() => {
     if (browserPreviewSummary) {
@@ -1965,6 +1982,24 @@ export function App() {
         setLoadState("fallback");
       });
   }, []);
+
+  useEffect(() => {
+    if (browserPreviewSummary || !security?.unlocked) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const update = await check();
+        if (!cancelled && update) {
+          setAppUpdate({ version: update.version, update });
+        }
+      } catch {
+        // 未配置更新源或离线时静默忽略，不打断使用。
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [security?.unlocked]);
 
   useEffect(() => {
     setDcaCashflows((current) => generateDcaCashflowsForAssets(assetItems, selectedMonth, current));
@@ -2918,6 +2953,43 @@ export function App() {
     }
   }
 
+  function skipCloudSetup() {
+    window.localStorage.setItem("worthtrace-cloud-setup-skipped-v1", "1");
+    setCloudSetupSkipped(true);
+    setCloudMessage(null);
+    setCloudEmail("");
+    setCloudPassword("");
+    setCloudSignupSuggested(false);
+    setCloudConfirmationPending(false);
+    if (!onboardingStatus?.completed) {
+      setView("onboarding");
+    }
+  }
+
+  async function handleInstallAppUpdate() {
+    if (!appUpdate) return;
+    setUpdateMessage(null);
+    setUpdateDownload({ percent: null });
+    try {
+      let received = 0;
+      let total: number | null = null;
+      await appUpdate.update.download((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? null;
+        } else if (event.event === "Progress") {
+          received += event.data.chunkLength;
+          const percent = total ? Math.min(99, Math.round((received / total) * 100)) : null;
+          setUpdateDownload({ percent });
+        }
+      });
+      await appUpdate.update.install();
+      await relaunch();
+    } catch (err) {
+      setUpdateDownload(null);
+      setUpdateMessage(`更新失败：${String(err)}`);
+    }
+  }
+
   function openSettings(tab: SyncTab = "sync") {
     setSettingsTab(tab);
     setSettingsOpen(true);
@@ -2974,7 +3046,10 @@ export function App() {
 
   async function handleCloudAuth(mode: "signin" | "signup") {
     setCloudMessage(null);
-    if (mode === "signin") setCloudSignupSuggested(false);
+    if (mode === "signin") {
+      setCloudSignupSuggested(false);
+      setCloudConfirmationPending(false);
+    }
     if (!cloudSyncConfigured()) {
       setCloudMessage("云同步还没有配置完成。");
       return;
@@ -2985,23 +3060,59 @@ export function App() {
     }
     setCloudBusy(true);
     try {
-      const session = mode === "signup"
-        ? await cloudSignUp(cloudEmail.trim(), cloudPassword)
-        : await cloudSignIn(cloudEmail.trim(), cloudPassword);
-      rememberCloudSession(session);
-      setCloudPassword("");
-      setCloudSignupSuggested(false);
-      setCloudMessage(mode === "signup" ? "账号已创建并登录。" : "已登录账号同步。");
-      await refreshCloudDrafts(session);
+      if (mode === "signup") {
+        const result = await cloudSignUp(cloudEmail.trim(), cloudPassword);
+        if (result.confirmationRequired) {
+          setCloudPassword("");
+          setCloudSignupSuggested(false);
+          setCloudConfirmationPending(true);
+          setCloudMessage(`确认邮件已发送至 ${cloudEmail.trim()}。请点击邮件中的链接完成验证（验证前该账号无法登录），验证后回到这里登录。如果几分钟内没有收到，请检查垃圾邮件文件夹，或点"重发验证邮件"再试一次。`);
+          return;
+        }
+        rememberCloudSession(result.session);
+        setCloudPassword("");
+        setCloudConfirmationPending(false);
+        setCloudMessage("账号已创建并登录。");
+        await refreshCloudDrafts(result.session);
+      } else {
+        const session = await cloudSignIn(cloudEmail.trim(), cloudPassword);
+        rememberCloudSession(session);
+        setCloudPassword("");
+        setCloudSignupSuggested(false);
+        setCloudMessage("已登录账号同步。");
+        await refreshCloudDrafts(session);
+      }
     } catch (err) {
       const message = friendlyCloudAuthError(err, mode);
       if (mode === "signin") {
         setCloudSignupSuggested(message.includes("新邮箱"));
+        setCloudConfirmationPending(message.includes("验证"));
         setCloudMessage(message);
       } else {
         setCloudSignupSuggested(false);
         setCloudMessage(message);
       }
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function handleCloudResendConfirmation() {
+    setCloudMessage(null);
+    if (!cloudSyncConfigured()) {
+      setCloudMessage("云同步还没有配置完成。");
+      return;
+    }
+    if (!cloudEmail.trim()) {
+      setCloudMessage("请输入邮箱后再重发验证邮件。");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      await cloudResendConfirmationEmail(cloudEmail.trim());
+      setCloudMessage("验证邮件已重新发送，请检查收件箱和垃圾邮件。");
+    } catch (err) {
+      setCloudMessage(friendlyCloudAuthError(err, "signup"));
     } finally {
       setCloudBusy(false);
     }
@@ -5438,6 +5549,7 @@ export function App() {
                       onChange={(event) => {
                         setCloudEmail(event.target.value);
                         setCloudSignupSuggested(false);
+                        setCloudConfirmationPending(false);
                       }}
                       placeholder="输入邮箱"
                       type="email"
@@ -5445,15 +5557,16 @@ export function App() {
                     />
                   </label>
                   <label>
-                    账号密码
+                    云账号密码
                     <input
                       autoComplete="current-password"
                       minLength={6}
                       onChange={(event) => {
                         setCloudPassword(event.target.value);
                         setCloudSignupSuggested(false);
+                        setCloudConfirmationPending(false);
                       }}
-                      placeholder="至少 6 位"
+                      placeholder="与文档密码相互独立，至少 6 位"
                       type="password"
                       value={cloudPassword}
                     />
@@ -5466,6 +5579,15 @@ export function App() {
                     {cloudSignupSuggested ? (
                       <button className="secondary-button compact" disabled={cloudBusy || !cloudSyncConfigured()} onClick={() => void handleCloudAuth("signup")} type="button">
                         用此邮箱创建新账号
+                      </button>
+                    ) : (
+                      <button className="secondary-button compact" disabled={cloudBusy || !cloudSyncConfigured()} onClick={() => void handleCloudAuth("signup")} type="button">
+                        注册新账号
+                      </button>
+                    )}
+                    {cloudConfirmationPending ? (
+                      <button className="secondary-button compact" disabled={cloudBusy || !cloudSyncConfigured()} onClick={() => void handleCloudResendConfirmation()} type="button">
+                        重发验证邮件
                       </button>
                     ) : null}
                   </div>
@@ -5724,6 +5846,119 @@ export function App() {
     );
   }
 
+  if (shouldShowCloudSetup) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <div className="auth-icon">
+            <Cloud size={28} />
+          </div>
+          {isDemoEnvironment ? <div className="environment-badge demo-badge">Demo 演示版</div> : null}
+          <p className="eyebrow">Cloud Account</p>
+          <h1>设置云账号（可选）</h1>
+          <p className="auth-copy">
+            绑定云账号后，手机端记账可以同步回电脑，已发布看板也能同步到手机。新注册账号需要打开邮箱点击验证链接。此步骤可跳过，之后随时在右上角“设置 → 账号与同步”里绑定。
+          </p>
+          {cloudSession ? (
+            <>
+              <p className="auth-account-hint">当前账号：{cloudSession.user.email || cloudSession.user.id}</p>
+              <div className="auth-actions">
+                <button onClick={skipCloudSetup} type="button">
+                  进入初始化
+                </button>
+              </div>
+            </>
+          ) : cloudSyncConfigured() ? (
+            <form
+              className="auth-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleCloudAuth("signin");
+              }}
+            >
+              <label>
+                邮箱
+                <input
+                  autoComplete="email"
+                  onChange={(event) => {
+                    setCloudEmail(event.target.value);
+                    setCloudSignupSuggested(false);
+                    setCloudConfirmationPending(false);
+                  }}
+                  placeholder="输入邮箱"
+                  type="email"
+                  value={cloudEmail}
+                />
+              </label>
+              <label>
+                云账号密码
+                <input
+                  autoComplete="current-password"
+                  minLength={6}
+                  onChange={(event) => {
+                    setCloudPassword(event.target.value);
+                    setCloudSignupSuggested(false);
+                    setCloudConfirmationPending(false);
+                  }}
+                  placeholder="与文档密码相互独立，至少 6 位"
+                  type="password"
+                  value={cloudPassword}
+                />
+              </label>
+              {cloudMessage ? <p className="auth-error">{cloudMessage}</p> : null}
+              <div className="auth-actions">
+                <button className="secondary-button compact" onClick={skipCloudSetup} type="button">
+                  跳过，稍后在设置中绑定
+                </button>
+                {cloudSignupSuggested ? (
+                  <button
+                    className="secondary-button compact"
+                    disabled={cloudBusy}
+                    onClick={() => void handleCloudAuth("signup")}
+                    type="button"
+                  >
+                    用此邮箱创建新账号
+                  </button>
+                ) : (
+                  <button
+                    className="secondary-button compact"
+                    disabled={cloudBusy}
+                    onClick={() => void handleCloudAuth("signup")}
+                    type="button"
+                  >
+                    注册新账号
+                  </button>
+                )}
+                {cloudConfirmationPending ? (
+                  <button
+                    className="secondary-button compact"
+                    disabled={cloudBusy}
+                    onClick={() => void handleCloudResendConfirmation()}
+                    type="button"
+                  >
+                    重发验证邮件
+                  </button>
+                ) : null}
+                <button disabled={cloudBusy} type="submit">
+                  登录
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <p className="auth-copy">当前安装包还没有启用账号同步，可以跳过此步骤。</p>
+              <div className="auth-actions">
+                <button className="secondary-button compact" onClick={skipCloudSetup} type="button">
+                  跳过
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </main>
+    );
+  }
+
   if (security && !security.unlocked) {
     return (
       <main className="auth-shell">
@@ -5737,6 +5972,11 @@ export function App() {
           <p className="auth-copy">
             解锁后才会读取财务看板和资产金额。{isDemoEnvironment ? "当前为脱敏演示数据，密码 demo123456。" : ""}
           </p>
+          {cloudSession ? (
+            <p className="auth-account-hint">当前账号：{cloudSession.user.email || cloudSession.user.id}</p>
+          ) : (
+            <p className="auth-account-hint">未绑定云账号（解锁后可在设置中绑定）</p>
+          )}
           <form className="auth-form" onSubmit={handleUnlock}>
             <label>
               密码
@@ -10283,6 +10523,39 @@ export function App() {
       {renderConfirmDialog()}
       {renderSettingsDialog()}
       {renderMobilePairingDialog()}
+      {appUpdate ? (
+        <div className="update-toast" role="status">
+          <div>
+            <p className="update-toast-title">发现新版本 v{appUpdate.version}</p>
+            {updateDownload ? (
+              <p className="update-toast-copy">
+                {updateDownload.percent !== null ? `正在下载更新… ${updateDownload.percent}%` : "正在下载更新…"}
+              </p>
+            ) : (
+              <p className="update-toast-copy">更新后 App 会自动重启完成安装。</p>
+            )}
+            {updateMessage ? <p className="update-toast-copy">{updateMessage}</p> : null}
+          </div>
+          <div className="row-actions">
+            <button
+              className="primary-button compact"
+              disabled={Boolean(updateDownload)}
+              onClick={() => void handleInstallAppUpdate()}
+              type="button"
+            >
+              立即更新
+            </button>
+            <button
+              className="secondary-button compact"
+              disabled={Boolean(updateDownload)}
+              onClick={() => setAppUpdate(null)}
+              type="button"
+            >
+              稍后
+            </button>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

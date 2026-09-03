@@ -19,6 +19,9 @@ __pycache__/
 output/
 releases/
 
+# Updater signing keys (private key must never enter Git)
+src-tauri/keys/
+
 # Databases and private data exports
 *.sqlite3
 *.sqlite3-shm
