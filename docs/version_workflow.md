@@ -92,12 +92,16 @@
 1. 同步 bump 三处版本号：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`。
 2. 合并到 `main` 后打 tag：`v<版本号>`（例如 `v2.9.1`）。
 3. push tag 触发 `.github/workflows/release.yml`：CI 构建 macOS arm64/Intel 和 Windows，生成 `.sig` 签名和 updater 构件（`.app.tar.gz` / NSIS），自动创建 GitHub Release 并上传 `latest.json`。
-4. 用户侧旧版 App 自动检查更新，下载、校验、安装、重启。
+4. **发布后必查 `latest.json`**：CI 的 tauri-action 存在已知时序问题——上传完 `.sig` 后立即读取 Release 资产列表，GitHub API 可能还没同步，导致日志出现 `Signature not found for the updater JSON. Skipping upload...`，`latest.json` 缺失。验证方法：`curl -sL https://github.com/emilylu011016-hue/WorthTrace/releases/latest/download/latest.json` 应返回 200 和当前版本号。若缺失，手动补传：按以下格式用 `gh release upload v<版本> latest.json --clobber` 上传，其中每个 platform 的 `signature` 是对应 `.sig` 文件的完整内容（用 `gh release download` 取回），`url` 是该平台更新包的 Release 下载地址，platform 键为 `darwin-aarch64` / `darwin-x86_64` / `windows-x86_64`：
+   ```json
+   {"version":"2.10.0","notes":"...","pub_date":"2026-09-03T11:30:00Z","platforms":{"darwin-aarch64":{"signature":"<.sig 文件内容>","url":"https://github.com/emilylu011016-hue/WorthTrace/releases/download/v2.10.0/<更新包文件名>"}}}
+   ```
+5. 用户侧旧版 App 自动检查更新，下载、校验、安装、重启。
 
 ### GitHub 仓库需要配置的 Secrets
 
 - `TAURI_SIGNING_PRIVATE_KEY`：Ed25519 签名私钥（本机生成于 `src-tauri/keys/tauri-updater.key`，该目录已 gitignore，不进 Git）。
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码。当前密钥未设密码，此项可留空；若将来给私钥设密码，必须在此配置。
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码。**注意：当前密钥是"空密码加密"格式（生成时用了 `--ci`），不是完全无密码**。CI 中此 secret 不配置时会得到空字符串，恰好能解锁；但本地命令行构建必须显式传 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`，否则 tauri CLI 会尝试交互式询问密码而失败（`Device not configured`）。
 
 ### 注意事项
 
