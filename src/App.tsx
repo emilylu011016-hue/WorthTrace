@@ -156,6 +156,13 @@ type InvestmentGroupTrend = InvestmentGroupPerformance & {
   period_month: string;
 };
 
+type YearlyInvestmentPerformance = {
+  year: string;
+  label: string;
+  gain: number;
+  annualized_return_rate?: number | null;
+};
+
 type DiscretionaryTrend = {
   period_month: string;
   amount: number;
@@ -213,6 +220,7 @@ type DashboardSeedSummary = {
   dca_cashflows: AssetCashflowItem[];
   investment_group_performances: InvestmentGroupPerformance[];
   investment_group_trends: InvestmentGroupTrend[];
+  yearly_investment_performances: YearlyInvestmentPerformance[];
   discretionary_trends: DiscretionaryTrend[];
   monthly_report_html: string;
   portfolio_targets: PortfolioTargetSummary[];
@@ -616,7 +624,7 @@ type TemplateType =
 
 const healthSections = ["总览", "收支储蓄", "支出结构", "资产配置", "投资表现", "月报"] as const;
 type HealthSection = (typeof healthSections)[number];
-const dashboardRanges = ["本月", "近 3 个月", "半年", "今年以来", "投资至今"] as const;
+const dashboardRanges = ["本月", "近 3 个月", "本季度", "半年", "今年以来", "投资至今"] as const;
 type DashboardRange = (typeof dashboardRanges)[number];
 type DashboardTheme = "champagne" | "sage" | "graphite";
 type DashboardItemDefinition = {
@@ -659,7 +667,7 @@ const dashboardModuleDetails: Record<HealthSection, { title: string; detail: str
   投资表现: {
     title: "投资表现",
     detail: "投资现金流、收益、XIRR 和资产组表现。",
-    charts: ["买入卖出分红", "月度 XIRR", "资产组收益"]
+    charts: ["买入卖出分红", "月度收益与收益率", "年度年化收益", "资产组收益"]
   },
   月报: {
     title: "月报",
@@ -702,6 +710,7 @@ const dashboardModuleItemDefinitions: Record<Exclude<HealthSection, "总览">, D
     { id: "investment_asset_return_chart", label: "资产所选范围内收益率图表", detail: "不同资产组收益率对比。", defaultEnabled: true },
     { id: "investment_group_perspective_chart", label: "资产组回报透视图表", detail: "资产组收益、买入、卖出和分红。", defaultEnabled: true },
     { id: "investment_return_xirr_chart", label: "所选范围内收益与资金加权收益率图表", detail: "月度收益金额和资金加权收益率同图。", defaultEnabled: true },
+    { id: "investment_yearly_xirr_table", label: "年度资金加权年化收益率", detail: "按自然年展示每年资金加权年化收益率和当年收益金额。", defaultEnabled: true },
     { id: "investment_group_return_table", label: "所选范围内资产组收益率图表", detail: "资产组收益、区间收益率和月末金额。", defaultEnabled: true }
   ],
   月报: [
@@ -1491,6 +1500,7 @@ const fallbackSummary: DashboardSeedSummary = {
   dca_cashflows: [],
   investment_group_performances: [],
   investment_group_trends: [],
+  yearly_investment_performances: [],
   discretionary_trends: [],
   monthly_report_html: "",
   portfolio_targets: []
@@ -2109,8 +2119,9 @@ export function App() {
 
   const privacyMode = Boolean(security?.privacy_mode);
   percentPrivacyMode = privacyMode;
-  const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dashboard_enabled_items?.length
-    ? onboardingStatus.dashboard_enabled_items
+  const newDefaultDashboardItemIds = ["investment_yearly_xirr_table"];
+const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dashboard_enabled_items?.length
+    ? [...onboardingStatus.dashboard_enabled_items, ...newDefaultDashboardItemIds.filter((id) => !onboardingStatus.dashboard_enabled_items?.includes(id))]
     : defaultDashboardItemIds);
   const enabledDashboardItemSet = useMemo(() => new Set(effectiveDashboardItems), [effectiveDashboardItems]);
   const visibleHealthSections = useMemo(() => {
@@ -2341,6 +2352,13 @@ export function App() {
       .sort((a, b) => a.period_month.localeCompare(b.period_month));
     if (dashboardRange === "本月") return trends.filter((item) => item.period_month === summary.snapshot_month);
     if (dashboardRange === "近 3 个月") return trends.slice(-3);
+    if (dashboardRange === "本季度") {
+      const snapshotQuarter = Math.floor((Number(summary.snapshot_month.slice(5, 7)) - 1) / 3);
+      return trends.filter((item) =>
+        item.period_month.slice(0, 4) === summary.snapshot_month.slice(0, 4) &&
+        Math.floor((Number(item.period_month.slice(5, 7)) - 1) / 3) === snapshotQuarter
+      );
+    }
     if (dashboardRange === "半年") return trends.slice(-6);
     if (dashboardRange === "今年以来") return trends.filter((item) => item.period_month.startsWith(summary.snapshot_month.slice(0, 4)));
     return trends;
@@ -8916,7 +8934,7 @@ export function App() {
       收支储蓄: { eyebrow: "Cashflow", title: "收支与储蓄", text: "看收入支出缺口、储蓄率、目标达成和异常波动。" },
       支出结构: { eyebrow: "Spending", title: "支出结构", text: "看分类占比、环比变化和异常支出。" },
 	      资产配置: { eyebrow: "Allocation", title: "资产配置", text: "看配置结构演变和当前资产比例；目标偏离、细分配比放在自定义项。" },
-      投资表现: { eyebrow: "Performance", title: "投资表现", text: "看非现金资产组收益率、收益金额和资金加权收益。" },
+      投资表现: { eyebrow: "Performance", title: "投资表现", text: "看非现金资产组收益率、收益金额、资金加权收益和年度年化。" },
       月报: { eyebrow: "Report", title: "月报", text: "生成本月总结、变化原因和下月提醒。" }
     };
     const module = activeModuleMeta[activeHealthSection];
@@ -10379,6 +10397,33 @@ export function App() {
                   <>
                     <h3 className="dashboard-subtitle">历史月度收益与资金加权收益</h3>
                     {renderInvestmentMonthlyChart()}
+                  </>
+                ) : null}
+                {dashboardItemEnabled("investment_yearly_xirr_table") ? (
+                  <>
+                    <h3 className="dashboard-subtitle">年度资金加权年化收益率</h3>
+                    <div className="dashboard-table">
+                      {summary.yearly_investment_performances.length === 0 ? (
+                        <div className="dashboard-empty-state compact">暂无数据：缺少年度投资数据。</div>
+                      ) : (
+                        summary.yearly_investment_performances.map((item) => (
+                          <button
+                            className="dashboard-table-row"
+                            key={item.year}
+                            type="button"
+                            {...tooltipEvents(
+                              item.label,
+                              `资金加权年化 ${item.annualized_return_rate === null || item.annualized_return_rate === undefined ? "待计算" : formatPercent(item.annualized_return_rate)}｜收益金额 ${item.gain >= 0 ? "+" : ""}${formatCurrency(item.gain, privacyMode)}`
+                            )}
+                          >
+                            <strong>{item.label}</strong>
+                            <span>收益 {item.gain >= 0 ? "+" : ""}{formatCurrency(item.gain, privacyMode)}</span>
+                            <span>{item.annualized_return_rate === null || item.annualized_return_rate === undefined ? "年化待算" : `年化 ${formatPercent(item.annualized_return_rate)}`}</span>
+                            <small>资金加权口径</small>
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </>
                 ) : null}
                 {dashboardItemEnabled("investment_group_return_table") ? (

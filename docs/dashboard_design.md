@@ -137,6 +137,7 @@ Charts:
 - Monthly investment gain.
 - Buy/sell/dividend cashflow timeline.
 - Asset contribution.
+- Yearly money-weighted annualized return (XIRR per calendar year, snapshot year labeled "至今") with yearly gain amount.
 
 Metrics:
 

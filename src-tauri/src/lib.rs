@@ -323,6 +323,7 @@ struct DashboardSeedSummary {
   dca_cashflows: Vec<GeneratedDcaCashflow>,
   investment_group_performances: Vec<InvestmentGroupPerformance>,
   investment_group_trends: Vec<InvestmentGroupTrend>,
+  yearly_investment_performances: Vec<YearlyInvestmentPerformance>,
   discretionary_trends: Vec<DiscretionaryTrend>,
   monthly_report_html: String,
   portfolio_targets: Vec<PortfolioTargetSummary>,
@@ -430,6 +431,14 @@ struct InvestmentGroupTrend {
   gain: f64,
   ending_value: f64,
   return_rate: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct YearlyInvestmentPerformance {
+  year: String,
+  label: String,
+  gain: f64,
+  annualized_return_rate: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -4091,6 +4100,123 @@ fn investment_group_performances(
   Ok(rows)
 }
 
+fn yearly_investment_performances(
+  connection: &Connection,
+  snapshot_month: &str,
+) -> Result<Vec<YearlyInvestmentPerformance>, AppError> {
+  let mut statement = connection.prepare(
+    "
+    select distinct substr(period_month, 1, 4) as year
+    from (
+      select period_month from monthly_asset_snapshots
+      union
+      select period_month from investment_cashflows
+    )
+    order by year
+    ",
+  )?;
+  let years = statement
+    .query_map([], |row| row.get::<_, String>(0))?
+    .collect::<Result<Vec<_>, _>>()?;
+  let snapshot_year = snapshot_month.get(0..4).unwrap_or("");
+  let mut out = Vec::new();
+  for year in years {
+    if year.as_str() > snapshot_year {
+      continue;
+    }
+    let year_start = format!("{}-01", year);
+    let end_month = if year == snapshot_year {
+      snapshot_month.to_string()
+    } else {
+      format!("{}-12", year)
+    };
+    let previous = previous_period_month(&year_start);
+    let (beginning_value, ending_value, buy, sell, dividend): (f64, f64, f64, f64, f64) = connection.query_row(
+      "
+      with bounds as (
+        select ?2 as beginning_month, ?3 as ending_month
+      ),
+      non_cash as (
+        select mas.period_month, mas.amount_cny
+        from monthly_asset_snapshots mas
+        join assets a on a.id = mas.asset_id
+        where mas.version_no = 1
+          and mas.status = 'held'
+          and a.main_asset_category_id <> 'asset_cat_cash'
+      )
+      select
+        coalesce((select sum(amount_cny) from non_cash, bounds where period_month = bounds.beginning_month), 0),
+        coalesce((select sum(amount_cny) from non_cash, bounds where period_month = bounds.ending_month), 0),
+        coalesce((select sum(case when flow_type = 'buy' then amount_cny else 0 end)
+                  from investment_cashflows ic join assets a on a.id = ic.asset_id
+                  where a.main_asset_category_id <> 'asset_cat_cash'
+                    and ic.period_month between ?1 and ?4), 0),
+        coalesce((select sum(case when flow_type = 'sell' then amount_cny else 0 end)
+                  from investment_cashflows ic join assets a on a.id = ic.asset_id
+                  where a.main_asset_category_id <> 'asset_cat_cash'
+                    and ic.period_month between ?1 and ?4), 0),
+        coalesce((select sum(case when flow_type = 'dividend' then amount_cny else 0 end)
+                  from investment_cashflows ic join assets a on a.id = ic.asset_id
+                  where a.main_asset_category_id <> 'asset_cat_cash'
+                    and ic.period_month between ?1 and ?4), 0)
+      ",
+      params![year_start, previous, end_month, end_month],
+      |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    )?;
+    if beginning_value.abs() <= 0.000_001
+      && ending_value.abs() <= 0.000_001
+      && buy.abs() <= 0.000_001
+      && sell.abs() <= 0.000_001
+      && dividend.abs() <= 0.000_001
+    {
+      continue;
+    }
+    let mut flow_statement = connection.prepare(
+      "
+      select flow_date, flow_type, amount_cny
+      from investment_cashflows ic
+      join assets a on a.id = ic.asset_id
+      where ic.period_month between ?1 and ?2
+        and a.main_asset_category_id <> 'asset_cat_cash'
+      order by flow_date
+      ",
+    )?;
+    let period_flows = flow_statement
+      .query_map(params![year_start, end_month], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, f64>(2)?))
+      })?
+      .collect::<Result<Vec<_>, _>>()?;
+    let mut flows = Vec::new();
+    if beginning_value.abs() > 0.000_001 {
+      flows.push((format!("{}-01", year), -beginning_value));
+    }
+    for (date, flow_type, amount) in period_flows {
+      let signed = match flow_type.as_str() {
+        "buy" => -amount,
+        "sell" | "dividend" => amount,
+        _ => 0.0,
+      };
+      if signed.abs() > 0.000_001 {
+        flows.push((date, signed));
+      }
+    }
+    if ending_value.abs() > 0.000_001 {
+      flows.push((month_end_date(&end_month), ending_value));
+    }
+    out.push(YearlyInvestmentPerformance {
+      label: if year == snapshot_year {
+        format!("{} 至今", year)
+      } else {
+        year.clone()
+      },
+      gain: ending_value - beginning_value - buy + sell + dividend,
+      annualized_return_rate: xirr(&flows),
+      year,
+    });
+  }
+  Ok(out)
+}
+
 fn asset_allocation_trends(connection: &Connection) -> Result<Vec<AssetAllocationTrend>, AppError> {
   let mut statement = connection.prepare(
     "
@@ -4698,6 +4824,7 @@ fn default_dashboard_items() -> Vec<String> {
     "investment_asset_return_chart".to_string(),
     "investment_group_perspective_chart".to_string(),
     "investment_return_xirr_chart".to_string(),
+    "investment_yearly_xirr_table".to_string(),
     "investment_group_return_table".to_string(),
     "report_template_picker".to_string(),
     "report_content_preview".to_string(),
@@ -9117,6 +9244,7 @@ fn get_dashboard_seed_summary(
   let dca_cashflows = generated_dca_cashflows_for_connection(&connection, &mobile_update_month)?;
   let investment_group_performances = investment_group_performances(&connection, &snapshot_month)?;
   let investment_group_trends = investment_group_trends(&connection)?;
+  let yearly_investment_performances = yearly_investment_performances(&connection, &snapshot_month)?;
   let discretionary_trends = discretionary_trends(&connection)?;
   let privacy_mode = setting_bool(&connection, "security_privacy_mode", false)?;
   let monthly_report_template = default_template_for_type(&connection, "monthly_report")?
@@ -9207,6 +9335,7 @@ fn get_dashboard_seed_summary(
     dca_cashflows,
     investment_group_performances,
     investment_group_trends,
+    yearly_investment_performances,
     discretionary_trends,
     monthly_report_html,
     portfolio_targets,
