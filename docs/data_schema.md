@@ -63,8 +63,10 @@ Stores buys, sells, dividends, and confirmed DCA flows.
 Important fields:
 
 - `flow_type`: `buy`, `sell`, `dividend`.
-- `source_kind`: `monthly_asset_entry`, `dca_auto`, `historical_numbers_cashflow`.
+- `source_kind`: `monthly_asset_entry`, `dca_auto`, `historical_numbers_cashflow`, `mobile_investment`.
 - `dca_plan_id`: links automatic DCA flow to the plan.
+
+`mobile_investment` rows come from the mobile PWA 「投资」tab: buy/sell drafts (`record_kind = "investment_flow"`) sync into the desktop inbox first, are merged into the month-end asset entry list for user confirmation, and are written here only when the month-end save succeeds.
 
 ## DCA
 

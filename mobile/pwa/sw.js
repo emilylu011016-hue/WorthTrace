@@ -1,4 +1,4 @@
-const CACHE_NAME = "worthtrace-mobile-pwa-0.3.38";
+const CACHE_NAME = "worthtrace-mobile-pwa-0.4.0";
 const ASSETS = [
   "./",
   "./index.html",

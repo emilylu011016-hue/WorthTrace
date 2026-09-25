@@ -4,10 +4,11 @@
 
 ## 当前版本
 
-- 手机 PWA 版本：0.3.38。
+- 手机 PWA 版本：0.4.0。
 - 所属项目版本：2.7.16。
 - 当前手机端可通过已绑定电脑的本地服务，或登录同一账号走云端同步；不直接打开 SQLite 文件。
 - 手机端本地草稿使用浏览器 IndexedDB：`worthtrace_mobile_v3`。
+- 0.4.0 新增「投资」tab（第 4 个底部导航）：记录投资买入/卖出，外币按可编辑汇率折算人民币；草稿经统一同步进电脑收件箱，月底更新（资产录入）确认后写入 `investment_cashflows`（`source_kind = mobile_investment`）；手机新建资产同步时直接落入 `assets` 表。
 - 手机端首次打开新版会清理旧 `worthtrace_mobile_v1` / `worthtrace_mobile_v2` 测试草稿，让手机端回到干净初始状态。
 
 ## 这个文件夹放什么

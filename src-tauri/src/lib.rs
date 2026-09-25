@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.3.38";
+const MOBILE_PWA_VERSION: &str = "0.4.0";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -160,6 +160,7 @@ struct MobileSyncInboxRecord {
   category: Option<String>,
   note: Option<String>,
   net_adjustment: Option<f64>,
+  payload_json: Option<String>,
   sync_status: String,
   received_at: String,
 }
@@ -212,6 +213,32 @@ struct MobilePortfolioTarget {
 }
 
 #[derive(Serialize)]
+struct MobileInvestmentFlowItem {
+  inbox_id: String,
+  device_id: String,
+  local_id: String,
+  asset_id: String,
+  asset_name: String,
+  period_month: String,
+  flow_date: String,
+  flow_type: String,
+  amount: f64,
+  currency: String,
+  fx_rate_to_cny: f64,
+  amount_cny: f64,
+  note: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MobileAssetMonthEndPoint {
+  asset_id: String,
+  period_month: String,
+  original_amount: f64,
+  currency: String,
+  amount_cny: f64,
+}
+
+#[derive(Serialize)]
 struct MobileCategoryMonthAmount {
   period_month: String,
   category: String,
@@ -253,6 +280,8 @@ struct MobileDashboardSnapshot {
   dca_cashflows: Vec<GeneratedDcaCashflow>,
   portfolio_targets: Vec<MobilePortfolioTarget>,
   spending_anomalies: Vec<SpendingAnomaly>,
+  asset_month_end_history: Vec<MobileAssetMonthEndPoint>,
+  total_net_invested_cny: f64,
 }
 
 #[derive(Debug, Error)]
@@ -1900,6 +1929,266 @@ fn mobile_asset_entries_from_payload(
   Ok(Some((period, entries)))
 }
 
+struct MobileInvestmentFlowPayload {
+  period_month: String,
+  asset_id: Option<String>,
+  asset_name: String,
+  flow_date: String,
+  flow_type: String,
+  amount: f64,
+  currency: String,
+  fx_rate_to_cny: f64,
+  amount_cny: f64,
+  note: Option<String>,
+}
+
+fn mobile_investment_flow_from_payload(
+  record_kind: &str,
+  period_month: Option<&str>,
+  payload: Option<&serde_json::Value>,
+) -> Result<Option<MobileInvestmentFlowPayload>, AppError> {
+  if record_kind != "investment_flow" {
+    return Ok(None);
+  }
+  let Some(payload) = payload else {
+    return Ok(None);
+  };
+  // LAN 收件箱存的是整条 MobileSyncRecordInput（flow 嵌在 payload_json 里），
+  // 云端草稿存的是原始 payload（flow 在顶层），两种形态都兼容。
+  let payload = if payload.get("flow").is_some() {
+    payload
+  } else {
+    match payload.get("payload_json") {
+      Some(inner) if inner.get("flow").is_some() => inner,
+      _ => return Ok(None),
+    }
+  };
+  let period = payload
+    .get("period_month")
+    .and_then(|value| value.as_str())
+    .or(period_month)
+    .unwrap_or("")
+    .trim()
+    .to_string();
+  let asset = payload.get("asset").cloned().unwrap_or_else(|| serde_json::json!({}));
+  let flow = payload.get("flow").cloned().unwrap_or_else(|| serde_json::json!({}));
+  let asset_id = asset
+    .get("asset_id")
+    .and_then(|value| value.as_str())
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(str::to_string);
+  let asset_name = asset
+    .get("name")
+    .and_then(|value| value.as_str())
+    .unwrap_or("")
+    .trim()
+    .to_string();
+  let flow_date = flow
+    .get("flow_date")
+    .and_then(|value| value.as_str())
+    .unwrap_or("")
+    .trim()
+    .to_string();
+  let flow_type = flow
+    .get("flow_type")
+    .and_then(|value| value.as_str())
+    .unwrap_or("buy")
+    .trim()
+    .to_lowercase();
+  if flow_type != "buy" && flow_type != "sell" {
+    return Err(AppError::InvalidCsvValue(format!("手机投资流水类型不支持：{flow_type}")));
+  }
+  let amount = flow.get("amount").and_then(|value| value.as_f64()).unwrap_or(0.0).abs();
+  if !amount.is_finite() {
+    return Err(AppError::InvalidCsvValue("手机投资流水金额无效".to_string()));
+  }
+  let currency = flow
+    .get("currency")
+    .and_then(|value| value.as_str())
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .unwrap_or("CNY")
+    .to_string();
+  let fx_rate_raw = flow.get("fx_rate_to_cny").and_then(|value| value.as_f64()).unwrap_or(1.0);
+  let fx_rate_to_cny = if fx_rate_raw.is_finite() && fx_rate_raw > 0.0 { fx_rate_raw } else { 1.0 };
+  let amount_cny_raw = flow.get("amount_cny").and_then(|value| value.as_f64()).unwrap_or(0.0);
+  let amount_cny = if amount_cny_raw.is_finite() && amount_cny_raw.abs() > 0.000_001 {
+    amount_cny_raw.abs()
+  } else {
+    amount * fx_rate_to_cny
+  };
+  let note = flow.get("note").and_then(|value| value.as_str()).map(str::to_string);
+  Ok(Some(MobileInvestmentFlowPayload {
+    period_month: period,
+    asset_id,
+    asset_name,
+    flow_date,
+    flow_type,
+    amount,
+    currency,
+    fx_rate_to_cny,
+    amount_cny,
+    note,
+  }))
+}
+
+fn mobile_investment_main_category(connection: &Connection, preferred: Option<&str>) -> Result<Option<String>, AppError> {
+  // 投资模块不创建现金类资产：现金类一律走兜底
+  if let Some(preferred) = preferred.filter(|value| *value != "asset_cat_cash") {
+    let exists: bool = connection.query_row(
+      "select exists(select 1 from asset_categories where id = ?1 and level = 'main')",
+      params![preferred],
+      |row| row.get(0),
+    )?;
+    if exists {
+      return Ok(Some(preferred.to_string()));
+    }
+  }
+  let fallback = connection
+    .query_row(
+      "
+      select id from asset_categories
+      where level = 'main'
+      order by case when id = 'asset_cat_other' then 0 else 1 end, sort_order
+      limit 1
+      ",
+      [],
+      |row| row.get::<_, String>(0),
+    )
+    .optional()?;
+  Ok(fallback)
+}
+
+/// 子分类必须真实存在、level='sub' 且 parent 是选定的主分类，否则留空。
+fn mobile_investment_sub_category(
+  connection: &Connection,
+  main_category_id: &str,
+  preferred: Option<&str>,
+) -> Result<Option<String>, AppError> {
+  let Some(preferred) = preferred else {
+    return Ok(None);
+  };
+  let valid: bool = connection.query_row(
+    "select exists(select 1 from asset_categories where id = ?1 and level = 'sub' and parent_id = ?2)",
+    params![preferred, main_category_id],
+    |row| row.get(0),
+  )?;
+  Ok(if valid { Some(preferred.to_string()) } else { None })
+}
+
+/// 手机「投资」草稿里 asset_id 为空时表示手机端新建资产：
+/// 按 名称+平台 查重，不存在则立刻落 assets 表（monthly_update_managed=1），返回真实 asset_id。
+fn ensure_mobile_investment_asset(connection: &Connection, payload: Option<&serde_json::Value>) -> Result<Option<String>, AppError> {
+  let Some(asset) = payload.and_then(|value| value.get("asset")) else {
+    return Ok(None);
+  };
+  if let Some(id) = asset
+    .get("asset_id")
+    .and_then(|value| value.as_str())
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+  {
+    return Ok(Some(id.to_string()));
+  }
+  let name = asset
+    .get("name")
+    .and_then(|value| value.as_str())
+    .unwrap_or("")
+    .trim()
+    .to_string();
+  if name.is_empty() {
+    return Ok(None);
+  }
+  let platform = asset
+    .get("platform")
+    .and_then(|value| value.as_str())
+    .unwrap_or("")
+    .trim()
+    .to_string();
+  if let Some(existing_id) = connection
+    .query_row(
+      "
+      select id from assets
+      where name = ?1 and coalesce(platform, '') = ?2
+      order by created_at
+      limit 1
+      ",
+      params![name, platform],
+      |row| row.get::<_, String>(0),
+    )
+    .optional()?
+  {
+    return Ok(Some(existing_id));
+  }
+  let asset_type = asset
+    .get("asset_type")
+    .and_then(|value| value.as_str())
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .unwrap_or("other")
+    .to_string();
+  let currency = asset
+    .get("currency")
+    .and_then(|value| value.as_str())
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .unwrap_or("CNY")
+    .to_string();
+  let preferred_category = asset
+    .get("main_asset_category_id")
+    .and_then(|value| value.as_str())
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(str::to_string);
+  let Some(main_category_id) = mobile_investment_main_category(connection, preferred_category.as_deref())? else {
+    return Err(AppError::InvalidCsvValue("资产分类缺失，无法接收手机新建资产。".to_string()));
+  };
+  let preferred_sub_category = asset
+    .get("sub_asset_category_id")
+    .and_then(|value| value.as_str())
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(str::to_string);
+  let sub_category_id = mobile_investment_sub_category(connection, &main_category_id, preferred_sub_category.as_deref())?;
+  let asset_id = make_id("asset", &format!("mobile|{name}|{platform}|{:?}", SystemTime::now()));
+  connection.execute(
+    "
+    insert into assets (
+      id, name, asset_type, main_asset_category_id, sub_asset_category_id,
+      currency, platform, is_dca, status, note, monthly_update_managed
+    )
+    values (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 'active', '手机投资模块新建', 1)
+    ",
+    params![asset_id, name, asset_type, main_category_id, sub_category_id, currency, platform],
+  )?;
+  Ok(Some(asset_id))
+}
+
+/// 投资草稿删除 = 墓碑语义：把同设备同 local_id 的 create 草稿连同这条 delete 记录一起置为已处理，不写 investment_cashflows。
+/// phone_local_id 覆盖云端草稿场景：收件箱 local_id 是 cloud:云端id，手机 local_id 存在 payload_json 里。
+fn tombstone_mobile_investment_flow(
+  connection: &Connection,
+  device_id: &str,
+  inbox_local_id: &str,
+  phone_local_id: &str,
+) -> Result<(), AppError> {
+  connection.execute(
+    "
+    update mobile_sync_inbox
+    set sync_status = 'reviewed', reviewed_at = current_timestamp, updated_at = current_timestamp
+    where record_kind = 'investment_flow'
+      and sync_status = 'received'
+      and (
+        (device_id = ?1 and local_id = ?2)
+        or json_extract(payload_json, '$.local_id') = ?3
+      )
+    ",
+    params![device_id, inbox_local_id, phone_local_id],
+  )?;
+  Ok(())
+}
+
 fn apply_mobile_asset_entry_batches(
   connection: &mut Connection,
   batches: Vec<(String, String, Vec<AssetMonthEntryInput>)>,
@@ -2165,7 +2454,7 @@ fn store_mobile_sync_records(
   let tx = connection.unchecked_transaction()?;
   let mut acknowledgements = Vec::new();
   let mut asset_entry_batches: Vec<(String, String, Vec<AssetMonthEntryInput>)> = Vec::new();
-  for record in input.records {
+  for mut record in input.records {
     let local_id = record.local_id.trim().to_string();
     if local_id.is_empty() {
       continue;
@@ -2178,6 +2467,21 @@ fn store_mobile_sync_records(
       .trim()
       .to_string();
     let operation = mobile_record_operation(&record);
+    if record_kind == "investment_flow" && operation != "delete" {
+      // 手机新建的资产立刻落库，并把真实 asset_id 回写进 payload，现金流留待月底确认时入账
+      if let Some(payload) = record.payload_json.clone() {
+        if let Some(asset_id) = ensure_mobile_investment_asset(&tx, Some(&payload))? {
+          if let Some(asset) = record
+            .payload_json
+            .as_mut()
+            .and_then(|value| value.get_mut("asset"))
+            .and_then(|value| value.as_object_mut())
+          {
+            asset.insert("asset_id".to_string(), serde_json::Value::String(asset_id));
+          }
+        }
+      }
+    }
     let payload_json = serde_json::to_string(&record)
       .map_err(|err| AppError::InvalidCsvValue(format!("手机同步数据无法保存：{err}")))?;
     if let Some((period_month, entries)) = mobile_asset_entries_from_payload(
@@ -2237,6 +2541,9 @@ fn store_mobile_sync_records(
         payload_json,
       ],
     )?;
+    if record_kind == "investment_flow" && operation == "delete" {
+      tombstone_mobile_investment_flow(&tx, &device_id, &local_id, &local_id)?;
+    }
     acknowledgements.push(MobileSyncAck {
       local_id,
       server_id: id,
@@ -2277,9 +2584,7 @@ fn import_cloud_mobile_drafts_into_connection(
     }
     let local_id = format!("cloud:{cloud_id}");
     let id = make_unique_id("mobile", &format!("{device_id}|{local_id}"));
-    let payload_value = draft.payload_json.clone().unwrap_or_else(|| serde_json::json!({}));
-    let payload_json = payload_value.to_string();
-    let net_adjustment = payload_value.get("net_adjustment").and_then(|value| value.as_f64());
+    let mut payload_value = draft.payload_json.clone().unwrap_or_else(|| serde_json::json!({}));
     let mobile_record = cloud_draft_as_mobile_record(&draft);
     let source_device_id = draft.device_id.as_deref().unwrap_or("worthtrace-cloud").to_string();
     let operation = mobile_record_operation(&mobile_record);
@@ -2288,6 +2593,22 @@ fn import_cloud_mobile_drafts_into_connection(
     } else {
       draft.record_kind.clone()
     };
+    if record_kind == "investment_flow" {
+      // 云端收件箱 local_id 是 cloud:云端id，把手机 local_id 存进 payload 方便删除草稿做墓碑匹配
+      if let Some(object) = payload_value.as_object_mut() {
+        object.insert("local_id".to_string(), serde_json::Value::String(draft.local_id.clone()));
+      }
+      if operation != "delete" {
+        // 手机新建的资产立刻落库，并把真实 asset_id 回写进 payload，现金流留待月底确认时入账
+        if let Some(asset_id) = ensure_mobile_investment_asset(&tx, Some(&payload_value))? {
+          if let Some(asset) = payload_value.get_mut("asset").and_then(|value| value.as_object_mut()) {
+            asset.insert("asset_id".to_string(), serde_json::Value::String(asset_id));
+          }
+        }
+      }
+    }
+    let payload_json = payload_value.to_string();
+    let net_adjustment = payload_value.get("net_adjustment").and_then(|value| value.as_f64());
     apply_mobile_transaction_record(&tx, &account_id, &source_device_id, &mobile_record)?;
     tx.execute(
       "
@@ -2331,6 +2652,9 @@ fn import_cloud_mobile_drafts_into_connection(
         payload_json
       ],
     )?;
+    if record_kind == "investment_flow" && operation == "delete" {
+      tombstone_mobile_investment_flow(&tx, &device_id, &local_id, &draft.local_id)?;
+    }
     if let Some((period_month, entries)) = mobile_asset_entries_from_payload(&record_kind, draft.period_month.as_deref(), Some(&payload_value))? {
       asset_entry_batches.push((id.clone(), period_month, entries));
     }
@@ -2392,7 +2716,7 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
   let mut statement = connection.prepare(
     "
     select id, account_id, device_id, local_id, record_kind, operation, transaction_type, transaction_date,
-      period_month, amount, category, note, net_adjustment, sync_status, received_at
+      period_month, amount, category, note, net_adjustment, payload_json, sync_status, received_at
     from mobile_sync_inbox
     where (?1 is null or account_id = ?1)
     order by received_at desc
@@ -2415,8 +2739,9 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
         category: row.get(10)?,
         note: row.get(11)?,
         net_adjustment: row.get(12)?,
-        sync_status: row.get(13)?,
-        received_at: row.get(14)?,
+        payload_json: row.get(13)?,
+        sync_status: row.get(14)?,
+        received_at: row.get(15)?,
       })
     })?
     .collect::<Result<Vec<_>, _>>()?;
@@ -2432,6 +2757,68 @@ fn read_mobile_sync_summary(connection: &Connection, enabled: bool) -> Result<Mo
     last_seen_at,
     records,
   })
+}
+
+/// 月底更新时拉取待入账的手机投资流水：只读收件箱，不写 investment_cashflows。
+fn pending_mobile_investment_flows(connection: &Connection, period_month: &str) -> Result<Vec<MobileInvestmentFlowItem>, AppError> {
+  ensure_mobile_sync_schema(connection)?;
+  let mut statement = connection.prepare(
+    "
+    select id, device_id, local_id, payload_json
+    from mobile_sync_inbox
+    where sync_status = 'received'
+      and record_kind = 'investment_flow'
+      and operation = 'create'
+      and coalesce(period_month, json_extract(payload_json, '$.period_month'), '') = ?1
+    order by received_at
+    ",
+  )?;
+  let rows = statement
+    .query_map(params![period_month], |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, String>(1)?,
+        row.get::<_, String>(2)?,
+        row.get::<_, String>(3)?,
+      ))
+    })?
+    .collect::<Result<Vec<_>, _>>()?;
+  let mut items = Vec::new();
+  for (inbox_id, device_id, local_id, payload_json) in rows {
+    let payload = serde_json::from_str::<serde_json::Value>(&payload_json)
+      .map_err(|err| AppError::InvalidCsvValue(format!("手机投资流水草稿无法解析：{err}")))?;
+    let Some(parsed) = mobile_investment_flow_from_payload("investment_flow", Some(period_month), Some(&payload))? else {
+      continue;
+    };
+    let Some(asset_id) = parsed.asset_id.clone() else {
+      continue;
+    };
+    let asset_name = connection
+      .query_row("select name from assets where id = ?1", params![asset_id], |row| row.get::<_, String>(0))
+      .optional()?
+      .unwrap_or(parsed.asset_name);
+    let phone_local_id = payload
+      .get("local_id")
+      .and_then(|value| value.as_str())
+      .unwrap_or(&local_id)
+      .to_string();
+    items.push(MobileInvestmentFlowItem {
+      inbox_id,
+      device_id,
+      local_id: phone_local_id,
+      asset_id,
+      asset_name,
+      period_month: parsed.period_month,
+      flow_date: parsed.flow_date,
+      flow_type: parsed.flow_type,
+      amount: parsed.amount,
+      currency: parsed.currency,
+      fx_rate_to_cny: parsed.fx_rate_to_cny,
+      amount_cny: parsed.amount_cny,
+      note: parsed.note,
+    });
+  }
+  Ok(items)
 }
 
 fn mobile_transaction_details(
@@ -2553,6 +2940,50 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
   let expense_year_rank = category_year_rank(connection, &snapshot_month, "expense")?;
   let expense_category_trends = category_month_amounts(connection, &snapshot_month, "expense")?;
   let transaction_details = mobile_transaction_details(connection, &snapshot_month)?;
+  // 投资模块：每资产最近 12 个月月末市值 + 全部投资现金流净投入本金（买入减卖出，分红不计入本金）
+  let total_net_invested_cny: f64 = connection.query_row(
+    "
+    select coalesce(sum(case
+      when ic.flow_type = 'buy' then ic.amount_cny
+      when ic.flow_type = 'sell' then -ic.amount_cny
+      else 0
+    end), 0)
+    from investment_cashflows ic
+    join assets a on a.id = ic.asset_id
+    where a.main_asset_category_id <> 'asset_cat_cash'
+    ",
+    [],
+    |row| row.get(0),
+  )?;
+  let mut history_statement = connection.prepare(
+    "
+    select asset_id, period_month, original_amount, currency, amount_cny
+    from monthly_asset_snapshots
+    where version_no = 1
+    order by asset_id, period_month desc
+    ",
+  )?;
+  let history_rows = history_statement
+    .query_map([], |row| {
+      Ok(MobileAssetMonthEndPoint {
+        asset_id: row.get(0)?,
+        period_month: row.get(1)?,
+        original_amount: row.get(2)?,
+        currency: row.get(3)?,
+        amount_cny: row.get(4)?,
+      })
+    })?
+    .collect::<Result<Vec<_>, _>>()?;
+  let mut asset_month_end_history = Vec::new();
+  let mut history_counts: HashMap<String, usize> = HashMap::new();
+  for point in history_rows {
+    let count = history_counts.entry(point.asset_id.clone()).or_insert(0);
+    if *count >= 12 {
+      continue;
+    }
+    *count += 1;
+    asset_month_end_history.push(point);
+  }
   let mut statement = connection.prepare(
     "
     select
@@ -2615,6 +3046,8 @@ fn read_mobile_dashboard_snapshot(connection: &Connection) -> Result<MobileDashb
     dca_cashflows,
     portfolio_targets,
     spending_anomalies,
+    asset_month_end_history,
+    total_net_invested_cny,
   })
 }
 
@@ -2784,6 +3217,17 @@ fn handle_mobile_sync_stream(mut stream: TcpStream, work_db_path: PathBuf, dashb
             .map_err(AppError::from)
             .and_then(|connection| read_mobile_dashboard_snapshot(&connection)) {
               Ok(snapshot) => http_json(&snapshot),
+              Err(err) => http_error("500 Internal Server Error", &err.to_string()),
+            }
+        } else if path == "/mobile-sync/assets" {
+          match Connection::open(&dashboard_db_path)
+            .map_err(AppError::from)
+            .and_then(|connection| {
+              ensure_runtime_schema(&connection)?;
+              let latest_month = latest_completed_period_month(&connection)?;
+              asset_entry_items_for_connection(&connection, &next_period_month(&latest_month))
+            }) {
+              Ok(items) => http_json(&items),
               Err(err) => http_error("500 Internal Server Error", &err.to_string()),
             }
         } else {
@@ -8071,7 +8515,7 @@ fn reset_asset_month_entries(
     "
     delete from investment_cashflows
     where period_month = ?1
-      and source_kind in ('monthly_asset_entry', 'dca_auto')
+      and source_kind in ('monthly_asset_entry', 'dca_auto', 'mobile_investment')
     ",
     params![&period_month],
   )?;
@@ -8470,7 +8914,7 @@ fn save_asset_month_entries_for_connection(
       delete from investment_cashflows
       where asset_id = ?1
         and period_month = ?2
-        and source_kind in ('monthly_asset_entry', 'dca_auto')
+        and source_kind in ('monthly_asset_entry', 'dca_auto', 'mobile_investment')
       ",
       params![entry.asset_id, period_month],
     )?;
@@ -8569,7 +9013,21 @@ fn save_asset_month_entries_for_connection(
       }
     }
 
+    // 同一资产同一日期：手机「投资」模块的手动买入优先，同日 dca_auto 自动生成项被替代。
+    // 通过 override included=0 持久化排除，下次 loadReview 生成时不会复活，也不会双写。
+    let mobile_buy_dates: std::collections::HashSet<String> = cashflows
+      .iter()
+      .filter(|item| {
+        item.source_kind == "mobile_investment"
+          && item.flow_type == "buy"
+          && item.included
+          && item.amount.abs() > 0.000_001
+      })
+      .map(|item| item.flow_date.clone())
+      .collect();
+
     for cashflow in cashflows.iter().filter(|item| item.source_kind == "dca_auto") {
+      let replaced_by_mobile = mobile_buy_dates.contains(&cashflow.flow_date);
       let override_id = dca_override_id(
         &cashflow.asset_id,
         &period_month,
@@ -8598,13 +9056,26 @@ fn save_asset_month_entries_for_connection(
           cashflow.dca_plan_id,
           cashflow.amount,
           cashflow.currency,
-          if cashflow.included { 1 } else { 0 },
-          cashflow.note
+          if replaced_by_mobile {
+            0
+          } else if cashflow.included {
+            1
+          } else {
+            0
+          },
+          if replaced_by_mobile {
+            Some("已被手机手动买入替代".to_string())
+          } else {
+            cashflow.note.clone()
+          }
         ],
       )?;
     }
 
     for cashflow in cashflows.iter().filter(|item| item.included && item.amount.abs() > 0.000_001) {
+      if cashflow.source_kind == "dca_auto" && mobile_buy_dates.contains(&cashflow.flow_date) {
+        continue;
+      }
       let cashflow_amount_cny = if cashflow.amount_cny.abs() > 0.000_001 {
         cashflow.amount_cny
       } else {
@@ -9412,6 +9883,42 @@ fn mark_mobile_sync_records_reviewed(
 }
 
 #[tauri::command]
+fn list_pending_mobile_investment_flows(
+  period_month: String,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<Vec<MobileInvestmentFlowItem>, AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  pending_mobile_investment_flows(&connection, &period_month)
+}
+
+#[tauri::command]
+fn mark_mobile_investment_flows_reviewed(
+  local_ids: Vec<String>,
+  db: State<'_, Database>,
+  security: State<'_, SecuritySession>,
+) -> Result<(), AppError> {
+  let connection = db.work_connection.lock().expect("database mutex poisoned");
+  ensure_unlocked(&connection, &security)?;
+  ensure_mobile_sync_schema(&connection)?;
+  for local_id in local_ids.iter().map(|value| value.trim()).filter(|value| !value.is_empty()) {
+    connection.execute(
+      "
+      update mobile_sync_inbox
+      set sync_status = 'reviewed', reviewed_at = current_timestamp, updated_at = current_timestamp
+      where record_kind = 'investment_flow'
+        and operation = 'create'
+        and sync_status = 'received'
+        and (local_id = ?1 or json_extract(payload_json, '$.local_id') = ?1)
+      ",
+      params![local_id],
+    )?;
+  }
+  Ok(())
+}
+
+#[tauri::command]
 fn import_cloud_mobile_drafts(
   drafts: Vec<CloudMobileDraftInput>,
   db: State<'_, Database>,
@@ -9498,6 +10005,8 @@ pub fn run() {
       get_mobile_pairing_info,
       reset_mobile_pairing_devices,
       mark_mobile_sync_records_reviewed,
+      list_pending_mobile_investment_flows,
+      mark_mobile_investment_flows_reviewed,
       import_cloud_mobile_drafts
     ])
     .run(tauri::generate_context!())
@@ -9692,5 +10201,326 @@ mod tests {
       .expect("count remaining transactions");
     assert_eq!(remaining, 0);
     assert!(dashboard_monthly_trends(&connection).expect("read deleted dashboard").is_empty());
+  }
+
+  fn mobile_investment_record(local_id: &str, operation: &str, period_month: &str, payload: serde_json::Value) -> MobileSyncRecordInput {
+    MobileSyncRecordInput {
+      local_id: local_id.to_string(),
+      server_id: None,
+      record_kind: Some("investment_flow".to_string()),
+      operation: Some(operation.to_string()),
+      sync_status: Some("pending".to_string()),
+      transaction_type: None,
+      amount: Some(800.0),
+      currency: Some("USD".to_string()),
+      category: None,
+      transaction_date: Some("2026-06-22".to_string()),
+      period_month: Some(period_month.to_string()),
+      note: None,
+      current_billed_amount: None,
+      current_unbilled_amount: None,
+      previous_unbilled_amount: None,
+      net_adjustment: None,
+      payload_json: Some(payload),
+      created_at: None,
+      updated_at: None,
+    }
+  }
+
+  #[test]
+  fn mobile_investment_flow_creates_asset_stays_pending_until_month_end_then_tombstoned() {
+    let mut connection = memory_connection();
+    connection
+      .execute(
+        "insert into asset_categories (id, name, parent_id, level, sort_order) values ('asset_cat_other', '其他', null, 'main', 90)",
+        [],
+      )
+      .expect("seed main category");
+    let account_id = mobile_account_id(&connection).expect("mobile account");
+
+    let new_asset_payload = serde_json::json!({
+      "period_month": "2026-06",
+      "operation": "create",
+      "asset": {"asset_id": null, "name": "测试新资产", "asset_type": "stock", "currency": "USD", "platform": "测试券商", "main_asset_category_id": null},
+      "flow": {"flow_date": "2026-06-22", "flow_type": "buy", "amount": 800.0, "currency": "USD", "fx_rate_to_cny": 7.10, "amount_cny": 5680.0, "note": "测试买入"}
+    });
+    let existing_asset_payload = serde_json::json!({
+      "period_month": "2026-05",
+      "operation": "create",
+      "asset": {"asset_id": "asset_existing_x", "name": "既有资产", "asset_type": "fund", "currency": "CNY", "platform": "天天基金"},
+      "flow": {"flow_date": "2026-05-12", "flow_type": "sell", "amount": 500.0, "currency": "CNY", "fx_rate_to_cny": 1.0, "amount_cny": 500.0, "note": ""}
+    });
+    let push = MobileSyncPushInput {
+      device_id: Some("device_test".to_string()),
+      account_id: Some(account_id),
+      app_version: None,
+      records: vec![
+        mobile_investment_record("inv_1", "create", "2026-06", new_asset_payload),
+        mobile_investment_record("inv_2", "create", "2026-05", existing_asset_payload),
+      ],
+    };
+    let result = store_mobile_sync_records(&mut connection, push).expect("push investment flows");
+    assert_eq!(result.accepted_count, 2);
+
+    // 新资产立刻落库：分类兜底 asset_cat_other、monthly_update_managed=1
+    let (asset_name, asset_category, managed): (String, String, i64) = connection
+      .query_row(
+        "select name, main_asset_category_id, monthly_update_managed from assets where name = '测试新资产'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+      )
+      .expect("read created asset");
+    assert_eq!(asset_name, "测试新资产");
+    assert_eq!(asset_category, "asset_cat_other");
+    assert_eq!(managed, 1);
+    let real_asset_id: String = connection
+      .query_row("select id from assets where name = '测试新资产'", [], |row| row.get(0))
+      .expect("read created asset id");
+    // 收件箱 payload 回写了真实 asset_id
+    let written_back: String = connection
+      .query_row(
+        "select json_extract(payload_json, '$.payload_json.asset.asset_id') from mobile_sync_inbox where local_id = 'inv_1'",
+        [],
+        |row| row.get(0),
+      )
+      .expect("read written-back asset id");
+    assert_eq!(written_back, real_asset_id);
+    // 现金流在月底确认前不落库
+    let cashflow_count: i64 = connection
+      .query_row("select count(*) from investment_cashflows", [], |row| row.get(0))
+      .expect("count cashflows");
+    assert_eq!(cashflow_count, 0);
+
+    // 月底 pending 列表只返回同月份、create、received 的流水
+    let pending = pending_mobile_investment_flows(&connection, "2026-06").expect("list pending");
+    assert_eq!(pending.len(), 1);
+    let item = &pending[0];
+    assert_eq!(item.local_id, "inv_1");
+    assert_eq!(item.asset_id, real_asset_id);
+    assert_eq!(item.asset_name, "测试新资产");
+    assert_eq!(item.flow_type, "buy");
+    assert_eq!(item.amount, 800.0);
+    assert_eq!(item.currency, "USD");
+    assert_eq!(item.amount_cny, 5680.0);
+    let may_pending = pending_mobile_investment_flows(&connection, "2026-05").expect("list may pending");
+    assert_eq!(may_pending.len(), 1);
+    assert_eq!(may_pending[0].flow_type, "sell");
+
+    // 删除草稿 = 墓碑：create 记录连同 delete 记录一起 reviewed
+    let delete_push = MobileSyncPushInput {
+      device_id: Some("device_test".to_string()),
+      account_id: Some(mobile_account_id(&connection).expect("mobile account")),
+      app_version: None,
+      records: vec![mobile_investment_record(
+        "inv_1",
+        "delete",
+        "2026-06",
+        serde_json::json!({"period_month": "2026-06", "operation": "delete"}),
+      )],
+    };
+    store_mobile_sync_records(&mut connection, delete_push).expect("push delete");
+    let statuses: Vec<(String, String)> = connection
+      .prepare("select local_id, sync_status from mobile_sync_inbox order by local_id")
+      .expect("prepare inbox status")
+      .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+      .expect("query inbox status")
+      .collect::<Result<Vec<_>, _>>()
+      .expect("collect inbox status");
+    assert_eq!(
+      statuses,
+      vec![
+        ("inv_1".to_string(), "reviewed".to_string()),
+        ("inv_2".to_string(), "received".to_string())
+      ]
+    );
+    assert!(pending_mobile_investment_flows(&connection, "2026-06")
+      .expect("list pending after delete")
+      .is_empty());
+    let cashflow_count_after: i64 = connection
+      .query_row("select count(*) from investment_cashflows", [], |row| row.get(0))
+      .expect("count cashflows after delete");
+    assert_eq!(cashflow_count_after, 0);
+  }
+
+  #[test]
+  fn mobile_investment_asset_validates_main_and_sub_category() {
+    let connection = memory_connection();
+    connection
+      .execute_batch(
+        "
+        insert into asset_categories (id, name, parent_id, level, sort_order) values
+          ('asset_cat_us_equity', '海外权益', null, 'main', 20),
+          ('asset_sub_us_market', '美股', 'asset_cat_us_equity', 'sub', 21),
+          ('asset_cat_cash', '现金', null, 'main', 10),
+          ('asset_sub_bank_payment', '银行/支付账户', 'asset_cat_cash', 'sub', 11),
+          ('asset_cat_other', '其他', null, 'main', 90);
+        ",
+      )
+      .expect("seed categories");
+
+    let asset_with = |name: &str, main: serde_json::Value, sub: serde_json::Value| {
+      let payload = serde_json::json!({
+        "period_month": "2026-06",
+        "operation": "create",
+        "asset": {"asset_id": null, "name": name, "asset_type": "stock", "currency": "USD", "platform": "测试券商", "main_asset_category_id": main, "sub_asset_category_id": sub},
+        "flow": {"flow_date": "2026-06-22", "flow_type": "buy", "amount": 100.0, "currency": "USD", "fx_rate_to_cny": 7.1, "amount_cny": 710.0}
+      });
+      ensure_mobile_investment_asset(&connection, Some(&payload))
+        .expect("create asset")
+        .expect("asset id")
+    };
+    let category_of = |asset_id: &str| {
+      connection
+        .query_row(
+          "select main_asset_category_id, sub_asset_category_id from assets where id = ?1",
+          params![asset_id],
+          |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .expect("read asset category")
+    };
+
+    // 合法 main + sub（parent 匹配）：按 payload 分类落库
+    let valid = asset_with("分类合法资产", serde_json::json!("asset_cat_us_equity"), serde_json::json!("asset_sub_us_market"));
+    assert_eq!(
+      category_of(&valid),
+      ("asset_cat_us_equity".to_string(), Some("asset_sub_us_market".to_string()))
+    );
+
+    // 现金类防御：main=asset_cat_cash 兜底 asset_cat_other；sub 挂在现金类下也因 parent 不匹配被丢弃
+    let cash = asset_with("现金防御资产", serde_json::json!("asset_cat_cash"), serde_json::json!("asset_sub_bank_payment"));
+    assert_eq!(category_of(&cash), ("asset_cat_other".to_string(), None));
+
+    // 无效 main + parent 不匹配的 sub：双双兜底/留空
+    let invalid = asset_with("无效分类资产", serde_json::json!("asset_cat_not_exist"), serde_json::json!("asset_sub_us_market"));
+    assert_eq!(category_of(&invalid), ("asset_cat_other".to_string(), None));
+
+    // 只传合法 main、不传 sub：sub 留空
+    let main_only = asset_with("只有主分类资产", serde_json::json!("asset_cat_us_equity"), serde_json::Value::Null);
+    assert_eq!(category_of(&main_only), ("asset_cat_us_equity".to_string(), None));
+  }
+
+  #[test]
+  fn mobile_investment_buy_replaces_same_day_dca_auto() {
+    let mut connection = memory_connection();
+    connection
+      .execute_batch(
+        "
+        insert into asset_categories (id, name, parent_id, level, sort_order) values
+          ('asset_cat_us_equity', '海外权益', null, 'main', 20),
+          ('asset_cat_other', '其他', null, 'main', 90);
+        insert into assets (id, name, asset_type, main_asset_category_id, currency, platform, is_dca, status, monthly_update_managed)
+          values ('asset_dca_test', '定投资产', 'fund', 'asset_cat_us_equity', 'CNY', '天天基金', 1, 'active', 1);
+        insert into dca_plans (id, asset_id, name, frequency, amount, currency, start_date, weekly_rules_json, is_active)
+          values ('dca_plan_test', 'asset_dca_test', '周五定投', 'weekly', 100, 'CNY', '2026-06-01', '[{\"weekday\":5,\"amount\":100}]', 1);
+        ",
+      )
+      .expect("seed dca asset");
+
+    let generated = generated_dca_cashflows_for_connection(&connection, "2026-06").expect("generate dca");
+    assert!(generated.iter().any(|flow| flow.flow_date == "2026-06-05" && flow.included));
+    assert!(generated.iter().any(|flow| flow.flow_date == "2026-06-12" && flow.included));
+
+    let dca_flow = |date: &str| AssetCashflowInput {
+      id: None,
+      asset_id: "asset_dca_test".to_string(),
+      flow_date: date.to_string(),
+      flow_type: "buy".to_string(),
+      amount: 100.0,
+      currency: "CNY".to_string(),
+      fx_rate_to_cny: 1.0,
+      amount_cny: 100.0,
+      source_kind: "dca_auto".to_string(),
+      dca_plan_id: Some("dca_plan_test".to_string()),
+      note: Some("周五定投".to_string()),
+      included: true,
+    };
+    let mobile_buy = AssetCashflowInput {
+      id: None,
+      asset_id: "asset_dca_test".to_string(),
+      flow_date: "2026-06-05".to_string(),
+      flow_type: "buy".to_string(),
+      amount: 1000.0,
+      currency: "CNY".to_string(),
+      fx_rate_to_cny: 1.0,
+      amount_cny: 1000.0,
+      source_kind: "mobile_investment".to_string(),
+      dca_plan_id: None,
+      note: Some("手机买入".to_string()),
+      included: true,
+    };
+    let entry = AssetMonthEntryInput {
+      asset_id: "asset_dca_test".to_string(),
+      name: Some("定投资产".to_string()),
+      asset_type: Some("fund".to_string()),
+      main_asset_category_id: Some("asset_cat_us_equity".to_string()),
+      sub_asset_category_id: None,
+      tags: Vec::new(),
+      platform: Some("天天基金".to_string()),
+      is_dca: true,
+      note: None,
+      dca_plans: vec![DcaPlanItem {
+        id: Some("dca_plan_test".to_string()),
+        frequency: "weekly".to_string(),
+        amount: 100.0,
+        start_date: "2026-06-01".to_string(),
+        end_date: None,
+        weekly_rules_json: Some("[{\"weekday\":5,\"amount\":100}]".to_string()),
+        monthly_day: None,
+      }],
+      month_end_amount: 5000.0,
+      currency: "CNY".to_string(),
+      extra_buy: 0.0,
+      sell: 0.0,
+      dividend: 0.0,
+      status: "held".to_string(),
+      confirmed: true,
+      fx_rate_to_cny: 1.0,
+      amount_cny: 5000.0,
+      cashflows: vec![mobile_buy, dca_flow("2026-06-05"), dca_flow("2026-06-12")],
+    };
+    save_asset_month_entries_for_connection(&mut connection, "2026-06", &[entry.clone()]).expect("save entries");
+
+    // 同日只有手机买入落库；异日定投照常落库
+    let rows: Vec<(String, String, f64)> = connection
+      .prepare("select flow_date, source_kind, amount from investment_cashflows where asset_id = 'asset_dca_test' order by flow_date")
+      .expect("prepare cashflows")
+      .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+      .expect("query cashflows")
+      .collect::<Result<Vec<_>, _>>()
+      .expect("collect cashflows");
+    assert_eq!(
+      rows,
+      vec![
+        ("2026-06-05".to_string(), "mobile_investment".to_string(), 1000.0),
+        ("2026-06-12".to_string(), "dca_auto".to_string(), 100.0)
+      ]
+    );
+
+    // 替代关系通过 override 持久化：06-05 included=0，下次生成不复活；06-12 不受影响
+    let excluded: i64 = connection
+      .query_row(
+        "select included from monthly_dca_cashflow_overrides where asset_id = 'asset_dca_test' and period_month = '2026-06' and flow_date = '2026-06-05'",
+        [],
+        |row| row.get(0),
+      )
+      .expect("read override");
+    assert_eq!(excluded, 0);
+    let regenerated = generated_dca_cashflows_for_connection(&connection, "2026-06").expect("regenerate dca");
+    let june5 = regenerated.iter().find(|flow| flow.flow_date == "2026-06-05").expect("regenerated 06-05");
+    assert!(!june5.included);
+    assert_eq!(june5.note.as_deref(), Some("已被手机手动买入替代"));
+    let june12 = regenerated.iter().find(|flow| flow.flow_date == "2026-06-12").expect("regenerated 06-12");
+    assert!(june12.included);
+
+    // 重复保存同一天数据不会主键冲突（mobile_investment 先清后插）
+    save_asset_month_entries_for_connection(&mut connection, "2026-06", &[entry]).expect("save entries again");
+    let count_june5: i64 = connection
+      .query_row(
+        "select count(*) from investment_cashflows where asset_id = 'asset_dca_test' and period_month = '2026-06' and flow_date = '2026-06-05'",
+        [],
+        |row| row.get(0),
+      )
+      .expect("count 06-05 flows");
+    assert_eq!(count_june5, 1);
   }
 }

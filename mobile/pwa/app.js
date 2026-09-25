@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.3.38";
+const MOBILE_APP_VERSION = "0.4.0";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -15,6 +15,47 @@ const CLOUD_SYNC_URL = "https://yyhuxgxohiguyaskhqco.supabase.co";
 const CLOUD_SYNC_PUBLISHABLE_KEY = "sb_publishable_TW9SJoYzougEOl5vvHZVpg_17iMWHH9";
 const LEGACY_DB_NAMES = ["worthtrace_mobile_v1", "worthtrace_mobile_v2"];
 const LEGACY_STORAGE_KEYS = ["worthtrace_mobile_settings_v1", "worthtrace_mobile_custom_categories_v1"];
+const INVEST_FX_RATES_KEY = "worthtrace_mobile_invest_fx_rates_v1";
+const INVEST_CUSTOM_ASSETS_KEY = "worthtrace_mobile_invest_assets_v1";
+const INVEST_DEFAULT_FX_RATES = { USD: 7.10, HKD: 0.91 };
+const INVEST_DOT_CLASSES = ["", "gold", "green", "rose"];
+const INVEST_CURRENCY_SYMBOLS = { CNY: "¥", USD: "$", HKD: "HK$" };
+const INVEST_MAIN_CATEGORIES = [
+  {
+    id: "asset_cat_us_equity", label: "海外权益", assetType: "fund",
+    subs: [
+      { id: "asset_sub_us_market", label: "美股" },
+      { id: "asset_sub_hk_market", label: "港股" },
+      { id: "asset_sub_emerging_market", label: "新兴市场" },
+      { id: "asset_sub_developed_market", label: "发达市场" }
+    ]
+  },
+  {
+    id: "asset_cat_a_share", label: "A股权益", assetType: "fund",
+    subs: [
+      { id: "asset_sub_a_share_broad", label: "宽基" },
+      { id: "asset_sub_a_share_sector_active", label: "行业/主动" },
+      { id: "asset_sub_dividend_low_vol", label: "红利低波" }
+    ]
+  },
+  {
+    id: "asset_cat_bond", label: "债券", assetType: "bond_fund",
+    subs: [
+      { id: "asset_sub_treasury_bond", label: "国债" },
+      { id: "asset_sub_pure_bond", label: "纯债" },
+      { id: "asset_sub_short_bond", label: "短债" },
+      { id: "asset_sub_convertible_bond", label: "可转债" }
+    ]
+  },
+  {
+    id: "asset_cat_gold", label: "黄金", assetType: "gold",
+    subs: [{ id: "asset_sub_gold_etf", label: "黄金ETF" }]
+  },
+  {
+    id: "asset_cat_other", label: "其他", assetType: "other",
+    subs: [{ id: "asset_sub_uncategorized", label: "未分类" }]
+  }
+];
 
 const baseCategories = {
   expense: ["餐饮", "交通", "购物", "居住", "日用", "医疗", "娱乐", "旅行", "人情", "学习", "运动", "宠物", "保险", "税费", "其他支出"],
@@ -59,7 +100,16 @@ const state = {
   spendingPeriod: "month",
   spendingAnchor: todayKey(),
   spendingCategory: "",
-  editingLocalId: ""
+  editingLocalId: "",
+  investMonth: currentMonthKey(),
+  investLanAssets: null,
+  investAssetsFetching: false,
+  investExpandedAsset: "",
+  investLedgerOpen: false,
+  investDetailAsset: "",
+  investCustomAssets: readInvestCustomAssets(),
+  investForm: { assetKey: "", flowType: "buy", currency: "CNY", step: 1 },
+  investNewAssetCurrency: "CNY"
 };
 
 const pageTitle = document.querySelector("#pageTitle");
@@ -157,6 +207,55 @@ const spendingPeriodPicker = document.querySelector("#spendingPeriodPicker");
 const spendingChart = document.querySelector("#spendingChart");
 const spendingRanking = document.querySelector("#spendingRanking");
 const spendingCategoryDetails = document.querySelector("#spendingCategoryDetails");
+const investMonthInput = document.querySelector("#investMonthInput");
+const investTodayButton = document.querySelector("#investTodayButton");
+const investSyncBar = document.querySelector("#investSyncBar");
+const investSyncText = document.querySelector("#investSyncText");
+const investHeroTitle = document.querySelector("#investHeroTitle");
+const investHeroNet = document.querySelector("#investHeroNet");
+const investHeroTotalRow = document.querySelector("#investHeroTotalRow");
+const investHeroTotal = document.querySelector("#investHeroTotal");
+const investHeroMvRow = document.querySelector("#investHeroMvRow");
+const investHeroMvLabel = document.querySelector("#investHeroMvLabel");
+const investHeroMv = document.querySelector("#investHeroMv");
+const investHeroFxNote = document.querySelector("#investHeroFxNote");
+const investAssetCards = document.querySelector("#investAssetCards");
+const investLedgerToggle = document.querySelector("#investLedgerToggle");
+const investLedgerHint = document.querySelector("#investLedgerHint");
+const investLedger = document.querySelector("#investLedger");
+const investAddButton = document.querySelector("#investAddButton");
+const investDetailPanel = document.querySelector("#investDetailPanel");
+const investDetailTitle = document.querySelector("#investDetailTitle");
+const investDetailBody = document.querySelector("#investDetailBody");
+const investDetailBack = document.querySelector("#investDetailBack");
+const investDialog = document.querySelector("#investDialog");
+const investStepLabel = document.querySelector("#investStepLabel");
+const investStepDots = document.querySelectorAll(".invest-steps i");
+const investAssetList = document.querySelector("#investAssetList");
+const investNewAssetButton = document.querySelector("#investNewAssetButton");
+const closeInvestDialogButton = document.querySelector("#closeInvestDialogButton");
+const investToStep2 = document.querySelector("#investToStep2");
+const investToStep3 = document.querySelector("#investToStep3");
+const investDirSeg = document.querySelector("#investDirSeg");
+const investCurrencySeg = document.querySelector("#investCurrencySeg");
+const investAmountInput = document.querySelector("#investAmountInput");
+const investAmountCurrency = document.querySelector("#investAmountCurrency");
+const investDateInput = document.querySelector("#investDateInput");
+const investFxField = document.querySelector("#investFxField");
+const investFxCurrency = document.querySelector("#investFxCurrency");
+const investFxRateInput = document.querySelector("#investFxRateInput");
+const investPreviewLabel = document.querySelector("#investPreviewLabel");
+const investPreviewValue = document.querySelector("#investPreviewValue");
+const investDcaHint = document.querySelector("#investDcaHint");
+const investSaveButton = document.querySelector("#investSaveButton");
+const investAssetDialog = document.querySelector("#investAssetDialog");
+const investAssetForm = document.querySelector("#investAssetForm");
+const investAssetNameInput = document.querySelector("#investAssetNameInput");
+const investAssetMainCategoryInput = document.querySelector("#investAssetMainCategoryInput");
+const investAssetSubCategoryInput = document.querySelector("#investAssetSubCategoryInput");
+const investAssetPlatformInput = document.querySelector("#investAssetPlatformInput");
+const investAssetCurrencySeg = document.querySelector("#investAssetCurrencySeg");
+const closeInvestAssetDialogButton = document.querySelector("#closeInvestAssetDialogButton");
 let toastTimer = null;
 let pendingCategoryType = "expense";
 
@@ -172,6 +271,10 @@ const assetRanges = [
 
 dateInput.value = todayKey();
 if (bookMonthInput) bookMonthInput.value = state.bookMonth;
+if (investMonthInput) {
+  investMonthInput.value = state.investMonth;
+  investMonthInput.max = currentMonthKey();
+}
 applyTheme();
 renderCategoryOptions();
 void loadMobileDashboardSnapshot();
@@ -262,6 +365,164 @@ bookTodayButton?.addEventListener("click", () => {
   if (bookMonthInput) bookMonthInput.value = state.bookMonth;
   state.draftSection = "all";
   render();
+});
+
+investMonthInput?.addEventListener("change", () => {
+  const current = currentMonthKey();
+  let value = investMonthInput.value || current;
+  if (value > current) {
+    value = current;
+    investMonthInput.value = value;
+    showToast("不能查看未来月份");
+  }
+  state.investMonth = value;
+  state.investExpandedAsset = "";
+  renderInvestView();
+});
+
+investTodayButton?.addEventListener("click", () => {
+  state.investMonth = currentMonthKey();
+  state.investExpandedAsset = "";
+  renderInvestView();
+});
+
+investSyncBar?.addEventListener("click", () => navigate("book"));
+
+investLedgerToggle?.addEventListener("click", () => {
+  state.investLedgerOpen = !state.investLedgerOpen;
+  renderInvestView();
+});
+
+investAssetCards?.addEventListener("click", (event) => {
+  const detailButton = event.target.closest("[data-invest-detail]");
+  if (detailButton) {
+    openInvestDetail(detailButton.dataset.investDetail);
+    return;
+  }
+  const head = event.target.closest("[data-invest-expand]");
+  if (!head) return;
+  const key = head.dataset.investExpand;
+  state.investExpandedAsset = state.investExpandedAsset === key ? "" : key;
+  renderInvestView();
+});
+
+investLedger?.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-invest-delete]");
+  if (!row) return;
+  void deleteInvestmentRecord(row.dataset.investDelete);
+});
+
+investDetailBack?.addEventListener("click", () => {
+  investDetailPanel.hidden = true;
+  state.investDetailAsset = "";
+});
+
+investDetailBody?.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-invest-delete]");
+  if (!row) return;
+  void deleteInvestmentRecord(row.dataset.investDelete);
+});
+
+investAddButton?.addEventListener("click", () => openInvestDialog());
+closeInvestDialogButton?.addEventListener("click", () => closeModal(investDialog));
+investToStep2?.addEventListener("click", () => {
+  if (!investFormAsset()) {
+    showToast("请先选择资产");
+    return;
+  }
+  goInvestStep(2);
+});
+investToStep3?.addEventListener("click", () => {
+  const amount = Number(investAmountInput.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast("请先填写金额");
+    investAmountInput.focus();
+    return;
+  }
+  goInvestStep(3);
+});
+document.querySelectorAll("[data-invest-back]").forEach((button) => {
+  button.addEventListener("click", () => goInvestStep(Number(button.dataset.investBack)));
+});
+investDirSeg?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-invest-dir]");
+  if (!button) return;
+  state.investForm.flowType = button.dataset.investDir === "sell" ? "sell" : "buy";
+  syncInvestDirSeg();
+});
+investCurrencySeg?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-invest-currency]");
+  if (!button) return;
+  state.investForm.currency = button.dataset.investCurrency;
+  syncInvestCurrencySeg();
+});
+investAssetList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-invest-asset]");
+  if (!button) return;
+  state.investForm.assetKey = button.dataset.investAsset;
+  const asset = investFormAsset();
+  if (asset?.currency) {
+    state.investForm.currency = asset.currency;
+    syncInvestCurrencySeg();
+  }
+  renderInvestAssetChoices();
+  updateInvestDcaHint();
+});
+investAmountInput?.addEventListener("input", updateInvestPreview);
+investFxRateInput?.addEventListener("input", updateInvestPreview);
+investSaveButton?.addEventListener("click", () => {
+  void saveInvestmentFlow();
+});
+investNewAssetButton?.addEventListener("click", () => {
+  investAssetNameInput.value = "";
+  investAssetPlatformInput.value = "";
+  state.investNewAssetCurrency = "CNY";
+  syncInvestAssetCurrencySeg();
+  renderInvestAssetCategoryOptions();
+  openModal(investAssetDialog);
+  investAssetNameInput.focus();
+});
+closeInvestAssetDialogButton?.addEventListener("click", () => closeModal(investAssetDialog));
+investAssetCurrencySeg?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-invest-asset-currency]");
+  if (!button) return;
+  state.investNewAssetCurrency = button.dataset.investAssetCurrency;
+  syncInvestAssetCurrencySeg();
+});
+investAssetMainCategoryInput?.addEventListener("change", () => {
+  renderInvestAssetSubCategoryOptions();
+});
+investAssetForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = investAssetNameInput.value.trim();
+  if (!name) {
+    investAssetNameInput.focus();
+    return;
+  }
+  const mainCategory = investMainCategoryById(investAssetMainCategoryInput.value);
+  const subCategory = mainCategory.subs.find((item) => item.id === investAssetSubCategoryInput.value) || mainCategory.subs[0];
+  const asset = {
+    id: null,
+    name,
+    asset_type: mainCategory.assetType,
+    currency: state.investNewAssetCurrency || "CNY",
+    platform: investAssetPlatformInput.value.trim(),
+    main_asset_category_id: mainCategory.id,
+    sub_asset_category_id: subCategory.id,
+    main_category: mainCategory.label,
+    sub_category: subCategory.label
+  };
+  state.investCustomAssets = [
+    ...state.investCustomAssets.filter((item) => !(item.name === asset.name && (item.platform || "") === asset.platform)),
+    asset
+  ];
+  writeInvestCustomAssets();
+  state.investForm.assetKey = investAssetKey(asset);
+  state.investForm.currency = asset.currency;
+  syncInvestCurrencySeg();
+  closeModal(investAssetDialog);
+  renderInvestAssetChoices();
+  showToast("资产已保存，随草稿一起同步");
 });
 
 openBookDialogButton?.addEventListener("click", () => {
@@ -494,6 +755,7 @@ function navigate(view) {
   if (view === "book" && !state.editingLocalId) {
     dateInput.value = todayKey();
   }
+  if (view === "invest") void refreshInvestAssets();
   document.querySelectorAll(".view").forEach((section) => {
     section.classList.toggle("active", section.dataset.view === view);
   });
@@ -503,7 +765,8 @@ function navigate(view) {
   pageTitle.textContent = {
     book: "记一笔",
     dashboard: "财务健康看板",
-    spending: "当月花费状况"
+    spending: "当月花费状况",
+    invest: "投资"
   }[view] || "记一笔";
 }
 
@@ -526,7 +789,10 @@ function renderCategoryOptions(selected = categoryInput.value) {
 }
 
 function pendingRecords() {
-  return state.records.filter((record) => record.sync_status !== "synced" && (record.record_kind || "transaction") === "transaction");
+  return state.records.filter((record) => {
+    const kind = record.record_kind || "transaction";
+    return record.sync_status !== "synced" && (kind === "transaction" || kind === "investment_flow");
+  });
 }
 
 function isDeletedRecord(record) {
@@ -751,7 +1017,7 @@ function render() {
   syncCard.hidden = pending.length === 0;
   syncCardTitle.textContent = pending.length ? `有 ${pending.length} 条记账变更待同步` : "没有待同步记录";
   syncCardText.textContent = state.online
-    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔${pendingSummary.deleteCount ? `，删除 ${pendingSummary.deleteCount} 笔` : ""}。同步后进入云端草稿箱。`
+    ? `收入 ${pendingSummary.incomeCount} 笔，支出 ${pendingSummary.expenseCount} 笔${pendingSummary.investmentCount ? `，投资 ${pendingSummary.investmentCount} 笔` : ""}${pendingSummary.deleteCount ? `，删除 ${pendingSummary.deleteCount} 笔` : ""}。同步后进入云端草稿箱。`
     : "离线记录会先保存在手机。恢复网络后同步到云端草稿箱。";
   privacyButton.innerHTML = state.privacy ? icons.eyeOff : icons.eye;
   privacyButton.setAttribute("aria-label", state.privacy ? "显示金额" : "隐藏金额");
@@ -768,6 +1034,7 @@ function render() {
   renderDashboardModules();
   renderHealthDashboard();
   renderSpendingDashboard();
+  renderInvestView();
   document.querySelectorAll(".money").forEach((node) => {
     node.textContent = state.privacy ? "••••••" : node.dataset.value;
   });
@@ -818,6 +1085,7 @@ function showSyncDialog() {
       <div class="sync-summary-grid">
         <article><span>收入</span><strong>${summary.incomeCount} 笔</strong><small>${formatPlainMoney(summary.incomeAmount)}</small></article>
         <article><span>支出</span><strong>${summary.expenseCount} 笔</strong><small>${formatPlainMoney(summary.expenseAmount)}</small></article>
+        ${summary.investmentCount ? `<article><span>投资流水</span><strong>${summary.investmentCount} 笔</strong><small>净投入 ${formatPlainMoney(summary.investmentNetAmount)}</small></article>` : ""}
         ${summary.deleteCount ? `<article><span>删除</span><strong>${summary.deleteCount} 笔</strong><small>同步后生效</small></article>` : ""}
       </div>
       <div class="sync-impact-list">
@@ -1474,6 +1742,9 @@ function summarizeRecords(records) {
       } else if (kind === "credit_card_adjustment") {
         summary.creditCardCount += 1;
         summary.creditCardNetAdjustment += Number(record.net_adjustment) || 0;
+      } else if (kind === "investment_flow") {
+        summary.investmentCount += 1;
+        summary.investmentNetAmount += investFlowSignedCny(record);
       } else if (record.transaction_type === "income") {
         summary.incomeCount += 1;
         summary.incomeAmount += Number(record.amount) || 0;
@@ -1483,7 +1754,7 @@ function summarizeRecords(records) {
       }
       return summary;
     },
-    { incomeCount: 0, incomeAmount: 0, expenseCount: 0, expenseAmount: 0, creditCardCount: 0, creditCardNetAdjustment: 0, deleteCount: 0 }
+    { incomeCount: 0, incomeAmount: 0, expenseCount: 0, expenseAmount: 0, creditCardCount: 0, creditCardNetAdjustment: 0, investmentCount: 0, investmentNetAmount: 0, deleteCount: 0 }
   );
 }
 
@@ -1887,6 +2158,10 @@ function normalizeDashboardSnapshot(data, snapshotMonthOverride = "") {
     assetEntryItems: Array.isArray(data.asset_entry_items)
       ? data.asset_entry_items.map(normalizeAssetEntryItem)
       : [],
+    assetMonthEndHistory: normalizeAssetMonthEndHistory(data.asset_month_end_history),
+    totalNetInvestedCny: data.total_net_invested_cny === null || data.total_net_invested_cny === undefined
+      ? null
+      : Number(data.total_net_invested_cny) || 0,
     dcaCashflows: Array.isArray(data.dca_cashflows)
       ? data.dca_cashflows.map(normalizeDcaCashflow)
       : []
@@ -1916,8 +2191,25 @@ function makeEmptyDashboardSnapshot() {
     investmentGroupTrends: [],
     investmentCashflowCalendar: [],
     assetEntryItems: [],
+    assetMonthEndHistory: {},
+    totalNetInvestedCny: null,
     dcaCashflows: []
   };
+}
+
+function normalizeAssetMonthEndHistory(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const history = {};
+  Object.entries(value).forEach(([assetId, rows]) => {
+    if (!Array.isArray(rows)) return;
+    history[assetId] = rows.map((row) => ({
+      periodMonth: row?.period_month || "",
+      originalAmount: Number(row?.original_amount) || 0,
+      currency: row?.currency || "CNY",
+      amountCny: Number(row?.amount_cny) || 0
+    })).filter((row) => row.periodMonth);
+  });
+  return history;
 }
 
 function normalizeAssetEntryItem(item) {
@@ -3097,6 +3389,666 @@ function renderMayAnomalies() {
       <em class="money" data-value="${formatPlainMoney(item.amount)}">${state.privacy ? "••••••" : formatPlainMoney(item.amount)}</em>
     </div>
   `).join("");
+}
+
+function readInvestCustomAssets() {
+  try {
+    const list = JSON.parse(localStorage.getItem(INVEST_CUSTOM_ASSETS_KEY) || "[]");
+    return Array.isArray(list) ? list.filter((item) => item && item.name) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeInvestCustomAssets() {
+  localStorage.setItem(INVEST_CUSTOM_ASSETS_KEY, JSON.stringify(state.investCustomAssets));
+}
+
+function readInvestFxRates() {
+  try {
+    return { ...INVEST_DEFAULT_FX_RATES, ...JSON.parse(localStorage.getItem(INVEST_FX_RATES_KEY) || "{}") };
+  } catch {
+    return { ...INVEST_DEFAULT_FX_RATES };
+  }
+}
+
+function writeInvestFxRate(currency, rate) {
+  if (!currency || currency === "CNY" || !(Number(rate) > 0)) return;
+  const rates = readInvestFxRates();
+  rates[currency] = Number(rate);
+  localStorage.setItem(INVEST_FX_RATES_KEY, JSON.stringify(rates));
+}
+
+function investAssetKey(asset) {
+  if (!asset) return "";
+  const id = asset.id || asset.asset_id;
+  if (id) return `id:${id}`;
+  return `local:${asset.name || ""}|${asset.platform || ""}`;
+}
+
+function isCashInvestAsset(asset) {
+  const mainId = asset?.main_asset_category_id || "";
+  const mainLabel = asset?.main_category || "";
+  return mainId === "asset_cat_cash" || mainId === "asset_prepaid_expenses" || mainLabel === "现金" || mainLabel === "预花费";
+}
+
+function investAssetCategoryLabel(asset) {
+  if (asset?.main_category) {
+    return asset.sub_category && asset.sub_category !== "未分类"
+      ? `${asset.main_category} · ${asset.sub_category}`
+      : asset.main_category;
+  }
+  return asset?.asset_type || "";
+}
+
+function investMainCategoryById(id) {
+  return INVEST_MAIN_CATEGORIES.find((item) => item.id === id) || INVEST_MAIN_CATEGORIES[0];
+}
+
+function renderInvestAssetCategoryOptions() {
+  if (!investAssetMainCategoryInput) return;
+  investAssetMainCategoryInput.innerHTML = INVEST_MAIN_CATEGORIES
+    .map((item) => `<option value="${item.id}">${item.label}</option>`)
+    .join("");
+  investAssetMainCategoryInput.value = INVEST_MAIN_CATEGORIES[0].id;
+  renderInvestAssetSubCategoryOptions();
+}
+
+function renderInvestAssetSubCategoryOptions() {
+  if (!investAssetSubCategoryInput) return;
+  const mainCategory = investMainCategoryById(investAssetMainCategoryInput?.value);
+  investAssetSubCategoryInput.innerHTML = mainCategory.subs
+    .map((item) => `<option value="${item.id}">${item.label}</option>`)
+    .join("");
+  investAssetSubCategoryInput.value = mainCategory.subs[0].id;
+}
+
+function investAssetFromRecord(record) {
+  const asset = record?.payload_json?.asset || {};
+  return {
+    id: asset.asset_id || null,
+    name: asset.name || "未命名资产",
+    asset_type: asset.asset_type || "",
+    currency: asset.currency || "CNY",
+    platform: asset.platform || "",
+    main_asset_category_id: asset.main_asset_category_id || null,
+    sub_asset_category_id: asset.sub_asset_category_id || null,
+    main_category: asset.main_category || "",
+    sub_category: asset.sub_category || ""
+  };
+}
+
+function investAssetKeyFromRecord(record) {
+  return investAssetKey(record?.payload_json?.asset || {});
+}
+
+function investFlowOf(record) {
+  return record?.payload_json?.flow && typeof record.payload_json.flow === "object" ? record.payload_json.flow : {};
+}
+
+function investFlowDate(record) {
+  return investFlowOf(record).flow_date || record.transaction_date || "";
+}
+
+function investFlowType(record) {
+  return investFlowOf(record).flow_type === "sell" ? "sell" : "buy";
+}
+
+function investFlowCurrency(record) {
+  return investFlowOf(record).currency || record.currency || "CNY";
+}
+
+function investFlowAmount(record) {
+  return Number(investFlowOf(record).amount ?? record.amount) || 0;
+}
+
+function investFlowAmountCny(record) {
+  const direct = Number(investFlowOf(record).amount_cny);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const amount = investFlowAmount(record);
+  const currency = investFlowCurrency(record);
+  if (currency === "CNY") return amount;
+  const rate = Number(investFlowOf(record).fx_rate_to_cny) || 0;
+  return rate > 0 ? amount * rate : 0;
+}
+
+function investFlowSignedCny(record) {
+  const amountCny = investFlowAmountCny(record);
+  return investFlowType(record) === "sell" ? -amountCny : amountCny;
+}
+
+function investmentFlowRecords() {
+  return state.records.filter((record) => record.record_kind === "investment_flow" && !isDeletedRecord(record));
+}
+
+function investmentRecordsForMonth(month) {
+  return investmentFlowRecords()
+    .filter((record) => investFlowDate(record).slice(0, 7) === month)
+    .sort((a, b) => investFlowDate(b).localeCompare(investFlowDate(a)));
+}
+
+function baseInvestAssets() {
+  if (Array.isArray(state.investLanAssets) && state.investLanAssets.length) return state.investLanAssets;
+  return mobileDashboardSnapshot.assetEntryItems || [];
+}
+
+function mergedInvestAssets() {
+  const merged = [];
+  const seen = new Set();
+  baseInvestAssets().forEach((asset) => {
+    if (isCashInvestAsset(asset)) return;
+    const keys = [investAssetKey(asset), `name:${asset.name || ""}|${asset.platform || ""}`];
+    if (keys.some((key) => seen.has(key))) return;
+    keys.forEach((key) => seen.add(key));
+    merged.push(asset);
+  });
+  const extras = [];
+  const addExtra = (asset) => {
+    if (!asset?.name) return;
+    const keys = [investAssetKey(asset), `name:${asset.name}|${asset.platform || ""}`];
+    if (keys.some((key) => seen.has(key))) return;
+    keys.forEach((key) => seen.add(key));
+    extras.push(asset);
+  };
+  state.investCustomAssets.forEach(addExtra);
+  investmentFlowRecords().forEach((record) => addExtra(investAssetFromRecord(record)));
+  return [...merged, ...extras];
+}
+
+async function fetchDesktopInvestAssets() {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch(`${syncEndpoint}/mobile-sync/assets`, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) throw new Error(await response.text());
+    const data = await response.json();
+    const list = Array.isArray(data) ? data : (Array.isArray(data?.assets) ? data.assets : []);
+    return list.map(normalizeAssetEntryItem);
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function refreshInvestAssets() {
+  if (state.investAssetsFetching) return;
+  state.investAssetsFetching = true;
+  try {
+    const assets = await fetchDesktopInvestAssets();
+    if (assets && assets.length) {
+      state.investLanAssets = assets;
+      renderInvestView();
+      renderInvestDetail();
+    }
+  } finally {
+    state.investAssetsFetching = false;
+  }
+}
+
+function investAssetMonthEndCny(asset, month) {
+  if (!asset || !month) return null;
+  const id = asset.id || asset.asset_id;
+  if (id) {
+    const rows = mobileDashboardSnapshot.assetMonthEndHistory?.[id] || [];
+    const row = rows.find((item) => item.periodMonth === month);
+    if (row) return row.amountCny || (row.currency === "CNY" ? row.originalAmount : 0);
+  }
+  if (month === asset.previous_snapshot_month && Number(asset.previous_month_amount) > 0) {
+    return Number(asset.previous_month_amount);
+  }
+  return null;
+}
+
+function investTotalMonthEndCny(month) {
+  const history = mobileDashboardSnapshot.assetMonthEndHistory || {};
+  let total = 0;
+  let found = false;
+  Object.values(history).forEach((rows) => {
+    const row = (rows || []).find((item) => item.periodMonth === month);
+    if (row) {
+      found = true;
+      total += row.amountCny || (row.currency === "CNY" ? row.originalAmount : 0);
+    }
+  });
+  return found ? total : null;
+}
+
+function investPrivacy(label) {
+  return state.privacy ? "••••••" : label;
+}
+
+function signedCnyLabel(value) {
+  return `${value < 0 ? "−" : ""}${formatPlainMoney(Math.abs(value))}`;
+}
+
+function investDirTag(record) {
+  const sell = investFlowType(record) === "sell";
+  return `<span class="invest-dir-tag ${sell ? "sell" : "buy"}">${sell ? "卖出" : "买入"}</span>`;
+}
+
+function investRecordAmountLabel(record) {
+  const currency = investFlowCurrency(record);
+  const symbol = INVEST_CURRENCY_SYMBOLS[currency] || `${currency} `;
+  const sign = investFlowType(record) === "sell" ? "+" : "−";
+  const amount = investFlowAmount(record).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${sign}${symbol}${amount}`;
+}
+
+function investFlowCnyNote(record) {
+  if (investFlowCurrency(record) === "CNY") return "";
+  return `<small>≈ ${investPrivacy(formatPlainMoney(investFlowAmountCny(record)))}</small>`;
+}
+
+function investLedgerRowHtml(record) {
+  const asset = investAssetFromRecord(record);
+  const pending = record.sync_status !== "synced";
+  return `
+    <button class="invest-ledger-row" data-invest-delete="${escapeHtml(record.local_id)}" type="button" title="点按可删除这笔记录">
+      ${investDirTag(record)}
+      <div><strong>${escapeHtml(asset.name)}</strong><span class="sub">${escapeHtml(asset.platform || "未填写平台")}${pending ? " · 待同步" : ""}</span></div>
+      <div class="amount"><b>${investPrivacy(investRecordAmountLabel(record))}</b>${investFlowCnyNote(record)}</div>
+    </button>
+  `;
+}
+
+function renderInvestView() {
+  if (!investMonthInput || !investAssetCards) return;
+  const month = state.investMonth || currentMonthKey();
+  if (investMonthInput.value !== month) investMonthInput.value = month;
+  investMonthInput.max = currentMonthKey();
+  const monthLabel = formatMonthShortLabel(month);
+  const records = investmentRecordsForMonth(month);
+
+  const pendingCount = state.records.filter((record) => record.record_kind === "investment_flow" && record.sync_status !== "synced").length;
+  const syncedCount = state.records.filter((record) => record.record_kind === "investment_flow" && record.sync_status === "synced" && !isDeletedRecord(record)).length;
+  investSyncText.textContent = `待同步 ${pendingCount} 条 · 已同步 ${syncedCount} 条`;
+
+  const net = records.reduce((sum, record) => sum + investFlowSignedCny(record), 0);
+  investHeroTitle.textContent = `${monthLabel}净买入（折人民币）`;
+  investHeroNet.dataset.value = signedCnyLabel(net);
+  investHeroNet.textContent = state.privacy ? "••••••" : investHeroNet.dataset.value;
+
+  const localDraftNet = investmentFlowRecords()
+    .filter((record) => record.sync_status !== "synced")
+    .reduce((sum, record) => sum + investFlowSignedCny(record), 0);
+  const baseTotal = mobileDashboardSnapshot.totalNetInvestedCny;
+  if (baseTotal === null && Math.abs(localDraftNet) < 0.000001) {
+    investHeroTotalRow.hidden = true;
+  } else {
+    investHeroTotalRow.hidden = false;
+    investHeroTotal.dataset.value = formatPlainMoney((baseTotal || 0) + localDraftNet);
+    investHeroTotal.textContent = state.privacy ? "••••••" : investHeroTotal.dataset.value;
+  }
+
+  const prevMonth = previousMonthKey(month);
+  const monthEndTotal = investTotalMonthEndCny(prevMonth);
+  if (monthEndTotal === null) {
+    investHeroMvRow.hidden = true;
+  } else {
+    investHeroMvRow.hidden = false;
+    investHeroMvLabel.textContent = `${formatMonthShortLabel(prevMonth)}末总市值`;
+    investHeroMv.dataset.value = formatPlainMoney(monthEndTotal);
+    investHeroMv.textContent = state.privacy ? "••••••" : investHeroMv.dataset.value;
+  }
+
+  const fxPairs = [];
+  records.forEach((record) => {
+    const currency = investFlowCurrency(record);
+    if (currency === "CNY") return;
+    const rate = Number(investFlowOf(record).fx_rate_to_cny) || 0;
+    const label = `${currency} ${rate > 0 ? rate.toFixed(2) : "未填汇率"}`;
+    if (!fxPairs.includes(label)) fxPairs.push(label);
+  });
+  investHeroFxNote.textContent = fxPairs.length
+    ? `外币已按记账汇率折算（${fxPairs.join(" · ")}）`
+    : "人民币记录无需折算；外币按记账时汇率折算";
+
+  renderInvestAssetCards(records, month, prevMonth);
+  renderInvestLedger(records, month);
+  renderInvestDetail();
+}
+
+function renderInvestAssetCards(records, month, prevMonth) {
+  const assets = mergedInvestAssets();
+  const byKey = new Map(assets.map((asset) => [investAssetKey(asset), asset]));
+  const grouped = new Map();
+  records.forEach((record) => {
+    const key = investAssetKeyFromRecord(record) || "unknown";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(record);
+  });
+  if (!grouped.size) {
+    investAssetCards.innerHTML = `<div class="invest-empty">${escapeHtml(formatMonthShortLabel(month))}还没有投资记录，点右下角 + 记一笔。</div>`;
+    return;
+  }
+  const entries = [...grouped.entries()].map(([key, rows]) => {
+    const buys = rows.filter((record) => investFlowType(record) === "buy").reduce((sum, record) => sum + investFlowAmountCny(record), 0);
+    const sells = rows.filter((record) => investFlowType(record) === "sell").reduce((sum, record) => sum + investFlowAmountCny(record), 0);
+    return { key, rows, asset: byKey.get(key) || investAssetFromRecord(rows[0]), buys, sells, net: buys - sells };
+  }).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+  investAssetCards.innerHTML = entries.map((entry, index) => {
+    const open = state.investExpandedAsset === entry.key;
+    const asset = entry.asset;
+    const sub = [investAssetCategoryLabel(asset), asset.currency, asset.platform].filter(Boolean).join(" · ");
+    const monthEndValue = investAssetMonthEndCny(asset, prevMonth);
+    const recent = entry.rows.slice(0, 3).map((record) => `
+      <div class="invest-mini-rec">
+        <span class="l">${investDirTag(record)}<span>${escapeHtml(formatDayLabel(investFlowDate(record)))}</span></span>
+        <span class="r">${investPrivacy(investRecordAmountLabel(record))}${investFlowCnyNote(record)}</span>
+      </div>
+    `).join("");
+    return `
+      <div class="invest-asset-card${open ? " open" : ""}">
+        <button class="invest-asset-card-head" data-invest-expand="${escapeHtml(entry.key)}" type="button">
+          <i class="tile ${INVEST_DOT_CLASSES[index % INVEST_DOT_CLASSES.length]}"></i>
+          <div><strong>${escapeHtml(asset.name || "未命名资产")}${asset.is_dca ? '<span class="invest-dca-tag">定投</span>' : ""}</strong><span class="sub">${escapeHtml(sub || "手机新增资产")}</span></div>
+          <span class="net">本月净投入 ${investPrivacy(signedCnyLabel(entry.net))}<i>›</i></span>
+        </button>
+        ${open ? `
+        <div class="invest-asset-card-body">
+          ${monthEndValue !== null ? `<div class="invest-mv-ref">${escapeHtml(formatMonthShortLabel(prevMonth))}末市值 ${privacyMoney(monthEndValue)}（参考）</div>` : ""}
+          <div class="invest-stat-rows">
+            <div><span>买入合计</span><b>${privacyMoney(entry.buys)}</b></div>
+            <div><span>卖出合计</span><b>${privacyMoney(entry.sells)}</b></div>
+            <div><span>净投入</span><b>${investPrivacy(signedCnyLabel(entry.net))}</b></div>
+          </div>
+          ${recent}
+          <button class="invest-detail-link" data-invest-detail="${escapeHtml(entry.key)}" type="button">查看明细 ›</button>
+        </div>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+function renderInvestLedger(records, month) {
+  investLedgerHint.textContent = `共 ${records.length} 条 · ${state.investLedgerOpen ? "收起 ⌃" : "展开 ›"}`;
+  investLedger.hidden = !state.investLedgerOpen;
+  if (!state.investLedgerOpen) return;
+  if (!records.length) {
+    investLedger.innerHTML = `<div class="invest-empty">${escapeHtml(formatMonthShortLabel(month))}还没有流水</div>`;
+    return;
+  }
+  const groups = new Map();
+  records.forEach((record) => {
+    const date = investFlowDate(record);
+    if (!groups.has(date)) groups.set(date, []);
+    groups.get(date).push(record);
+  });
+  investLedger.innerHTML = [...groups.entries()].map(([date, rows]) => `
+    <div class="invest-date-group">${escapeHtml(formatDateHeader(date))}</div>
+    ${rows.map((record) => investLedgerRowHtml(record)).join("")}
+  `).join("");
+}
+
+function openInvestDetail(key) {
+  state.investDetailAsset = key;
+  investDetailPanel.hidden = false;
+  renderInvestDetail();
+  investDetailBody.scrollTop = 0;
+}
+
+function renderInvestDetail() {
+  if (!investDetailPanel || investDetailPanel.hidden) return;
+  const key = state.investDetailAsset;
+  const month = state.investMonth || currentMonthKey();
+  const records = investmentRecordsForMonth(month).filter((record) => investAssetKeyFromRecord(record) === key);
+  const asset = mergedInvestAssets().find((item) => investAssetKey(item) === key)
+    || (records[0] ? investAssetFromRecord(records[0]) : null);
+  investDetailTitle.textContent = asset?.name || "资产明细";
+  const buys = records.filter((record) => investFlowType(record) === "buy").reduce((sum, record) => sum + investFlowAmountCny(record), 0);
+  const sells = records.filter((record) => investFlowType(record) === "sell").reduce((sum, record) => sum + investFlowAmountCny(record), 0);
+  const net = buys - sells;
+  const prevMonth = previousMonthKey(month);
+  const monthEndValue = investAssetMonthEndCny(asset, prevMonth);
+  const groups = new Map();
+  records.forEach((record) => {
+    const date = investFlowDate(record);
+    if (!groups.has(date)) groups.set(date, []);
+    groups.get(date).push(record);
+  });
+  investDetailBody.innerHTML = `
+    <div class="invest-stat-rows">
+      <div><span>买入合计</span><b>${privacyMoney(buys)}</b></div>
+      <div><span>卖出合计</span><b>${privacyMoney(sells)}</b></div>
+      <div><span>净投入</span><b>${investPrivacy(signedCnyLabel(net))}</b></div>
+    </div>
+    ${monthEndValue !== null ? `<div class="invest-mv-ref">${escapeHtml(formatMonthShortLabel(prevMonth))}末市值 ${privacyMoney(monthEndValue)}（参考）</div>` : ""}
+    ${records.length
+      ? [...groups.entries()].map(([date, rows]) => `
+        <div class="invest-date-group">${escapeHtml(formatDateHeader(date))}</div>
+        ${rows.map((record) => investLedgerRowHtml(record)).join("")}
+      `).join("")
+      : `<div class="invest-empty">${escapeHtml(formatMonthShortLabel(month))}暂无该资产流水</div>`}
+  `;
+}
+
+async function deleteInvestmentRecord(localId) {
+  const record = state.records.find((item) => item.local_id === localId);
+  if (!record || record.record_kind !== "investment_flow") return;
+  const asset = investAssetFromRecord(record);
+  const label = `${investFlowDate(record)} ${asset.name} ${investFlowType(record) === "sell" ? "卖出" : "买入"} ${investRecordAmountLabel(record)}`;
+  if (!window.confirm(`确认删除这笔投资记录？\n${label}\n\n已同步记录会把删除操作同步到电脑。`)) return;
+  const hasReachedServer = record.sync_status === "synced" || Boolean(record.server_id);
+  if (hasReachedServer) {
+    const now = new Date().toISOString();
+    const tombstone = {
+      ...record,
+      operation: "delete",
+      sync_status: "pending",
+      deleted_at: now,
+      updated_at: now,
+      payload_json: { ...(record.payload_json || {}), operation: "delete" }
+    };
+    state.records = [tombstone, ...state.records.filter((item) => item.local_id !== record.local_id)];
+    await putRecord(tombstone);
+  } else {
+    state.records = state.records.filter((item) => item.local_id !== record.local_id);
+    await removeRecord(record.local_id);
+  }
+  render();
+  void reportMobileStatus();
+  showToast(hasReachedServer ? "已删除，等待同步到电脑" : "已删除");
+}
+
+function investFormAsset() {
+  return mergedInvestAssets().find((asset) => investAssetKey(asset) === state.investForm.assetKey) || null;
+}
+
+function syncInvestDirSeg() {
+  investDirSeg?.querySelectorAll("[data-invest-dir]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.investDir === state.investForm.flowType);
+  });
+  updateInvestDcaHint();
+}
+
+function updateInvestDcaHint() {
+  if (!investDcaHint) return;
+  const asset = investFormAsset();
+  investDcaHint.hidden = !(asset?.is_dca && state.investForm.flowType === "buy");
+}
+
+function syncInvestCurrencySeg() {
+  investCurrencySeg?.querySelectorAll("[data-invest-currency]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.investCurrency === state.investForm.currency);
+  });
+  if (investAmountCurrency) investAmountCurrency.textContent = state.investForm.currency;
+}
+
+function syncInvestAssetCurrencySeg() {
+  investAssetCurrencySeg?.querySelectorAll("[data-invest-asset-currency]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.investAssetCurrency === state.investNewAssetCurrency);
+  });
+}
+
+function renderInvestAssetChoices() {
+  if (!investAssetList) return;
+  const assets = mergedInvestAssets();
+  investAssetList.innerHTML = assets.length
+    ? assets.map((asset, index) => {
+      const key = investAssetKey(asset);
+      const selected = key === state.investForm.assetKey;
+      const sub = [investAssetCategoryLabel(asset), asset.currency, asset.platform].filter(Boolean).join(" · ") || "未填写信息";
+      return `
+        <button class="list-row invest-asset-choice${selected ? " selected" : ""}" data-invest-asset="${escapeHtml(key)}" type="button">
+          <i class="tile ${INVEST_DOT_CLASSES[index % INVEST_DOT_CLASSES.length]}"></i>
+          <span><b>${escapeHtml(asset.name || "未命名资产")}${asset.is_dca ? '<span class="invest-dca-tag">定投</span>' : ""}</b><small>${escapeHtml(sub)}</small></span>
+          <em class="check">✓</em>
+        </button>
+      `;
+    }).join("")
+    : `<div class="invest-empty">还没有资产。点下方「＋ 新增资产」先建一个。</div>`;
+}
+
+function goInvestStep(step) {
+  state.investForm.step = step;
+  document.querySelectorAll("[data-invest-step]").forEach((pane) => {
+    pane.hidden = pane.dataset.investStep !== String(step);
+  });
+  investStepDots.forEach((dot, index) => {
+    dot.classList.toggle("on", index < step);
+  });
+  investStepLabel.textContent = `第 ${step} 步 · ${{ 1: "选择资产", 2: "方向与金额", 3: "汇率与确认" }[step]}`;
+  if (step === 3) prepareInvestStep3();
+}
+
+function investDefaultFlowDate() {
+  const month = state.investMonth || currentMonthKey();
+  if (month >= currentMonthKey()) return todayKey();
+  return `${month}-${String(daysInMonthFromKey(month)).padStart(2, "0")}`;
+}
+
+function openInvestDialog() {
+  if (!investFormAsset()) {
+    const first = mergedInvestAssets()[0];
+    state.investForm.assetKey = first ? investAssetKey(first) : "";
+  }
+  const asset = investFormAsset();
+  state.investForm.flowType = "buy";
+  state.investForm.currency = asset?.currency || "CNY";
+  investAmountInput.value = "";
+  investDateInput.value = investDefaultFlowDate();
+  investDateInput.max = todayKey();
+  syncInvestDirSeg();
+  syncInvestCurrencySeg();
+  renderInvestAssetChoices();
+  updateInvestDcaHint();
+  goInvestStep(1);
+  openModal(investDialog);
+}
+
+function investConvertedCny() {
+  const amount = Number(investAmountInput.value) || 0;
+  if (state.investForm.currency === "CNY") return amount;
+  return amount * (Number(investFxRateInput.value) || 0);
+}
+
+function updateInvestPreview() {
+  if (!investPreviewValue) return;
+  const amountCny = investConvertedCny();
+  if (state.investForm.currency === "CNY") {
+    investPreviewLabel.textContent = "记录金额（人民币）";
+    investPreviewValue.textContent = formatPlainMoney(amountCny);
+  } else {
+    const rate = Number(investFxRateInput.value) || 0;
+    investPreviewLabel.textContent = `按汇率 ${rate > 0 ? rate.toFixed(2) : "—"} 折算`;
+    investPreviewValue.textContent = `≈ ${formatPlainMoney(amountCny)}`;
+  }
+}
+
+function prepareInvestStep3() {
+  const currency = state.investForm.currency;
+  const foreign = currency !== "CNY";
+  investFxField.hidden = !foreign;
+  if (foreign) {
+    investFxCurrency.textContent = currency;
+    const rate = Number(readInvestFxRates()[currency]) || 0;
+    investFxRateInput.value = rate > 0 ? rate.toFixed(2) : "";
+  }
+  updateInvestPreview();
+}
+
+async function saveInvestmentFlow() {
+  const asset = investFormAsset();
+  if (!asset) {
+    showToast("请先选择资产");
+    goInvestStep(1);
+    return;
+  }
+  const amount = Number(investAmountInput.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast("请先填写金额");
+    goInvestStep(2);
+    investAmountInput.focus();
+    return;
+  }
+  const currency = state.investForm.currency || "CNY";
+  const today = todayKey();
+  let flowDate = investDateInput.value || today;
+  if (flowDate > today) flowDate = today;
+  let fxRate = null;
+  let amountCny = amount;
+  if (currency !== "CNY") {
+    fxRate = Number(investFxRateInput.value);
+    if (!Number.isFinite(fxRate) || fxRate <= 0) {
+      showToast("请填写汇率");
+      investFxRateInput.focus();
+      return;
+    }
+    amountCny = amount * fxRate;
+    writeInvestFxRate(currency, fxRate);
+  }
+  amountCny = Math.round(amountCny * 100) / 100;
+  const now = new Date().toISOString();
+  const periodMonth = flowDate.slice(0, 7);
+  const flowType = state.investForm.flowType === "sell" ? "sell" : "buy";
+  const record = {
+    local_id: createLocalId("inv"),
+    server_id: null,
+    record_kind: "investment_flow",
+    operation: "create",
+    sync_status: "pending",
+    transaction_type: null,
+    amount,
+    currency,
+    transaction_date: flowDate,
+    period_month: periodMonth,
+    category: null,
+    note: "",
+    created_at: now,
+    updated_at: now,
+    payload_json: {
+      period_month: periodMonth,
+      operation: "create",
+      asset: {
+        asset_id: asset.id || asset.asset_id || null,
+        name: asset.name || "",
+        asset_type: asset.asset_type || "",
+        currency: asset.currency || currency,
+        platform: asset.platform || "",
+        main_asset_category_id: asset.main_asset_category_id || null,
+        sub_asset_category_id: asset.sub_asset_category_id || null,
+        main_category: asset.main_category || "",
+        sub_category: asset.sub_category || ""
+      },
+      flow: {
+        flow_date: flowDate,
+        flow_type: flowType,
+        amount,
+        currency,
+        fx_rate_to_cny: currency === "CNY" ? null : fxRate,
+        amount_cny: amountCny,
+        note: ""
+      }
+    }
+  };
+  state.records = [record, ...state.records];
+  await putRecord(record);
+  closeModal(investDialog);
+  if (periodMonth <= currentMonthKey()) state.investMonth = periodMonth;
+  render();
+  void reportMobileStatus();
+  showToast("已保存草稿，待同步");
 }
 
 function formatPlainMoney(value) {
