@@ -1,0 +1,1095 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>钱迹WorthTrace · 投资模块 Mock · 方向A 流水账本</title>
+  <style>
+    /* ===== 设计 token：与 mobile/pwa/styles.css 香槟主题一致（值直接内联，不引用正式文件） ===== */
+    :root {
+      color-scheme: light;
+      --ink: #171b18;
+      --muted: #69736b;
+      --line: #e4d8c7;
+      --paper: #fffdfa;
+      --gold: #c4a46a;
+      --sage: #789883;
+      --green: #6f927f;
+      --blue: #6388a9;
+      --rose: #c8775b;
+      --deep: #2a2b26;
+      --shadow: 0 24px 56px rgba(42, 35, 23, .10);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 40px 16px;
+      color: var(--ink);
+      /* 容器外：极淡香槟米色渐变 */
+      background:
+        radial-gradient(circle at 18% 0%, rgba(196, 164, 106, .18), transparent 36%),
+        radial-gradient(circle at 84% 90%, rgba(120, 152, 131, .14), transparent 38%),
+        linear-gradient(135deg, #fbf7ef 0%, #f4ecdd 55%, #f0f4ee 100%);
+    }
+
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    /* ===== 手机容器 ===== */
+    .phone {
+      position: relative;
+      width: 412px;
+      max-width: 100%;
+      height: 880px;
+      overflow: hidden;
+      border-radius: 52px;
+      background: #fbf7ee;
+      box-shadow:
+        0 0 0 10px #151712,
+        0 0 0 11px rgba(255, 255, 255, .14),
+        0 42px 100px rgba(30, 27, 22, .26);
+    }
+
+    /* ===== 状态栏：纯 CSS 信号/电池 ===== */
+    .statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 26px 6px;
+      color: rgba(23, 27, 24, .78);
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .status-icons {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .signal {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 11px;
+    }
+
+    .signal i {
+      width: 3px;
+      border-radius: 1px;
+      background: currentColor;
+    }
+
+    .signal i:nth-child(1) { height: 4px; }
+    .signal i:nth-child(2) { height: 6px; }
+    .signal i:nth-child(3) { height: 8px; }
+    .signal i:nth-child(4) { height: 11px; }
+
+    .battery {
+      position: relative;
+      width: 22px;
+      height: 11px;
+      border: 1.5px solid currentColor;
+      border-radius: 3.5px;
+    }
+
+    .battery::before {
+      content: "";
+      position: absolute;
+      inset: 1.5px;
+      right: 30%;
+      border-radius: 1.5px;
+      background: currentColor;
+    }
+
+    .battery::after {
+      content: "";
+      position: absolute;
+      right: -4px;
+      top: 2.5px;
+      width: 2px;
+      height: 4px;
+      border-radius: 0 2px 2px 0;
+      background: currentColor;
+    }
+
+    /* ===== 主页 ===== */
+    .content {
+      height: calc(100% - 37px);
+      overflow-y: auto;
+      padding: 10px 20px 118px;
+      scrollbar-width: none;
+    }
+
+    .content::-webkit-scrollbar { display: none; }
+
+    .page-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin: 10px 2px 14px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 31px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .head-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    /* 细窄汇总条 */
+    .summary-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 18px;
+      padding: 10px 16px;
+      border: 1px solid rgba(205, 187, 154, .5);
+      border-radius: 999px;
+      background: rgba(255, 253, 250, .66);
+      backdrop-filter: blur(16px);
+      font-size: 12.5px;
+      font-weight: 760;
+      color: #4d564e;
+    }
+
+    .summary-strip strong {
+      color: var(--ink);
+      font-weight: 840;
+    }
+
+    .summary-strip .dot-sep {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--gold);
+    }
+
+    /* 日期分组 */
+    .day-group { margin-bottom: 16px; }
+
+    .day-label {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin: 0 4px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .day-label b {
+      color: #3f473f;
+      font-size: 13px;
+      font-weight: 840;
+    }
+
+    .list {
+      display: grid;
+      gap: 9px;
+    }
+
+    /* 流水行：与正式 PWA .list-row 同气质 */
+    .row {
+      border: 1px solid rgba(205, 187, 154, .42);
+      border-radius: 21px;
+      background: rgba(255, 255, 255, .64);
+      overflow: hidden;
+      transition: border-color 180ms ease, background 180ms ease;
+    }
+
+    .row-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto 14px;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 13px 14px;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      transition: transform 120ms ease;
+    }
+
+    .row-main:active { transform: scale(.985); }
+
+    .row-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .row-name strong {
+      overflow: hidden;
+      font-size: 15px;
+      font-weight: 780;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* 买/卖小胶囊 */
+    .tag {
+      flex: 0 0 auto;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 840;
+    }
+
+    .tag.buy {
+      color: #4f7a60;
+      background: rgba(111, 146, 127, .16);
+    }
+
+    .tag.sell {
+      color: #b05f44;
+      background: rgba(200, 119, 91, .15);
+    }
+
+    .row-sub {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11.5px;
+      font-weight: 640;
+    }
+
+    .row-amount {
+      text-align: right;
+    }
+
+    .row-amount b {
+      display: block;
+      font-size: 15px;
+      font-weight: 820;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .row-amount span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 640;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 右侧小箭头：纯 CSS 几何 */
+    .chev {
+      width: 7px;
+      height: 7px;
+      border-right: 1.6px solid #b6ad9c;
+      border-bottom: 1.6px solid #b6ad9c;
+      transform: rotate(-45deg);
+      transition: transform 200ms ease;
+    }
+
+    .row.open .chev { transform: rotate(45deg); }
+
+    /* 展开详情 */
+    .row-detail {
+      display: none;
+      margin: 0 14px 13px;
+      padding: 11px 13px;
+      border-radius: 14px;
+      background: rgba(248, 243, 234, .8);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 640;
+      line-height: 1.7;
+    }
+
+    .row.open .row-detail { display: block; }
+
+    .row-detail b {
+      color: #4d564e;
+      font-weight: 760;
+    }
+
+    /* ===== FAB ===== */
+    .fab {
+      position: absolute;
+      right: 20px;
+      bottom: 104px;
+      z-index: 20;
+      width: 56px;
+      height: 56px;
+      border: 0;
+      border-radius: 50%;
+      background: var(--deep);
+      box-shadow: 0 16px 36px rgba(29, 33, 28, .28);
+      transition: transform 150ms ease, box-shadow 150ms ease;
+    }
+
+    .fab::before,
+    .fab::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 18px;
+      height: 2px;
+      border-radius: 1px;
+      background: var(--paper);
+      transform: translate(-50%, -50%);
+    }
+
+    .fab::after { transform: translate(-50%, -50%) rotate(90deg); }
+
+    .fab:hover { transform: translateY(-2px); box-shadow: 0 20px 42px rgba(29, 33, 28, .32); }
+    .fab:active { transform: scale(.93); }
+
+    /* ===== 底部导航（固定在手机容器内底部） ===== */
+    .bottom-nav {
+      position: absolute;
+      left: 20px;
+      right: 20px;
+      bottom: 18px;
+      z-index: 15;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      padding: 8px;
+      border: 1px solid rgba(205, 187, 154, .5);
+      border-radius: 28px;
+      background: rgba(255, 253, 250, .78);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 48px rgba(42, 36, 26, .14);
+    }
+
+    .bottom-nav button {
+      min-height: 46px;
+      border: 0;
+      border-radius: 20px;
+      color: #6a746c;
+      background: transparent;
+      font-size: 12px;
+      font-weight: 780;
+      transition: transform 160ms ease, background-color 160ms ease, color 160ms ease;
+    }
+
+    .bottom-nav button:active { transform: scale(.95); }
+
+    .bottom-nav button.active {
+      color: var(--paper);
+      background: var(--deep);
+    }
+
+    /* ===== 底部全屏 sheet：记录表单 ===== */
+    .sheet-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      background: rgba(23, 27, 24, .32);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 240ms ease;
+    }
+
+    .sheet {
+      position: absolute;
+      inset: 0;
+      z-index: 31;
+      display: flex;
+      flex-direction: column;
+      background: #fbf7ee;
+      border-radius: 52px;
+      transform: translateY(103%);
+      transition: transform 320ms cubic-bezier(.32, .72, .24, 1);
+    }
+
+    .sheet.open { transform: translateY(0); }
+    .sheet-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    .sheet-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 22px 10px;
+    }
+
+    .sheet-head h2 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .sheet-close {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(205, 187, 154, .58);
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .68);
+      color: #6a746c;
+      font-size: 15px;
+      transition: transform 140ms ease;
+    }
+
+    .sheet-close:active { transform: scale(.9); }
+
+    .sheet-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 22px 26px;
+      scrollbar-width: none;
+    }
+
+    .sheet-body::-webkit-scrollbar { display: none; }
+
+    .field-label {
+      margin: 16px 2px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    /* pill 分段（买入/卖出、币种） */
+    .pills {
+      display: flex;
+      gap: 8px;
+    }
+
+    .pills button {
+      flex: 1;
+      min-height: 40px;
+      border: 1px solid rgba(205, 187, 154, .55);
+      border-radius: 999px;
+      color: #5d675f;
+      background: rgba(255, 255, 255, .62);
+      font-size: 13.5px;
+      font-weight: 800;
+      transition: transform 140ms ease, background 160ms ease, color 160ms ease, border-color 160ms ease;
+    }
+
+    .pills button:active { transform: scale(.96); }
+
+    .pills button.active {
+      color: var(--paper);
+      background: var(--deep);
+      border-color: var(--deep);
+    }
+
+    .pills button.active.buy-on { background: var(--green); border-color: var(--green); }
+    .pills button.active.sell-on { background: var(--rose); border-color: var(--rose); }
+
+    /* 资产选择列表 */
+    .asset-pick {
+      display: grid;
+      gap: 8px;
+    }
+
+    .asset-pick button {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px;
+      border: 1px solid rgba(205, 187, 154, .45);
+      border-radius: 17px;
+      background: rgba(255, 255, 255, .6);
+      text-align: left;
+      transition: transform 130ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .asset-pick button:active { transform: scale(.98); }
+
+    .asset-pick button.selected {
+      border-color: var(--deep);
+      background: var(--paper);
+      box-shadow: 0 8px 22px rgba(42, 35, 23, .08);
+    }
+
+    .asset-pick .a-name {
+      overflow: hidden;
+      font-size: 14px;
+      font-weight: 780;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .asset-pick .a-meta {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 680;
+    }
+
+    /* 选中勾：纯 CSS */
+    .check {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--deep);
+      position: relative;
+    }
+
+    .check::after {
+      content: "";
+      position: absolute;
+      left: 4.5px;
+      top: 4px;
+      width: 4px;
+      height: 7px;
+      border-right: 1.6px solid var(--paper);
+      border-bottom: 1.6px solid var(--paper);
+      transform: rotate(42deg);
+    }
+
+    .asset-pick button.selected .check { display: block; }
+
+    .asset-pick button.add-asset {
+      grid-template-columns: 1fr;
+      justify-items: center;
+      color: var(--muted);
+      border-style: dashed;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    /* 输入行 */
+    .input-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 52px;
+      padding: 0 15px;
+      border: 1px solid rgba(205, 187, 154, .5);
+      border-radius: 17px;
+      background: rgba(255, 255, 255, .62);
+    }
+
+    .input-row input, .input-row select {
+      flex: 1;
+      min-width: 0;
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 720;
+    }
+
+    .input-row .prefix {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    /* 汇率行 + 折算预览 */
+    .fx-row { display: none; }
+    .fx-row.show { display: block; animation: rise 260ms cubic-bezier(.2, .8, .2, 1); }
+
+    .fx-preview {
+      margin-top: 9px;
+      padding: 11px 15px;
+      border-radius: 14px;
+      background: rgba(196, 164, 106, .13);
+      color: #7a6535;
+      font-size: 13px;
+      font-weight: 780;
+      font-variant-numeric: tabular-nums;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* 保存按钮 */
+    .primary-btn {
+      width: 100%;
+      min-height: 54px;
+      margin-top: 22px;
+      border: 0;
+      border-radius: 999px;
+      color: var(--paper);
+      background: var(--deep);
+      font-size: 15px;
+      font-weight: 840;
+      box-shadow: 0 18px 38px rgba(29, 33, 28, .20);
+      transition: transform 150ms ease, opacity 150ms ease;
+    }
+
+    .primary-btn:active { transform: scale(.97); }
+    .primary-btn:disabled { opacity: .38; box-shadow: none; }
+
+    /* ===== 新增资产小表单（第二层 sheet） ===== */
+    .sub-sheet {
+      position: absolute;
+      inset: 0;
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+      background: #fbf7ee;
+      border-radius: 52px;
+      transform: translateY(103%);
+      transition: transform 320ms cubic-bezier(.32, .72, .24, 1);
+    }
+
+    .sub-sheet.open { transform: translateY(0); }
+
+    /* ===== toast ===== */
+    .toast {
+      position: absolute;
+      left: 50%;
+      bottom: 178px;
+      z-index: 50;
+      padding: 11px 20px;
+      border-radius: 999px;
+      color: var(--paper);
+      background: rgba(42, 43, 38, .94);
+      font-size: 13px;
+      font-weight: 780;
+      box-shadow: 0 14px 34px rgba(29, 33, 28, .3);
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 10px);
+      transition: opacity 240ms ease, transform 240ms ease;
+      white-space: nowrap;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    /* 新插入行的高亮过渡 */
+    .row.flash { animation: flash 1200ms ease; }
+
+    @keyframes flash {
+      0% { background: rgba(196, 164, 106, .24); border-color: var(--gold); }
+      100% { background: rgba(255, 255, 255, .64); }
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 0; }
+      .phone { width: 100%; height: 100vh; border-radius: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="phone" id="phone">
+    <!-- 状态栏 -->
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="status-icons">
+        <span class="signal"><i></i><i></i><i></i><i></i></span>
+        <span class="battery"></span>
+      </span>
+    </div>
+
+    <!-- 方向A 主页：流水账本 -->
+    <div class="content" id="content">
+      <div class="page-head">
+        <h1>投资</h1>
+        <span class="head-note">2026 年 9 月</span>
+      </div>
+
+      <!-- 细窄汇总条：本月净买入 · 笔数 -->
+      <div class="summary-strip">
+        <span>本月净买入 <strong id="sum-net">¥0</strong></span>
+        <span class="dot-sep"></span>
+        <span>共 <strong id="sum-count">0</strong> 笔</span>
+      </div>
+
+      <!-- 按日期分组的流水，时间倒序，JS 渲染 -->
+      <div id="ledger"></div>
+    </div>
+
+    <!-- FAB：打开记录表单 -->
+    <button class="fab" id="fab" aria-label="记一笔投资"></button>
+
+    <!-- 底部导航：投资为激活态，其余装饰 -->
+    <nav class="bottom-nav" aria-label="底部导航">
+      <button type="button">记账</button>
+      <button type="button">花费</button>
+      <button type="button" class="active">投资</button>
+      <button type="button">健康</button>
+    </nav>
+
+    <!-- 记录表单 sheet -->
+    <div class="sheet-backdrop" id="backdrop"></div>
+    <section class="sheet" id="form-sheet" aria-label="记一笔投资">
+      <div class="sheet-head">
+        <h2>记一笔投资</h2>
+        <button class="sheet-close" id="form-close" aria-label="关闭">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="field-label">方向</p>
+        <div class="pills" id="dir-pills">
+          <button type="button" data-dir="buy" class="active buy-on">买入</button>
+          <button type="button" data-dir="sell">卖出</button>
+        </div>
+
+        <p class="field-label">资产</p>
+        <div class="asset-pick" id="asset-pick"></div>
+
+        <p class="field-label">日期</p>
+        <div class="input-row">
+          <input type="date" id="f-date" />
+        </div>
+
+        <p class="field-label">金额</p>
+        <div class="input-row">
+          <span class="prefix" id="amount-prefix">¥</span>
+          <input type="number" id="f-amount" inputmode="decimal" min="0" step="0.01" placeholder="0.00" />
+        </div>
+
+        <p class="field-label">币种</p>
+        <div class="pills" id="ccy-pills">
+          <button type="button" data-ccy="CNY" class="active">CNY</button>
+          <button type="button" data-ccy="USD">USD</button>
+          <button type="button" data-ccy="HKD">HKD</button>
+        </div>
+
+        <!-- 选 USD/HKD 时显示汇率行 + 人民币折算预览 -->
+        <div class="fx-row" id="fx-row">
+          <p class="field-label">汇率（1 <span id="fx-ccy">USD</span> = ? CNY）</p>
+          <div class="input-row">
+            <input type="number" id="f-rate" inputmode="decimal" min="0" step="0.0001" />
+          </div>
+          <div class="fx-preview" id="fx-preview">≈ ¥0.00</div>
+        </div>
+
+        <button class="primary-btn" id="save-btn">保存记录</button>
+      </div>
+    </section>
+
+    <!-- 新增资产小表单 -->
+    <section class="sub-sheet" id="asset-sheet" aria-label="新增资产">
+      <div class="sheet-head">
+        <h2>新增资产</h2>
+        <button class="sheet-close" id="asset-close" aria-label="关闭">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="field-label">名称</p>
+        <div class="input-row">
+          <input type="text" id="na-name" placeholder="如 中证红利ETF" maxlength="24" />
+        </div>
+
+        <p class="field-label">类型</p>
+        <div class="input-row">
+          <select id="na-type">
+            <option>股票</option>
+            <option>基金</option>
+            <option selected>ETF</option>
+            <option>债券</option>
+            <option>现金</option>
+            <option>其他</option>
+          </select>
+        </div>
+
+        <p class="field-label">币种</p>
+        <div class="pills" id="na-ccy-pills">
+          <button type="button" data-ccy="CNY" class="active">CNY</button>
+          <button type="button" data-ccy="USD">USD</button>
+          <button type="button" data-ccy="HKD">HKD</button>
+        </div>
+
+        <p class="field-label">平台</p>
+        <div class="input-row">
+          <input type="text" id="na-platform" placeholder="如 华泰证券 / 支付宝基金" maxlength="20" />
+        </div>
+
+        <button class="primary-btn" id="na-save">保存并选中</button>
+      </div>
+    </section>
+
+    <!-- toast -->
+    <div class="toast" id="toast">已保存草稿，待同步</div>
+  </div>
+
+  <script>
+    /* ===== 演示数据（纯前端，刷新即丢） ===== */
+    const CCY_SYMBOL = { CNY: "¥", USD: "$", HKD: "HK$" };
+    const DEFAULT_RATE = { USD: 7.10, HKD: 0.91 };
+    const today = new Date();
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const shift = (n) => { const d = new Date(today); d.setDate(d.getDate() - n); return iso(d); };
+
+    let assets = [
+      { name: "沪深300ETF", type: "ETF", ccy: "CNY", platform: "华泰证券" },
+      { name: "纳指100ETF(QDII)", type: "ETF", ccy: "CNY", platform: "支付宝基金" },
+      { name: "标普500ETF联接", type: "基金", ccy: "CNY", platform: "支付宝基金" },
+      { name: "黄金ETF", type: "ETF", ccy: "CNY", platform: "华泰证券" },
+      { name: "美元活期", type: "现金", ccy: "USD", platform: "招商银行" },
+    ];
+
+    let records = [
+      { asset: "沪深300ETF", dir: "buy", amount: 5000, ccy: "CNY", rate: 1, date: shift(0), platform: "华泰证券" },
+      { asset: "纳指100ETF(QDII)", dir: "buy", amount: 3000, ccy: "CNY", rate: 1, date: shift(3), platform: "支付宝基金" },
+      { asset: "美元活期", dir: "buy", amount: 2000, ccy: "USD", rate: 7.10, date: shift(7), platform: "招商银行" },
+      { asset: "黄金ETF", dir: "sell", amount: 4800, ccy: "CNY", rate: 1, date: shift(7), platform: "华泰证券" },
+      { asset: "标普500ETF联接", dir: "buy", amount: 2000, ccy: "CNY", rate: 1, date: shift(16), platform: "支付宝基金" },
+      { asset: "沪深300ETF", dir: "buy", amount: 5000, ccy: "CNY", rate: 1, date: shift(23), platform: "华泰证券" },
+    ];
+
+    /* ===== 格式化 ===== */
+    const fmt = (n) => n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtInt = (n) => n.toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+    const cnyOf = (r) => r.ccy === "CNY" ? r.amount : r.amount * r.rate;
+    const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+    /* ===== 主页渲染：汇总条 + 按日期分组流水 ===== */
+    const ledgerEl = document.getElementById("ledger");
+
+    function dayLabel(dateStr) {
+      if (dateStr === iso(today)) return { main: "今天", sub: `${today.getMonth() + 1}月${today.getDate()}日 ${WEEK[today.getDay()]}` };
+      const d = new Date(dateStr + "T00:00:00");
+      return { main: `${d.getMonth() + 1}月${d.getDate()}日`, sub: WEEK[d.getDay()] };
+    }
+
+    function renderLedger(flashFirst) {
+      // 汇总：本月净买入 = 买入折人民币 − 卖出折人民币
+      const monthKey = iso(today).slice(0, 7);
+      const monthRows = records.filter((r) => r.date.startsWith(monthKey));
+      const net = monthRows.reduce((s, r) => s + (r.dir === "buy" ? cnyOf(r) : -cnyOf(r)), 0);
+      document.getElementById("sum-net").textContent = "¥" + fmtInt(net);
+      document.getElementById("sum-count").textContent = monthRows.length;
+
+      // 分组，时间倒序
+      const groups = new Map();
+      [...records].sort((a, b) => b.date.localeCompare(a.date)).forEach((r) => {
+        if (!groups.has(r.date)) groups.set(r.date, []);
+        groups.get(r.date).push(r);
+      });
+
+      ledgerEl.innerHTML = "";
+      let firstRow = null;
+      groups.forEach((rows, date) => {
+        const g = document.createElement("div");
+        g.className = "day-group";
+        const label = dayLabel(date);
+        g.innerHTML = `<p class="day-label"><b>${label.main}</b><span>${label.sub}</span></p>`;
+        const list = document.createElement("div");
+        list.className = "list";
+
+        rows.forEach((r) => {
+          const row = document.createElement("div");
+          row.className = "row";
+          const sym = CCY_SYMBOL[r.ccy];
+          const foreign = r.ccy !== "CNY";
+          const amountHtml = foreign
+            ? `<b>${sym}${fmt(r.amount)}</b><span>≈ ¥${fmt(cnyOf(r))}</span>`
+            : `<b>${sym}${fmt(r.amount)}</b>`;
+          row.innerHTML = `
+            <button type="button" class="row-main">
+              <span class="row-name">
+                <span class="tag ${r.dir}">${r.dir === "buy" ? "买入" : "卖出"}</span>
+                <span style="min-width:0">
+                  <strong>${r.asset}</strong>
+                  <span class="row-sub">${r.platform}</span>
+                </span>
+              </span>
+              <span class="row-amount">${amountHtml}</span>
+              <span class="chev"></span>
+            </button>
+            <div class="row-detail">
+              日期 <b>${r.date}</b> · 平台 <b>${r.platform}</b><br>
+              ${foreign ? `币种 <b>${r.ccy}</b> · 汇率 <b>${r.rate}</b> · 折人民币 <b>¥${fmt(cnyOf(r))}</b>` : `币种 <b>CNY</b>`}
+            </div>`;
+          row.querySelector(".row-main").addEventListener("click", () => row.classList.toggle("open"));
+          list.appendChild(row);
+          if (!firstRow) firstRow = row;
+        });
+
+        g.appendChild(list);
+        ledgerEl.appendChild(g);
+      });
+
+      if (flashFirst && firstRow) {
+        firstRow.classList.add("flash");
+        document.getElementById("content").scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+
+    /* ===== 记录表单状态 ===== */
+    const form = { dir: "buy", asset: null, ccy: "CNY" };
+    const backdrop = document.getElementById("backdrop");
+    const formSheet = document.getElementById("form-sheet");
+    const assetSheet = document.getElementById("asset-sheet");
+    const amountInput = document.getElementById("f-amount");
+    const rateInput = document.getElementById("f-rate");
+    const dateInput = document.getElementById("f-date");
+    const saveBtn = document.getElementById("save-btn");
+
+    function renderAssetPick() {
+      const wrap = document.getElementById("asset-pick");
+      wrap.innerHTML = "";
+      assets.forEach((a, i) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = form.asset === i ? "selected" : "";
+        b.innerHTML = `
+          <span style="min-width:0">
+            <span class="a-name">${a.name}</span>
+            <span class="a-meta">${a.type} · ${a.ccy} · ${a.platform}</span>
+          </span>
+          <span class="check"></span>`;
+        b.addEventListener("click", () => {
+          form.asset = i;
+          setCcy(a.ccy); // 选中资产后带出默认币种，仍可手动改
+          renderAssetPick();
+          syncForm();
+        });
+        wrap.appendChild(b);
+      });
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "add-asset";
+      add.textContent = "＋ 新增资产";
+      add.addEventListener("click", () => assetSheet.classList.add("open"));
+      wrap.appendChild(add);
+    }
+
+    function setCcy(ccy) {
+      form.ccy = ccy;
+      document.querySelectorAll("#ccy-pills button").forEach((b) =>
+        b.classList.toggle("active", b.dataset.ccy === ccy));
+      const foreign = ccy !== "CNY";
+      document.getElementById("fx-row").classList.toggle("show", foreign);
+      document.getElementById("amount-prefix").textContent = CCY_SYMBOL[ccy];
+      if (foreign) {
+        document.getElementById("fx-ccy").textContent = ccy;
+        rateInput.value = DEFAULT_RATE[ccy].toFixed(2);
+      }
+      updatePreview();
+    }
+
+    function updatePreview() {
+      if (form.ccy === "CNY") return;
+      const amt = parseFloat(amountInput.value) || 0;
+      const rate = parseFloat(rateInput.value) || 0;
+      document.getElementById("fx-preview").textContent = "≈ ¥" + fmt(amt * rate);
+    }
+
+    function syncForm() {
+      saveBtn.disabled = !(form.asset !== null && (parseFloat(amountInput.value) || 0) > 0);
+    }
+
+    /* 方向 pill */
+    document.querySelectorAll("#dir-pills button").forEach((b) => {
+      b.addEventListener("click", () => {
+        form.dir = b.dataset.dir;
+        document.querySelectorAll("#dir-pills button").forEach((x) => {
+          const on = x === b;
+          x.classList.toggle("active", on);
+          x.classList.toggle("buy-on", on && x.dataset.dir === "buy");
+          x.classList.toggle("sell-on", on && x.dataset.dir === "sell");
+        });
+      });
+    });
+
+    /* 币种 pill */
+    document.querySelectorAll("#ccy-pills button").forEach((b) => {
+      b.addEventListener("click", () => setCcy(b.dataset.ccy));
+    });
+
+    amountInput.addEventListener("input", () => { updatePreview(); syncForm(); });
+    rateInput.addEventListener("input", updatePreview);
+
+    /* 打开 / 关闭表单 */
+    function openForm() {
+      dateInput.value = iso(today);
+      renderAssetPick();
+      setCcy(form.asset !== null ? assets[form.asset].ccy : "CNY");
+      syncForm();
+      backdrop.classList.add("open");
+      formSheet.classList.add("open");
+    }
+
+    function closeForm() {
+      assetSheet.classList.remove("open");
+      backdrop.classList.remove("open");
+      formSheet.classList.remove("open");
+    }
+
+    document.getElementById("fab").addEventListener("click", openForm);
+    document.getElementById("form-close").addEventListener("click", closeForm);
+    backdrop.addEventListener("click", closeForm);
+
+    /* ===== 新增资产 ===== */
+    let naCcy = "CNY";
+    document.querySelectorAll("#na-ccy-pills button").forEach((b) => {
+      b.addEventListener("click", () => {
+        naCcy = b.dataset.ccy;
+        document.querySelectorAll("#na-ccy-pills button").forEach((x) =>
+          x.classList.toggle("active", x === b));
+      });
+    });
+
+    document.getElementById("asset-close").addEventListener("click", () => assetSheet.classList.remove("open"));
+
+    document.getElementById("na-save").addEventListener("click", () => {
+      const name = document.getElementById("na-name").value.trim();
+      if (!name) { document.getElementById("na-name").focus(); return; }
+      assets.push({
+        name,
+        type: document.getElementById("na-type").value,
+        ccy: naCcy,
+        platform: document.getElementById("na-platform").value.trim() || "未指定平台",
+      });
+      form.asset = assets.length - 1; // 自动选中新资产
+      setCcy(naCcy);
+      assetSheet.classList.remove("open");
+      document.getElementById("na-name").value = "";
+      document.getElementById("na-platform").value = "";
+      renderAssetPick();
+      syncForm();
+    });
+
+    /* ===== 保存记录：关表单 → toast → 插入列表头部 ===== */
+    const toast = document.getElementById("toast");
+    let toastTimer = null;
+
+    saveBtn.addEventListener("click", () => {
+      const a = assets[form.asset];
+      records.unshift({
+        asset: a.name,
+        dir: form.dir,
+        amount: parseFloat(amountInput.value),
+        ccy: form.ccy,
+        rate: form.ccy === "CNY" ? 1 : (parseFloat(rateInput.value) || DEFAULT_RATE[form.ccy]),
+        date: dateInput.value || iso(today),
+        platform: a.platform,
+      });
+      closeForm();
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
+      renderLedger(true);
+      // 重置金额，保留资产和方向便于连续记
+      amountInput.value = "";
+      syncForm();
+    });
+
+    /* ===== 初始化；支持 hash 直接打开状态（便于截图验收） =====
+       #open-form      打开记录表单
+       #open-form-usd  打开表单并预选美元资产 + 金额，展示汇率行和折算预览 */
+    renderLedger(false);
+    if (location.hash.startsWith("#open-form")) {
+      if (location.hash.includes("usd")) {
+        form.asset = assets.findIndex((a) => a.ccy === "USD");
+        amountInput.value = "2000";
+      }
+      openForm();
+    }
+  </script>
+</body>
+</html>

@@ -129,8 +129,8 @@ mobile_dashboard_snapshots
 
 表用途：
 
-- `mobile_cloud_drafts`：手机记账变更箱。手机写入新增、修改、删除操作；电脑拉取后自动应用到本地统计。
-- `mobile_dashboard_snapshots`：电脑端已发布月报看板快照。电脑上传，手机读取，用于显示净资产、收支、资产配置、目标偏离等。
+- `mobile_cloud_drafts`：手机记账变更箱。手机写入新增、修改、删除操作；电脑拉取后自动应用到本地统计。`record_kind` 现有 `transaction`、`credit_card_adjustment`、`monthly_update_assets`、`investment_flow`（投资买入/卖出草稿，payload_json 里带 asset 和 flow 详情，月底更新确认后落 `investment_cashflows`，来源标记 `mobile_investment`）。
+- `mobile_dashboard_snapshots`：电脑端已发布月报看板快照。电脑上传，手机读取，用于显示净资产、收支、资产配置、目标偏离等。payload 另含 `asset_entry_items`（资产清单，手机「投资」tab 选择资产用）、`asset_month_end_history`（每资产最近 12 个月月末市值）和 `total_net_invested_cny`（累计净投入本金，人民币口径）。
 
 相关文件：
 

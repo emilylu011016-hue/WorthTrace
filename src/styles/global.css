@@ -5176,6 +5176,17 @@ svg .negative {
   justify-self: start;
 }
 
+.asset-flow-mobile-tag {
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #146c43;
+  background: #ecfdf3;
+  border: 1px solid #b7ebc6;
+}
+
 .done-button {
   border-color: #b7ebc6;
   color: #146c43;

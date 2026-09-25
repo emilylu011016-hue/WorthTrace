@@ -312,8 +312,25 @@ type MobileSyncInboxRecord = {
   category?: string | null;
   note?: string | null;
   net_adjustment?: number | null;
+  payload_json?: string | null;
   sync_status: string;
   received_at: string;
+};
+
+type MobileInvestmentFlowItem = {
+  inbox_id: string;
+  device_id: string;
+  local_id: string;
+  asset_id: string;
+  asset_name: string;
+  period_month: string;
+  flow_date: string;
+  flow_type: "buy" | "sell";
+  amount: number;
+  currency: string;
+  fx_rate_to_cny: number;
+  amount_cny: number;
+  note?: string | null;
 };
 
 type SyncTab = "sync" | "password" | "categories" | "reset";
@@ -533,6 +550,7 @@ type AssetCashflowItem = {
   confirmed?: boolean;
   fx_rate_to_cny?: number;
   amount_cny?: number;
+  mobile_local_id?: string;
 };
 
 type AssetSectionKey = "creator" | "summary" | "assets" | "creditCard" | "expense" | "income";
@@ -1462,6 +1480,22 @@ function normalizeAssetEntryItems(assets: AssetEntryItem[]) {
     cashflows: asset.cashflows ?? [],
     confirmed: asset.confirmed ?? false
   }));
+}
+
+type MobileInvestmentDraftPayload = {
+  asset?: { name?: string };
+  flow?: { flow_type?: string; amount?: number; currency?: string };
+};
+
+// 收件箱 payload 有两种形态：LAN 推送存整条记录（flow 嵌在 payload_json 里），云端草稿直接存原始 payload
+function mobileInvestmentPayload(record: MobileSyncInboxRecord): MobileInvestmentDraftPayload | null {
+  if (!record.payload_json) return null;
+  try {
+    const raw = JSON.parse(record.payload_json) as MobileInvestmentDraftPayload & { payload_json?: MobileInvestmentDraftPayload };
+    return raw.flow ? raw : raw.payload_json ?? null;
+  } catch {
+    return null;
+  }
 }
 
 const fallbackSummary: DashboardSeedSummary = {
@@ -3332,13 +3366,14 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
 
   async function loadReview(month = selectedMonth, applyStatus = true) {
     try {
-      const [expense, income, assets, dcaFlows, cards, status] = await Promise.all([
+      const [expense, income, assets, dcaFlows, cards, status, pendingInvestmentFlows] = await Promise.all([
         invoke<TransactionReview>("get_transaction_review", { periodMonth: month, transactionType: "expense" }),
         invoke<TransactionReview>("get_transaction_review", { periodMonth: month, transactionType: "income" }),
         invoke<AssetEntryItem[]>("get_asset_entry_items", { periodMonth: month }),
         invoke<AssetCashflowItem[]>("get_generated_dca_cashflows", { periodMonth: month }),
         invoke<CreditCardEntry[]>("get_credit_card_entries", { periodMonth: month }),
-        invoke<MonthlyStepStatus>("get_monthly_step_status", { periodMonth: month })
+        invoke<MonthlyStepStatus>("get_monthly_step_status", { periodMonth: month }),
+        invoke<MobileInvestmentFlowItem[]>("list_pending_mobile_investment_flows", { periodMonth: month })
       ]);
       console.log("[loadReview] loaded", month, "expense", expense.rows.length, "income", income.rows.length, "assets", assets.length);
       const expenseRows = expense.rows.map((row) => ({ ...row, include_in_stats: row.include_in_stats ?? true }));
@@ -3355,7 +3390,38 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
         expense: hasReviewAnomaly(expenseRows),
         income: hasReviewAnomaly(incomeRows)
       });
-      setAssetItems(normalizeAssetEntryItems(assets));
+      // 手机「投资」草稿：收到时只进收件箱，这里把待入账流水 merge 进资产现金流编辑列表，随月底保存一次性落库
+      const matchedFlowAssetIds = new Set<string>();
+      const mergedAssets = assets.map((asset) => {
+        const mobileFlows: AssetCashflowItem[] = pendingInvestmentFlows
+          .filter((flow) => flow.asset_id === asset.id)
+          .map((flow) => {
+            matchedFlowAssetIds.add(asset.id);
+            return {
+              id: `mobile-investment-${flow.local_id}`,
+              asset_id: asset.id,
+              asset_name: asset.name,
+              flow_date: flow.flow_date || `${month}-28`,
+              flow_type: flow.flow_type,
+              amount: flow.amount,
+              currency: (flow.currency || asset.currency || "CNY") as CurrencyCode,
+              source_kind: "mobile_investment",
+              dca_plan_id: null,
+              note: flow.note ?? "",
+              included: true,
+              confirmed: false,
+              fx_rate_to_cny: flow.fx_rate_to_cny,
+              amount_cny: flow.amount_cny,
+              mobile_local_id: flow.local_id
+            };
+          });
+        return mobileFlows.length ? { ...asset, cashflows: [...(asset.cashflows ?? []), ...mobileFlows] } : asset;
+      });
+      const unmatchedFlows = pendingInvestmentFlows.filter((flow) => !matchedFlowAssetIds.has(flow.asset_id));
+      if (unmatchedFlows.length) {
+        console.warn("[loadReview] 手机投资草稿对应资产不在本月录入清单", unmatchedFlows.map((flow) => flow.asset_name || flow.asset_id));
+      }
+      setAssetItems(normalizeAssetEntryItems(mergedAssets));
       setDcaCashflows(dcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
       setCreditCards(cards);
       if (applyStatus) {
@@ -4845,6 +4911,20 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       });
       applyMonthlyStatus(status);
       setAssetValidationIssue(null);
+      // 保存成功后才把本次 merge 进来的手机投资草稿标记为已处理；失败则不标记
+      const savedMobileLocalIds = assetItems.flatMap((asset) =>
+        (asset.cashflows ?? [])
+          .filter((flow) => flow.source_kind === "mobile_investment" && flow.mobile_local_id)
+          .map((flow) => flow.mobile_local_id as string)
+      );
+      if (savedMobileLocalIds.length) {
+        try {
+          await invoke("mark_mobile_investment_flows_reviewed", { localIds: savedMobileLocalIds });
+          void refreshMobileSyncSummary();
+        } catch (markErr) {
+          console.warn("[saveAssetEntries] 手机投资草稿标记已处理失败", markErr);
+        }
+      }
       setCompletedSteps((current) => ({ ...current, assets: true }));
       setAssetItems((current) => current.map((asset) => ({ ...asset, confirmed: true })));
       const nextDcaFlows = await invoke<AssetCashflowItem[]>("get_generated_dca_cashflows", { periodMonth: selectedMonth });
@@ -6086,6 +6166,11 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
 
   const mobileRecordLabel = (record: MobileSyncInboxRecord) => {
     const operationLabel = record.operation === "delete" ? "删除" : record.operation === "update" ? "修改" : "新增";
+    if (record.record_kind === "investment_flow") {
+      const payload = mobileInvestmentPayload(record);
+      const flowLabel = record.operation === "delete" ? "删除流水" : payload?.flow?.flow_type === "sell" ? "卖出" : "买入";
+      return `${operationLabel}投资流水｜${flowLabel} · ${payload?.asset?.name || "投资资产"}`;
+    }
     if (record.record_kind === "credit_card_adjustment") {
       return `${operationLabel}信用卡调整｜${record.period_month || selectedMonth}`;
     }
@@ -6093,6 +6178,12 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
   };
 
   const mobileRecordAmount = (record: MobileSyncInboxRecord) => {
+    if (record.record_kind === "investment_flow") {
+      const flow = mobileInvestmentPayload(record)?.flow;
+      const amount = Number(record.amount ?? flow?.amount) || 0;
+      const formatted = formatCurrency(amount, privacyMode);
+      return flow?.currency && flow.currency !== "CNY" ? `${formatted} ${flow.currency}` : formatted;
+    }
     if (record.record_kind === "credit_card_adjustment") {
       return formatCurrency(Number(record.net_adjustment) || 0, privacyMode);
     }
@@ -8551,6 +8642,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
                 </div>
                 {(asset.cashflows ?? []).map((flow) => (
                   <div className="asset-flow-row" key={flow.id}>
+                    {flow.source_kind === "mobile_investment" ? <span className="asset-flow-mobile-tag">手机</span> : null}
                     <input type="date" value={flow.flow_date} onChange={(event) => updateAssetCashflow(asset.id, flow.id, { flow_date: event.target.value })} />
                     <select value={flow.flow_type} onChange={(event) => updateAssetCashflow(asset.id, flow.id, { flow_type: event.target.value as AssetCashflowItem["flow_type"] })}>
                       <option value="buy">买入</option>

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.3.37" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.4.0" />
 </head>
 <body class="theme-champagne privacy-on needs-binding">
   <main class="mobile-shell">
@@ -210,9 +210,60 @@
       <div id="targetDeviationSection"></div>
     </section>
 
+    <section class="view" data-view="invest">
+      <section class="book-overview">
+        <div class="book-month-row">
+          <label>
+            <span>月份</span>
+            <input id="investMonthInput" type="month" />
+          </label>
+          <button id="investTodayButton" type="button">本月</button>
+        </div>
+      </section>
+
+      <button class="invest-sync-bar" id="investSyncBar" type="button">
+        <i></i>
+        <span id="investSyncText">待同步 0 条 · 已同步 0 条</span>
+        <em>去记账页统一同步 ›</em>
+      </button>
+
+      <article class="hero-card invest-hero">
+        <p id="investHeroTitle">本月净买入（折人民币）</p>
+        <strong id="investHeroNet" class="money" data-value="CNY 0.00">••••••</strong>
+        <div class="invest-hero-lines">
+          <p id="investHeroTotalRow">累计投入（总本金） <b id="investHeroTotal" class="money" data-value="CNY 0.00">••••••</b>（全量口径，不随月份变化）</p>
+          <p id="investHeroMvRow"><span id="investHeroMvLabel">上月末总市值</span> <b id="investHeroMv" class="money" data-value="CNY 0.00">••••••</b>（月末更新，参考口径）</p>
+          <p id="investHeroFxNote">外币按记账时汇率折算</p>
+        </div>
+      </article>
+
+      <div class="section-title compact-title">
+        <h2>我的投资</h2>
+        <span>本月各资产投入</span>
+      </div>
+      <div class="invest-asset-cards" id="investAssetCards"></div>
+
+      <button class="section-title compact-title invest-ledger-toggle" id="investLedgerToggle" type="button">
+        <h2>流水</h2>
+        <span id="investLedgerHint">共 0 条 · 展开 ›</span>
+      </button>
+      <div class="invest-ledger" id="investLedger" hidden></div>
+
+      <button class="book-add-button" id="investAddButton" type="button" aria-label="记一笔投资">+</button>
+
+      <div class="invest-detail-panel" id="investDetailPanel" hidden>
+        <div class="invest-detail-head">
+          <button class="invest-detail-back" id="investDetailBack" type="button">‹ 返回</button>
+          <h2 id="investDetailTitle">资产明细</h2>
+        </div>
+        <div class="invest-detail-body" id="investDetailBody"></div>
+      </div>
+    </section>
+
     <nav class="bottom-nav" aria-label="底部导航">
       <button class="active" data-nav="book" type="button">记账</button>
       <button data-nav="spending" type="button">花费</button>
+      <button data-nav="invest" type="button">投资</button>
       <button data-nav="dashboard" type="button">财务健康</button>
     </nav>
   </main>
@@ -259,6 +310,103 @@
         <button id="closeBookDialogButton" type="button">取消</button>
         <button class="danger-button" id="deleteRecordButton" type="button" hidden>删除</button>
         <button class="save-button" type="submit">保存这一笔</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="investDialog" class="book-dialog">
+    <div class="book-card invest-form-card">
+      <div class="book-card-header">
+        <div>
+          <span id="investStepLabel">第 1 步 · 选择资产</span>
+          <strong>记录投资</strong>
+        </div>
+        <button id="closeInvestDialogButton" type="button">取消</button>
+      </div>
+      <div class="invest-steps" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
+
+      <div class="invest-step" data-invest-step="1">
+        <div class="invest-asset-list" id="investAssetList"></div>
+        <button class="list-row invest-new-asset" id="investNewAssetButton" type="button">
+          <i class="tile"></i>
+          <span><b>＋ 新增资产</b><small>名称、分类、币种、平台</small></span>
+          <em>新增</em>
+        </button>
+        <div class="dialog-actions invest-actions">
+          <button class="save-button" id="investToStep2" type="button">下一步</button>
+        </div>
+      </div>
+
+      <div class="invest-step" data-invest-step="2" hidden>
+        <div class="segmented" id="investDirSeg" role="group" aria-label="买卖方向">
+          <button class="active" data-invest-dir="buy" type="button">买入</button>
+          <button data-invest-dir="sell" type="button">卖出</button>
+        </div>
+        <label class="amount-field">
+          <span>金额（<b id="investAmountCurrency">CNY</b>）</span>
+          <input id="investAmountInput" inputmode="decimal" placeholder="0.00" />
+        </label>
+        <p class="invest-dca-hint" id="investDcaHint" hidden>该资产有定投计划；同日买入将以本记录为准，不再自动生成定投</p>
+        <div class="segmented tri" id="investCurrencySeg" role="group" aria-label="币种">
+          <button class="active" data-invest-currency="CNY" type="button">CNY</button>
+          <button data-invest-currency="USD" type="button">USD</button>
+          <button data-invest-currency="HKD" type="button">HKD</button>
+        </div>
+        <label class="field">
+          <span>日期（不能记录未来日期）</span>
+          <input id="investDateInput" type="date" />
+        </label>
+        <div class="dialog-actions invest-actions">
+          <button data-invest-back="1" type="button">上一步</button>
+          <button class="save-button" id="investToStep3" type="button">下一步</button>
+        </div>
+      </div>
+
+      <div class="invest-step" data-invest-step="3" hidden>
+        <label class="field" id="investFxField">
+          <span>汇率（1 <b id="investFxCurrency">USD</b> = ? CNY）</span>
+          <input id="investFxRateInput" inputmode="decimal" placeholder="7.10" />
+        </label>
+        <div class="invest-fx-preview">
+          <span id="investPreviewLabel">人民币折算</span>
+          <strong id="investPreviewValue">≈ CNY 0.00</strong>
+        </div>
+        <div class="dialog-actions invest-actions">
+          <button data-invest-back="2" type="button">上一步</button>
+          <button class="save-button" id="investSaveButton" type="button">保存草稿</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="investAssetDialog">
+    <form id="investAssetForm">
+      <h2>新增资产</h2>
+      <p>新增后先保存在手机端，随投资草稿一起同步到电脑。</p>
+      <label class="pair-code-field">
+        <span>名称</span>
+        <input id="investAssetNameInput" maxlength="24" placeholder="例如 中证红利ETF" />
+      </label>
+      <label class="field">
+        <span>主分类</span>
+        <select id="investAssetMainCategoryInput"></select>
+      </label>
+      <label class="field">
+        <span>子分类</span>
+        <select id="investAssetSubCategoryInput"></select>
+      </label>
+      <div class="segmented tri" id="investAssetCurrencySeg" role="group" aria-label="资产币种">
+        <button class="active" data-invest-asset-currency="CNY" type="button">CNY</button>
+        <button data-invest-asset-currency="USD" type="button">USD</button>
+        <button data-invest-asset-currency="HKD" type="button">HKD</button>
+      </div>
+      <label class="pair-code-field">
+        <span>平台</span>
+        <input id="investAssetPlatformInput" maxlength="24" placeholder="例如 华泰证券" />
+      </label>
+      <div class="dialog-actions">
+        <button id="closeInvestAssetDialogButton" type="button">取消</button>
+        <button type="submit">保存资产</button>
       </div>
     </form>
   </dialog>
@@ -369,6 +517,6 @@
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.3.37" type="module"></script>
+  <script src="./app.js?mobileVersion=0.4.0" type="module"></script>
 </body>
 </html>

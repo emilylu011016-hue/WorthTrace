@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>「投资」模块 · 3 个设计方向对比</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "SF Pro Display", "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #f6f1e7 0%, #efe9dc 55%, #f3ede2 100%);
+    min-height: 100vh;
+    padding: 48px 32px 64px;
+    color: #171b18;
+  }
+  header { max-width: 1500px; margin: 0 auto 40px; }
+  header h1 { font-size: 28px; letter-spacing: 0.02em; }
+  header p { margin-top: 8px; font-size: 14px; color: #69736b; line-height: 1.7; }
+  .grid {
+    max-width: 1500px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px;
+  }
+  @media (max-width: 1400px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: rgba(255,253,250,.74);
+    border: 1px solid #e4d8c7;
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 24px 56px rgba(42,35,23,.10);
+  }
+  .card h2 { font-size: 18px; }
+  .card .tag {
+    display: inline-block; margin-left: 8px; padding: 2px 10px;
+    font-size: 12px; border-radius: 999px;
+    background: #2a2b26; color: #fffdfa; vertical-align: 2px;
+  }
+  .card .desc { margin: 10px 0 6px; font-size: 13px; color: #69736b; line-height: 1.8; }
+  .card .hint { margin-bottom: 16px; font-size: 12px; color: #a09a8b; }
+  .frame-wrap {
+    border-radius: 18px; overflow: hidden;
+    border: 1px solid #e4d8c7; background: #f6f1e7;
+    aspect-ratio: 1280 / 1000;
+  }
+  iframe {
+    width: 1280px; height: 1000px; border: 0;
+    transform-origin: top left;
+  }
+  .links { margin-top: 14px; font-size: 13px; }
+  .links a { color: #789883; text-decoration: none; margin-right: 14px; }
+  .links a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<header>
+  <h1>「投资」模块 · 设计稿</h1>
+  <p>最终版 = 方向 C 的复合骨架 + 月份筛选（不可选未来）+ 同步状态条（统一在记账页同步）+ 方向 B 的资产折叠卡（可展开、可看明细）+ 方向 A 的流水账。下方保留 3 个原始方向供对照。</p>
+  <p style="margin-top:14px"><a href="invest-final.html" target="_blank" style="display:inline-block;padding:12px 28px;background:#2a2b26;color:#fffdfa;border-radius:999px;text-decoration:none;font-size:15px">打开最终合并版 invest-final.html →</a>
+  <a href="invest-final.html#open-form" target="_blank" style="margin-left:12px;font-size:13px;color:#789883">直接看记录表单</a></p>
+</header>
+<div class="grid">
+  <div class="card">
+    <h2>方向 A · 流水账本<span class="tag">零学习成本</span></h2>
+    <p class="desc">主页 = 按日期分组的买卖流水，和现有「记账」模块心智完全一致。顶部一条细窄汇总条（本月净买入 · 笔数），右下 FAB 记一笔。适合：买卖频率高、把投资当流水记。</p>
+    <p class="hint">可点：FAB 打开表单 / 行尾箭头展开详情 / 新增资产</p>
+    <div class="frame-wrap"><iframe src="invest-a-ledger.html" data-scale></iframe></div>
+    <div class="links"><a href="invest-a-ledger.html" target="_blank">单独打开</a><a href="invest-a-ledger.html#open-form" target="_blank">直接看表单</a><a href="invest-a-ledger.html#open-form-usd" target="_blank">看美元汇率态</a></div>
+  </div>
+  <div class="card">
+    <h2>方向 B · 持仓卡片<span class="tag">资产为中心</span></h2>
+    <p class="desc">主页 = 每个资产一张卡（累计投入折人民币 + 最近一笔），卡上直接带「买入」「卖出」快捷按钮，点了就预填好该资产。底部虚线卡直接新增资产。适合：标的固定、对同一批资产反复操作。</p>
+    <p class="hint">可点：卡上买入/卖出按钮 / 虚线新增资产卡</p>
+    <div class="frame-wrap"><iframe src="invest-b-holdings.html" data-scale></iframe></div>
+    <div class="links"><a href="invest-b-holdings.html" target="_blank">单独打开</a><a href="invest-b-holdings.html#open-form" target="_blank">直接看表单</a></div>
+  </div>
+  <div class="card">
+    <h2>方向 C · 投资概览<span class="tag">信息密度最高</span></h2>
+    <p class="desc">主页 = hero 大卡（累计投入折人民币大数字 + 本月净买入）+「待同步草稿」专区（金色状态点）+ 最近记录。表单是分 3 步的 sheet（选资产 → 方向金额币种 → 汇率确认）。适合：想一眼看全局、在意同步状态。</p>
+    <p class="hint">可点：FAB 打开分步表单（1/2/3 步指示）</p>
+    <div class="frame-wrap"><iframe src="invest-c-overview.html" data-scale></iframe></div>
+    <div class="links"><a href="invest-c-overview.html" target="_blank">单独打开</a><a href="invest-c-overview.html#open-form" target="_blank">直接看表单</a></div>
+  </div>
+</div>
+<script>
+  // iframe 按容器宽度等比缩放
+  function fit() {
+    document.querySelectorAll('iframe[data-scale]').forEach(f => {
+      const w = f.parentElement.clientWidth;
+      f.style.transform = 'scale(' + (w / 1280) + ')';
+    });
+  }
+  window.addEventListener('resize', fit);
+  fit();
+</script>
+</body>
+</html>

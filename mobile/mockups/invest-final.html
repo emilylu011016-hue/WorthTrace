@@ -1,0 +1,1208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <!--
+    WorthTrace 手机 PWA 投资模块 mock · 合并最终版
+    = 方向C 复合骨架 + 月份筛选 + 同步状态条 + 方向B 资产分组折叠卡 + 方向A 流水账
+    自包含单文件，双击 file:// 即可打开；不引用 mobile/pwa/ 任何正式文件，
+    设计 token 从 mobile/pwa/styles.css 复制内联，保证与正式 PWA 视觉一致。
+    纯前端演示：IndexedDB / Supabase 链路不实现，状态刷新即丢。
+    数据模型：records 数组（date/asset/dir/amount/cur/rate/platform/synced），
+    所有区块（hero / 同步条 / 资产卡 / 流水）由它按选中月份 filter 派生渲染。
+    同步动作统一在记账页顶部，本模块只显示状态。
+    调试 hash：#open-form 直接开记录表单；#expand-first 展开第一张资产卡。
+  -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>钱迹WorthTrace · 投资模块 Mock · 最终合并版</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #171b18;
+      --muted: #69736b;
+      --line: #e4d8c7;
+      --paper: #fffdfa;
+      --gold: #c4a46a;
+      --sage: #789883;
+      --green: #6f927f;
+      --blue: #6388a9;
+      --rose: #c8775b;
+      --graphite: #2a2b26;
+      font-family: -apple-system, "SF Pro Display", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    button, input, select { font: inherit; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(196, 164, 106, 0.20), transparent 34%),
+        linear-gradient(135deg, #faf5ec 0%, #f2e9d9 55%, #eef2ec 100%);
+    }
+
+    /* ===== 手机外壳 ===== */
+    .phone {
+      width: 414px;
+      height: 896px;
+      max-height: calc(100vh - 48px);
+      border-radius: 46px;
+      background: #fbf7ee;
+      box-shadow:
+        0 0 0 11px #191b16,
+        0 0 0 12px rgba(255, 255, 255, 0.16),
+        0 48px 110px rgba(42, 35, 23, 0.22);
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ===== 状态栏 ===== */
+    .statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 26px 4px;
+      color: rgba(23, 27, 24, 0.78);
+      font-size: 13px;
+      font-weight: 760;
+    }
+    .status-icons { display: flex; align-items: center; gap: 6px; }
+    .signal { display: flex; align-items: flex-end; gap: 2px; height: 11px; }
+    .signal i { width: 3px; border-radius: 1px; background: rgba(23, 27, 24, 0.78); }
+    .signal i:nth-child(1) { height: 4px; }
+    .signal i:nth-child(2) { height: 6px; }
+    .signal i:nth-child(3) { height: 8px; }
+    .signal i:nth-child(4) { height: 10px; }
+    .battery {
+      width: 22px; height: 11px;
+      border: 1.5px solid rgba(23, 27, 24, 0.55);
+      border-radius: 3.5px;
+      position: relative;
+      padding: 1.5px;
+    }
+    .battery::before {
+      content: ""; display: block; height: 100%; width: 72%;
+      border-radius: 1.5px; background: rgba(23, 27, 24, 0.78);
+    }
+    .battery::after {
+      content: ""; position: absolute; right: -4px; top: 3px;
+      width: 2px; height: 4px; border-radius: 0 2px 2px 0;
+      background: rgba(23, 27, 24, 0.55);
+    }
+
+    /* ===== 主页内容 ===== */
+    .content {
+      height: calc(100% - 34px);
+      overflow-y: auto;
+      padding: 10px 20px 120px;
+      scrollbar-width: none;
+    }
+    .content::-webkit-scrollbar { display: none; }
+
+    .mobile-header {
+      position: relative;
+      display: flex; align-items: center; justify-content: space-between;
+      margin: 8px 0 16px;
+    }
+    h1 { margin: 0; font-size: 31px; line-height: 1; letter-spacing: -0.01em; }
+
+    /* ===== 月份筛选器 ===== */
+    .month-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 12px;
+      border: 1px solid rgba(205, 187, 154, 0.58);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.68);
+      color: #3f473f;
+      font-size: 12px; font-weight: 780;
+      cursor: pointer;
+      transition: transform 140ms ease;
+    }
+    .month-pill:active { transform: scale(0.96); }
+    .month-pill .caret { font-size: 9px; color: var(--muted); }
+    .month-menu {
+      position: absolute; top: 44px; right: 0; z-index: 15;
+      min-width: 148px;
+      padding: 6px;
+      border: 1px solid rgba(205, 187, 154, 0.55);
+      border-radius: 18px;
+      background: rgba(255, 253, 250, 0.96);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 48px rgba(42, 35, 23, 0.16);
+      opacity: 0; transform: translateY(-6px); pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+    .month-menu.open { opacity: 1; transform: none; pointer-events: auto; }
+    .month-menu button {
+      width: 100%; display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 12px; border: 0; border-radius: 12px;
+      background: transparent; color: var(--ink);
+      font-size: 13px; font-weight: 720; text-align: left; cursor: pointer;
+    }
+    .month-menu button:hover { background: rgba(205, 187, 154, 0.22); }
+    .month-menu button.current { background: #f0e7d8; }
+    .month-menu button:disabled {
+      color: rgba(105, 115, 107, 0.45);
+      cursor: not-allowed;
+      background: transparent;
+    }
+    .month-menu button:disabled:hover { background: transparent; }
+    .month-menu button .tick { font-size: 11px; color: var(--gold); }
+
+    /* ===== 同步状态条 ===== */
+    .sync-bar {
+      width: 100%;
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      border: 1px solid rgba(205, 187, 154, 0.5);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.64);
+      font-size: 12px; font-weight: 760; color: #3f473f;
+      cursor: pointer;
+      transition: transform 140ms ease;
+    }
+    .sync-bar:active { transform: scale(0.98); }
+    .sync-bar .sync-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--gold);
+      box-shadow: 0 0 0 3px rgba(196, 164, 106, 0.22);
+      flex: 0 0 auto;
+    }
+    .sync-bar .go {
+      margin-left: auto;
+      color: var(--muted); font-size: 11px; font-weight: 680;
+      white-space: nowrap;
+    }
+
+    /* ===== hero 大卡 ===== */
+    .hero-card {
+      padding: 22px;
+      border-radius: 30px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(244, 236, 222, 0.5)),
+        radial-gradient(circle at 84% 16%, rgba(197, 164, 109, 0.30), transparent 34%);
+      border: 1px solid rgba(207, 190, 160, 0.5);
+      box-shadow: 0 24px 56px rgba(42, 35, 23, 0.10);
+    }
+    .metric-label { margin: 0 0 8px; color: #68736b; font-size: 13px; font-weight: 760; }
+    .metric-value { margin: 0; font-size: 36px; line-height: 1.05; letter-spacing: -0.01em; font-weight: 880; }
+    .metric-lines {
+      margin-top: 12px; padding-top: 12px;
+      border-top: 1px solid rgba(207, 190, 160, 0.42);
+      display: grid; gap: 4px;
+    }
+    .metric-lines p { margin: 0; color: var(--muted); font-size: 11px; font-weight: 640; line-height: 1.5; }
+    .metric-lines p b { color: #3f473f; font-weight: 800; }
+
+    /* ===== 分区标题 ===== */
+    .section-title {
+      display: flex; align-items: center; justify-content: space-between;
+      margin: 22px 0 10px;
+      color: #2a302b; font-size: 15px; font-weight: 840;
+    }
+    .section-title small { color: var(--muted); font-size: 11px; font-weight: 680; }
+
+    /* ===== 资产分组折叠卡 ===== */
+    .asset-cards { display: grid; gap: 10px; }
+    .asset-card {
+      border: 1px solid rgba(205, 187, 154, 0.42);
+      border-radius: 21px;
+      background: rgba(255, 255, 255, 0.64);
+      overflow: hidden;
+      transition: border-color 160ms ease, background 160ms ease;
+    }
+    .asset-card.open { border-color: rgba(42, 43, 38, 0.4); background: rgba(255, 255, 255, 0.9); }
+    .asset-card-head {
+      width: 100%;
+      display: grid; grid-template-columns: 38px minmax(0, 1fr) auto;
+      gap: 11px; align-items: center;
+      padding: 12px;
+      border: 0; background: transparent;
+      text-align: left; cursor: pointer;
+    }
+    .asset-card-head:active { opacity: 0.8; }
+    .asset-card-head strong { display: block; font-size: 15px; }
+    .asset-card-head .sub { display: block; margin-top: 3px; color: #727b73; font-size: 11px; font-weight: 720; }
+    .asset-card-head .net {
+      text-align: right;
+      color: #3f473f; font-size: 13px; font-weight: 800;
+      white-space: nowrap;
+    }
+    .asset-card-head .net i { font-style: normal; color: var(--muted); font-size: 10px; margin-left: 4px; }
+    .asset-card-body { display: none; padding: 2px 12px 14px; }
+    .asset-card.open .asset-card-body { display: block; animation: pane-in 220ms ease; }
+    @keyframes pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .stat-rows { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+    .mv-ref { margin: 2px 2px 8px; color: var(--muted); font-size: 11px; font-weight: 680; }
+    .stat-rows div {
+      padding: 10px;
+      border-radius: 15px;
+      background: #f8f3ea;
+      border: 1px solid rgba(205, 187, 154, 0.4);
+    }
+    .stat-rows span { display: block; color: #727b73; font-size: 10.5px; font-weight: 720; }
+    .stat-rows b { display: block; margin-top: 4px; font-size: 12.5px; font-weight: 800; }
+    .mini-rec {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 8px 2px;
+      border-top: 1px solid rgba(205, 187, 154, 0.3);
+      font-size: 12px;
+    }
+    .mini-rec .l { display: flex; align-items: center; gap: 8px; color: #3f473f; font-weight: 720; }
+    .mini-rec .r { text-align: right; font-weight: 760; white-space: nowrap; }
+    .mini-rec .r small { display: block; color: var(--muted); font-size: 10px; font-weight: 640; }
+    .detail-link {
+      width: 100%;
+      margin-top: 8px; padding: 9px 0 2px;
+      border: 0; border-top: 1px solid rgba(205, 187, 154, 0.3);
+      background: transparent;
+      color: var(--muted); font-size: 12px; font-weight: 760;
+      text-align: center; cursor: pointer;
+    }
+    .detail-link:active { color: var(--ink); }
+
+    /* 买/卖胶囊 */
+    .dir-tag {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 10.5px; font-weight: 800;
+      flex: 0 0 auto;
+    }
+    .dir-tag.buy { color: var(--green); background: rgba(111, 146, 127, 0.14); }
+    .dir-tag.sell { color: var(--rose); background: rgba(200, 119, 91, 0.14); }
+
+    /* ===== 流水账 ===== */
+    .ledger-toggle {
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .ledger-toggle:active { opacity: 0.75; }
+    #ledger.ledger-collapsed { display: none; }
+    #ledger:not(.ledger-collapsed) { animation: pane-in 200ms ease; }
+    .date-group { margin-bottom: 4px; color: var(--muted); font-size: 11px; font-weight: 760; padding-left: 2px; }
+    .ledger-list { display: grid; gap: 10px; margin-bottom: 14px; }
+    .ledger-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 11px; align-items: center;
+      padding: 12px;
+      border: 1px solid rgba(205, 187, 154, 0.42);
+      border-radius: 21px;
+      background: rgba(255, 255, 255, 0.64);
+    }
+    .ledger-row strong { display: block; font-size: 14px; }
+    .ledger-row .sub { display: block; margin-top: 3px; color: #727b73; font-size: 11px; font-weight: 720; }
+    .ledger-row .amount { text-align: right; }
+    .ledger-row .amount b { display: block; font-size: 13px; white-space: nowrap; }
+    .ledger-row .amount small { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; font-weight: 640; }
+    .ledger-row .amount .buy { color: var(--ink); }
+    .ledger-row .amount .sell { color: var(--green); }
+    .empty-hint {
+      padding: 22px;
+      border: 1px dashed rgba(205, 187, 154, 0.6);
+      border-radius: 21px;
+      color: var(--muted); font-size: 12.5px; font-weight: 680;
+      text-align: center;
+    }
+
+    /* 色点 */
+    .dot { width: 38px; height: 38px; border-radius: 14px; background: linear-gradient(135deg, var(--sage), var(--blue)); flex: 0 0 auto; }
+    .dot.gold { background: linear-gradient(135deg, var(--gold), #e6cf9f); }
+    .dot.rose { background: linear-gradient(135deg, var(--rose), #eab09d); }
+    .dot.blue { background: linear-gradient(135deg, var(--blue), #9fbdd4); }
+    .dot.dark { background: linear-gradient(135deg, #262a24, #6f927f); }
+
+    /* ===== 资产明细面板（容器内滑入子页） ===== */
+    .detail-panel {
+      position: absolute; inset: 0; z-index: 7;
+      display: flex; flex-direction: column;
+      background: #fbf7ee;
+      transform: translateX(100%);
+      transition: transform 280ms cubic-bezier(.2, .8, .2, 1);
+    }
+    .phone.detail-open .detail-panel { transform: none; }
+    .detail-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 20px 14px;
+    }
+    .back-btn {
+      display: inline-flex; align-items: center; gap: 2px;
+      padding: 8px 12px 8px 9px;
+      border: 1px solid rgba(205, 187, 154, 0.58);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.68);
+      color: #3f473f; font-size: 12px; font-weight: 780;
+      cursor: pointer;
+    }
+    .back-btn:active { transform: scale(0.96); }
+    .detail-head h2 { margin: 0; font-size: 19px; font-weight: 840; }
+    .detail-body {
+      flex: 1; overflow-y: auto;
+      padding: 0 20px 40px;
+      scrollbar-width: none;
+    }
+    .detail-body::-webkit-scrollbar { display: none; }
+    .detail-summary {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+      margin-bottom: 16px;
+    }
+    .detail-summary div {
+      padding: 11px;
+      border-radius: 17px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(205, 187, 154, 0.45);
+    }
+    .detail-summary span { display: block; color: #727b73; font-size: 10.5px; font-weight: 720; }
+    .detail-summary b { display: block; margin-top: 4px; font-size: 13px; font-weight: 800; }
+
+    /* ===== FAB ===== */
+    .fab {
+      position: absolute; right: 22px; bottom: 108px; z-index: 5;
+      width: 56px; height: 56px; border: 0; border-radius: 20px;
+      color: var(--paper); background: var(--graphite);
+      font-size: 26px; font-weight: 400; line-height: 1;
+      cursor: pointer;
+      box-shadow: 0 18px 38px rgba(29, 33, 28, 0.28);
+      transition: transform 160ms ease;
+    }
+    .fab:active { transform: scale(0.93); }
+
+    /* ===== 底部导航 ===== */
+    .bottom-nav {
+      position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: 6;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+      padding: 8px;
+      border: 1px solid rgba(205, 187, 154, 0.5);
+      border-radius: 28px;
+      background: rgba(255, 253, 250, 0.78);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 48px rgba(42, 36, 26, 0.14);
+    }
+    .bottom-nav button {
+      min-height: 46px; border: 0; border-radius: 20px;
+      color: #6a746c; background: transparent;
+      font-size: 12px; font-weight: 780; cursor: pointer;
+      transition: transform 160ms ease;
+    }
+    .bottom-nav button:active { transform: scale(0.96); }
+    .bottom-nav button.active { color: var(--paper); background: var(--graphite); }
+
+    /* ===== 分步记录表单（底部 sheet） ===== */
+    .sheet-mask {
+      position: absolute; inset: 0; z-index: 8;
+      background: rgba(23, 27, 24, 0.28);
+      opacity: 0; pointer-events: none;
+      transition: opacity 220ms ease;
+    }
+    .sheet {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 9;
+      max-height: 84%;
+      display: flex; flex-direction: column;
+      padding: 14px 20px 22px;
+      border-radius: 30px 30px 0 0;
+      border: 1px solid rgba(207, 190, 160, 0.55);
+      border-bottom: 0;
+      background: rgba(255, 253, 250, 0.94);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 -24px 56px rgba(42, 35, 23, 0.16);
+      transform: translateY(105%);
+      transition: transform 300ms cubic-bezier(.2, .8, .2, 1);
+    }
+    .phone.form-open .sheet-mask { opacity: 1; pointer-events: auto; }
+    .phone.form-open .sheet { transform: translateY(0); }
+
+    .grabber { width: 38px; height: 4px; margin: 0 auto 12px; border-radius: 999px; background: rgba(205, 187, 154, 0.8); }
+
+    .sheet-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .sheet-head strong { font-size: 17px; font-weight: 840; }
+    .sheet-close {
+      width: 32px; height: 32px; border: 0; border-radius: 50%;
+      color: var(--muted); background: rgba(205, 187, 154, 0.3);
+      font-size: 14px; cursor: pointer;
+    }
+
+    .steps { display: flex; align-items: center; gap: 7px; margin-bottom: 14px; }
+    .steps i {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: rgba(205, 187, 154, 0.6);
+      font-style: normal;
+      transition: background 180ms ease, width 180ms ease;
+    }
+    .steps i.on { width: 22px; border-radius: 999px; background: var(--graphite); }
+    .steps span { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 720; }
+
+    .sheet-body { overflow-y: auto; scrollbar-width: none; }
+    .sheet-body::-webkit-scrollbar { display: none; }
+    .step-pane { display: none; animation: pane-in 240ms ease; }
+    .step-pane.on { display: block; }
+
+    .asset-row {
+      width: 100%;
+      display: grid; grid-template-columns: 38px minmax(0, 1fr) auto;
+      gap: 11px; align-items: center;
+      padding: 12px; margin-bottom: 9px;
+      border: 1px solid rgba(205, 187, 154, 0.42);
+      border-radius: 21px;
+      background: rgba(255, 255, 255, 0.64);
+      text-align: left; cursor: pointer;
+      transition: border-color 160ms ease, background 160ms ease, transform 120ms ease;
+    }
+    .asset-row:active { transform: scale(0.985); }
+    .asset-row.selected { border-color: var(--graphite); background: rgba(255, 255, 255, 0.9); }
+    .asset-row strong { display: block; font-size: 14px; }
+    .asset-row span { display: block; margin-top: 2px; color: #727b73; font-size: 11px; font-weight: 720; }
+    .asset-row .check {
+      width: 20px; height: 20px; border-radius: 50%;
+      border: 1.5px solid rgba(205, 187, 154, 0.8);
+      display: grid; place-items: center;
+      color: transparent; font-size: 11px; font-weight: 900;
+    }
+    .asset-row.selected .check { background: var(--graphite); border-color: var(--graphite); color: var(--paper); }
+    .asset-row.new { border-style: dashed; color: var(--muted); }
+    .asset-row.new strong { color: #5d675f; }
+
+    .seg { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; padding: 6px; border-radius: 999px; background: #f0e7d8; }
+    .seg.tri { grid-template-columns: repeat(3, 1fr); }
+    .seg button {
+      min-height: 40px; border: 0; border-radius: 999px;
+      color: #68736b; background: transparent;
+      font-size: 14px; font-weight: 800; cursor: pointer;
+      transition: color 160ms ease, background 160ms ease;
+    }
+    .seg button.active { color: var(--paper); background: var(--graphite); }
+
+    .field-label { margin: 16px 0 8px; color: #68736b; font-size: 12px; font-weight: 760; }
+    .field-hint { margin: 6px 2px 0; color: rgba(105, 115, 107, 0.75); font-size: 10.5px; font-weight: 640; }
+
+    .amount-input {
+      display: flex; align-items: baseline; gap: 6px;
+      padding: 14px 16px;
+      border: 1px solid rgba(205, 187, 154, 0.55);
+      border-radius: 21px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+    .amount-input .cur { color: var(--muted); font-size: 17px; font-weight: 800; }
+    .amount-input input {
+      flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
+      color: var(--ink); font-size: 26px; font-weight: 840;
+    }
+    .amount-input input::placeholder { color: rgba(105, 115, 107, 0.4); }
+
+    .input-line {
+      width: 100%;
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px;
+      border: 1px solid rgba(205, 187, 154, 0.5);
+      border-radius: 17px;
+      background: #f8f3ea;
+    }
+    .input-line input, .input-line select {
+      flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
+      color: var(--ink); font-size: 14px; font-weight: 720;
+    }
+
+    .fx-preview {
+      margin-top: 14px; padding: 14px 16px;
+      border-radius: 21px;
+      border: 1px solid rgba(196, 164, 106, 0.45);
+      background: linear-gradient(135deg, rgba(255, 250, 240, 0.9), rgba(244, 236, 222, 0.55));
+    }
+    .fx-preview span { display: block; color: var(--muted); font-size: 11px; font-weight: 720; }
+    .fx-preview strong { display: block; margin-top: 4px; font-size: 22px; font-weight: 860; }
+
+    .sheet-actions { display: grid; grid-template-columns: auto 1fr; gap: 10px; margin-top: 18px; }
+    .btn-ghost, .btn-primary {
+      min-height: 52px; border-radius: 999px;
+      font-weight: 840; cursor: pointer;
+      transition: transform 140ms ease;
+    }
+    .btn-ghost:active, .btn-primary:active { transform: scale(0.97); }
+    .btn-ghost {
+      padding: 0 20px;
+      border: 1px solid rgba(205, 187, 154, 0.55);
+      color: #5d675f; background: rgba(255, 255, 255, 0.7);
+    }
+    .btn-primary {
+      border: 0; color: var(--paper); background: var(--graphite);
+      box-shadow: 0 16px 34px rgba(29, 33, 28, 0.20);
+    }
+    .sheet-actions.single { grid-template-columns: 1fr; }
+
+    /* ===== 新增资产小表单 ===== */
+    .mini-mask {
+      position: absolute; inset: 0; z-index: 10;
+      display: grid; place-items: center;
+      padding: 24px;
+      background: rgba(23, 27, 24, 0.34);
+      opacity: 0; pointer-events: none;
+      transition: opacity 200ms ease;
+    }
+    .mini-card {
+      width: 100%;
+      padding: 20px;
+      border-radius: 26px;
+      border: 1px solid rgba(207, 190, 160, 0.55);
+      background: var(--paper);
+      box-shadow: 0 24px 56px rgba(42, 35, 23, 0.20);
+      transform: translateY(12px) scale(0.97);
+      transition: transform 220ms cubic-bezier(.2, .8, .2, 1);
+    }
+    .phone.mini-open .mini-mask { opacity: 1; pointer-events: auto; }
+    .phone.mini-open .mini-card { transform: none; }
+    .mini-card h2 { margin: 0 0 14px; font-size: 17px; font-weight: 840; }
+    .mini-card .input-line { margin-bottom: 10px; }
+    .mini-card .seg { margin-bottom: 10px; }
+
+    /* ===== Toast ===== */
+    .toast {
+      position: absolute; left: 50%; bottom: 96px; z-index: 12;
+      transform: translate(-50%, 14px);
+      padding: 11px 18px;
+      border-radius: 999px;
+      color: var(--paper); background: var(--graphite);
+      font-size: 13px; font-weight: 780;
+      box-shadow: 0 16px 38px rgba(29, 33, 28, 0.28);
+      opacity: 0; pointer-events: none;
+      transition: opacity 220ms ease, transform 220ms ease;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  </style>
+</head>
+<body>
+  <div class="phone" id="phone">
+
+    <!-- 状态栏 -->
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="status-icons">
+        <span class="signal"><i></i><i></i><i></i><i></i></span>
+        <span class="battery"></span>
+      </span>
+    </div>
+
+    <!-- 主页 -->
+    <div class="content" id="content">
+      <div class="mobile-header">
+        <h1>投资</h1>
+        <button class="month-pill" id="month-pill"><span id="month-label">2026 年 9 月</span><span class="caret">▾</span></button>
+        <div class="month-menu" id="month-menu"></div>
+      </div>
+
+      <button class="sync-bar" id="sync-bar">
+        <i class="sync-dot"></i>
+        <span id="sync-text">待同步 2 条 · 已同步 5 条</span>
+        <span class="go">去记账页统一同步 ›</span>
+      </button>
+
+      <article class="hero-card">
+        <p class="metric-label" id="hero-label">9 月净买入（折人民币）</p>
+        <p class="metric-value" id="hero-value">¥ 0.00</p>
+        <div class="metric-lines">
+          <p>累计投入（总本金） <b id="hero-total">¥ 312,480.60</b>（全量口径，不随月份变化）</p>
+          <p><span id="hero-mv-label">8 月末总市值</span> <b id="hero-mv-value">¥ 298,340.00</b>（上月末更新，参考口径）</p>
+          <p>外币已按汇率折算（USD 7.10 · HKD 0.91）</p>
+        </div>
+      </article>
+
+      <div class="section-title">
+        <span>我的投资</span>
+        <small id="asset-sub">本月各资产投入</small>
+      </div>
+      <div class="asset-cards" id="asset-cards"></div>
+
+      <button class="section-title ledger-toggle" id="ledger-toggle">
+        <span>流水</span>
+        <small id="ledger-sub">共 0 条 · 展开 ›</small>
+      </button>
+      <div id="ledger" class="ledger-collapsed"></div>
+    </div>
+
+    <!-- FAB -->
+    <button class="fab" id="fab" aria-label="记一笔投资">+</button>
+
+    <!-- 底部导航 -->
+    <nav class="bottom-nav">
+      <button>记账</button>
+      <button>花费</button>
+      <button class="active">投资</button>
+      <button>健康</button>
+    </nav>
+
+    <!-- 资产明细面板 -->
+    <section class="detail-panel" id="detail-panel">
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="status-icons">
+          <span class="signal"><i></i><i></i><i></i><i></i></span>
+          <span class="battery"></span>
+        </span>
+      </div>
+      <div class="detail-head">
+        <button class="back-btn" id="detail-back">‹ 返回</button>
+        <h2 id="detail-title">资产明细</h2>
+      </div>
+      <div class="detail-body" id="detail-body"></div>
+    </section>
+
+    <!-- 记录表单：分步 sheet -->
+    <div class="sheet-mask" id="sheet-mask"></div>
+    <section class="sheet" id="sheet" aria-label="记录投资">
+      <div class="grabber"></div>
+      <div class="sheet-head">
+        <strong>记录投资</strong>
+        <button class="sheet-close" id="sheet-close" aria-label="关闭">✕</button>
+      </div>
+      <div class="steps">
+        <i id="st-1" class="on"></i><i id="st-2"></i><i id="st-3"></i>
+        <span id="step-label">第 1 步 · 选择资产</span>
+      </div>
+
+      <div class="sheet-body">
+        <!-- 第一步：选资产 -->
+        <div class="step-pane on" id="pane-1">
+          <div id="asset-list"></div>
+          <button class="asset-row new" id="btn-new-asset">
+            <i class="dot" style="background:rgba(205,187,154,0.4)"></i>
+            <div><strong>＋ 新增资产</strong><span>名称、类型、币种、平台</span></div>
+            <span></span>
+          </button>
+          <div class="sheet-actions single">
+            <button class="btn-primary" id="to-step-2">下一步</button>
+          </div>
+        </div>
+
+        <!-- 第二步：方向 + 金额 + 币种 + 日期 -->
+        <div class="step-pane" id="pane-2">
+          <div class="seg" id="dir-seg">
+            <button class="active" data-dir="buy">买入</button>
+            <button data-dir="sell">卖出</button>
+          </div>
+          <p class="field-label">金额</p>
+          <div class="amount-input">
+            <span class="cur" id="amount-cur">¥</span>
+            <input id="amount" type="number" inputmode="decimal" min="0" placeholder="0.00" />
+          </div>
+          <p class="field-label">币种</p>
+          <div class="seg tri" id="cur-seg">
+            <button class="active" data-cur="CNY">CNY</button>
+            <button data-cur="USD">USD</button>
+            <button data-cur="HKD">HKD</button>
+          </div>
+          <p class="field-label">日期</p>
+          <div class="input-line">
+            <input id="date" type="date" max="2026-09-25" />
+          </div>
+          <p class="field-hint">不能记录未来日期</p>
+          <div class="sheet-actions">
+            <button class="btn-ghost" data-back="1">上一步</button>
+            <button class="btn-primary" id="to-step-3">下一步</button>
+          </div>
+        </div>
+
+        <!-- 第三步：汇率确认 + 折算预览 + 保存 -->
+        <div class="step-pane" id="pane-3">
+          <div id="fx-block" hidden>
+            <p class="field-label" style="margin-top:0">汇率（1 <span id="fx-cur">USD</span> = ? CNY）</p>
+            <div class="input-line">
+              <input id="fx-rate" type="number" inputmode="decimal" min="0" step="0.01" value="7.10" />
+            </div>
+          </div>
+          <div class="fx-preview">
+            <span id="preview-label">人民币折算</span>
+            <strong id="preview-value">≈ ¥0.00</strong>
+          </div>
+          <div class="sheet-actions">
+            <button class="btn-ghost" data-back="2">上一步</button>
+            <button class="btn-primary" id="btn-save">保存草稿</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 新增资产小表单 -->
+    <div class="mini-mask" id="mini-mask">
+      <div class="mini-card">
+        <h2>新增资产</h2>
+        <div class="input-line"><input id="na-name" placeholder="名称，如 中证红利ETF" /></div>
+        <div class="input-line">
+          <select id="na-type">
+            <option>股票</option>
+            <option selected>基金</option>
+            <option>ETF</option>
+            <option>债券</option>
+            <option>现金</option>
+            <option>其他</option>
+          </select>
+        </div>
+        <div class="seg tri" id="na-cur-seg">
+          <button class="active" data-cur="CNY">CNY</button>
+          <button data-cur="USD">USD</button>
+          <button data-cur="HKD">HKD</button>
+        </div>
+        <div class="input-line"><input id="na-platform" placeholder="平台，如 华泰证券" /></div>
+        <div class="sheet-actions">
+          <button class="btn-ghost" id="na-cancel">取消</button>
+          <button class="btn-primary" id="na-save">保存资产</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast">已保存草稿，待同步</div>
+  </div>
+
+  <script>
+    // ---------- 假数据 ----------
+    const TODAY = "2026-09-25";
+    const FX = { USD: 7.10, HKD: 0.91 };
+    const CUR_SYMBOL = { CNY: "¥", USD: "$", HKD: "HK$" };
+    const DOTS = ["", "gold", "blue", "rose", "dark"];
+    const BASE_INVESTED = 284470.60; // records 之前的历史累计净投入
+
+    let assets = [
+      { name: "沪深300ETF", type: "ETF", cur: "CNY", platform: "华泰证券", dot: "dark", lastMonthValue: 88200.00 },
+      { name: "纳指100ETF(QDII)", type: "基金", cur: "USD", platform: "且慢", dot: "blue", lastMonthValue: 36400.00 },
+      { name: "标普500ETF联接", type: "基金", cur: "CNY", platform: "且慢", dot: "", lastMonthValue: 24760.00 },
+      { name: "黄金ETF", type: "ETF", cur: "CNY", platform: "华泰证券", dot: "gold", lastMonthValue: 19500.00 },
+      { name: "美元活期", type: "现金", cur: "USD", platform: "汇丰香港", dot: "rose", lastMonthValue: 29480.00 },
+      // 沉默资产：本月无流水，不进「我的投资」卡，只出现在记录表单的资产列表
+      { name: "恒生科技ETF", type: "ETF", cur: "HKD", platform: "华泰证券", dot: "", lastMonthValue: 58000.00 },
+      { name: "短债基金", type: "债券", cur: "CNY", platform: "且慢", dot: "dark", lastMonthValue: 42000.00 },
+    ];
+
+    // 选中月份 → 上月末总市值参考口径（月末更新时填写）
+    const MONTH_END_VALUE = {
+      "2026-09": { label: "8 月末", value: 298340.00 },
+      "2026-08": { label: "7 月末", value: 291500.00 },
+      "2026-07": { label: "6 月末", value: 285900.00 },
+    };
+
+    // 全部区块从这个数组派生；synced=false 即待同步草稿
+    let records = [
+      { date: "2026-09-24", asset: "黄金ETF", dir: "buy", amount: 2000, cur: "CNY", rate: null, platform: "华泰证券", synced: false },
+      { date: "2026-09-22", asset: "纳指100ETF(QDII)", dir: "buy", amount: 800, cur: "USD", rate: 7.10, platform: "且慢", synced: false },
+      { date: "2026-09-18", asset: "沪深300ETF", dir: "buy", amount: 5000, cur: "CNY", rate: null, platform: "华泰证券", synced: true },
+      { date: "2026-09-11", asset: "标普500ETF联接", dir: "buy", amount: 3000, cur: "CNY", rate: null, platform: "且慢", synced: true },
+      { date: "2026-09-08", asset: "标普500ETF联接", dir: "buy", amount: 2000, cur: "CNY", rate: null, platform: "且慢", synced: true },
+      { date: "2026-09-05", asset: "美元活期", dir: "sell", amount: 500, cur: "USD", rate: 7.10, platform: "汇丰香港", synced: true },
+      { date: "2026-09-02", asset: "纳指100ETF(QDII)", dir: "buy", amount: 300, cur: "USD", rate: 7.10, platform: "且慢", synced: true },
+      { date: "2026-08-29", asset: "黄金ETF", dir: "buy", amount: 1500, cur: "CNY", rate: null, platform: "华泰证券", synced: true },
+      { date: "2026-08-25", asset: "纳指100ETF(QDII)", dir: "buy", amount: 300, cur: "USD", rate: 7.10, platform: "且慢", synced: true },
+      { date: "2026-08-12", asset: "沪深300ETF", dir: "sell", amount: 2000, cur: "CNY", rate: null, platform: "华泰证券", synced: true },
+      { date: "2026-07-20", asset: "标普500ETF联接", dir: "buy", amount: 3000, cur: "CNY", rate: null, platform: "且慢", synced: true },
+      { date: "2026-07-06", asset: "美元活期", dir: "buy", amount: 1000, cur: "USD", rate: 7.12, platform: "汇丰香港", synced: true },
+    ];
+
+    // 月份列表：10 月起为未来，置灰不可选
+    const MONTHS = [
+      { key: "2026-10", label: "2026 年 10 月", disabled: true },
+      { key: "2026-09", label: "2026 年 9 月", disabled: false },
+      { key: "2026-08", label: "2026 年 8 月", disabled: false },
+      { key: "2026-07", label: "2026 年 7 月", disabled: false },
+    ];
+
+    const state = { month: "2026-09", expanded: null, ledgerOpen: false };
+    const form = { asset: 0, dir: "buy", cur: "CNY" };
+    let newAssetCur = "CNY";
+
+    const $ = (id) => document.getElementById(id);
+    const phone = $("phone");
+    const fmtCny = (n) =>
+      "¥" + n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtAmt = (r) =>
+      CUR_SYMBOL[r.cur] + r.amount.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const cnyOf = (r) => (r.cur === "CNY" ? r.amount : r.amount * (r.rate || FX[r.cur]));
+    const inMonth = (r, m) => r.date.startsWith(m);
+    const monthNum = (m) => Number(m.slice(5, 7));
+    const assetOf = (name) => assets.find((a) => a.name === name);
+    const shortDate = (d) => d.slice(5).replace("-", ".");
+    const longDate = (d) => Number(d.slice(5, 7)) + " 月 " + Number(d.slice(8, 10)) + " 日";
+
+    // ---------- 月份筛选 ----------
+    function renderMonthMenu() {
+      const menu = $("month-menu");
+      menu.innerHTML = "";
+      MONTHS.forEach((m) => {
+        const b = document.createElement("button");
+        b.disabled = m.disabled;
+        b.className = m.key === state.month ? "current" : "";
+        b.innerHTML = "<span>" + m.label + (m.disabled ? "（未来）" : "") + "</span>" +
+          (m.key === state.month ? '<span class="tick">✓</span>' : "<span></span>");
+        if (!m.disabled) {
+          b.addEventListener("click", () => {
+            state.month = m.key;
+            state.expanded = null;
+            closeMonthMenu();
+            phone.classList.remove("detail-open");
+            renderAll();
+          });
+        }
+        menu.appendChild(b);
+      });
+    }
+    function closeMonthMenu() { $("month-menu").classList.remove("open"); }
+    $("month-pill").addEventListener("click", (e) => {
+      e.stopPropagation();
+      $("month-menu").classList.toggle("open");
+    });
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".mobile-header")) closeMonthMenu();
+    });
+
+    // ---------- 区块渲染 ----------
+    function monthRecords() {
+      return records.filter((r) => inMonth(r, state.month)).sort((a, b) => b.date.localeCompare(a.date));
+    }
+
+    function renderHero() {
+      const rs = monthRecords();
+      const net = rs.reduce((s, r) => s + (r.dir === "buy" ? cnyOf(r) : -cnyOf(r)), 0);
+      $("hero-label").textContent = monthNum(state.month) + " 月净买入（折人民币）";
+      $("hero-value").textContent = (net < 0 ? "−" : "") + fmtCny(Math.abs(net)).replace("¥", "¥ ");
+      const total = BASE_INVESTED + records.reduce((s, r) => s + (r.dir === "buy" ? cnyOf(r) : -cnyOf(r)), 0);
+      $("hero-total").textContent = fmtCny(total);
+      const mv = MONTH_END_VALUE[state.month];
+      $("hero-mv-label").textContent = mv.label + "总市值";
+      $("hero-mv-value").textContent = fmtCny(mv.value);
+    }
+
+    function renderSyncBar() {
+      const rs = monthRecords();
+      const pending = rs.filter((r) => !r.synced).length;
+      const done = rs.length - pending;
+      $("sync-text").textContent = "待同步 " + pending + " 条 · 已同步 " + done + " 条";
+    }
+
+    function dirTag(r) {
+      return '<span class="dir-tag ' + r.dir + '">' + (r.dir === "buy" ? "买入" : "卖出") + "</span>";
+    }
+    function amountHtml(r) {
+      const sign = r.dir === "buy" ? "−" : "+";
+      let h = '<b class="' + r.dir + '">' + sign + fmtAmt(r) + "</b>";
+      if (r.cur !== "CNY") h += "<small>≈ " + fmtCny(cnyOf(r)) + "</small>";
+      return h;
+    }
+
+    function renderAssetCards() {
+      const rs = monthRecords();
+      const wrap = $("asset-cards");
+      wrap.innerHTML = "";
+      const names = assets.map((a) => a.name).filter((n) => rs.some((r) => r.asset === n));
+      if (!names.length) {
+        wrap.innerHTML = '<div class="empty-hint">本月还没有投资记录</div>';
+        return;
+      }
+      names.forEach((name) => {
+        const a = assetOf(name);
+        const list = rs.filter((r) => r.asset === name);
+        const buys = list.filter((r) => r.dir === "buy").reduce((s, r) => s + cnyOf(r), 0);
+        const sells = list.filter((r) => r.dir === "sell").reduce((s, r) => s + cnyOf(r), 0);
+        const net = buys - sells;
+        const open = state.expanded === name;
+
+        const card = document.createElement("div");
+        card.className = "asset-card" + (open ? " open" : "");
+
+        const head = document.createElement("button");
+        head.className = "asset-card-head";
+        head.innerHTML =
+          '<i class="dot ' + a.dot + '"></i>' +
+          "<div><strong>" + name + "</strong><span class=\"sub\">" + a.type + " · " + a.cur + " · " + a.platform + "</span></div>" +
+          '<span class="net">本月净投入 ' + (net < 0 ? "−" : "") + fmtCny(Math.abs(net)) + "<i>›</i></span>";
+        head.addEventListener("click", () => {
+          state.expanded = open ? null : name;
+          renderAssetCards();
+        });
+        card.appendChild(head);
+
+        if (open) {
+          const body = document.createElement("div");
+          body.className = "asset-card-body";
+          let recs = "";
+          list.slice(0, 3).forEach((r) => {
+            recs += '<div class="mini-rec"><span class="l">' + dirTag(r) + "<span>" + shortDate(r.date) + "</span></span>" +
+              '<span class="r">' + (r.dir === "buy" ? "−" : "+") + fmtAmt(r) +
+              (r.cur !== "CNY" ? "<small>≈ " + fmtCny(cnyOf(r)) + "</small>" : "") + "</span></div>";
+          });
+          body.innerHTML =
+            (a.lastMonthValue != null
+              ? '<div class="mv-ref">' + MONTH_END_VALUE[state.month].label + "市值 " + fmtCny(a.lastMonthValue) + "（参考）</div>"
+              : "") +
+            '<div class="stat-rows">' +
+            "<div><span>买入合计</span><b>" + fmtCny(buys) + "</b></div>" +
+            "<div><span>卖出合计</span><b>" + fmtCny(sells) + "</b></div>" +
+            "<div><span>净投入</span><b>" + (net < 0 ? "−" : "") + fmtCny(Math.abs(net)) + "</b></div>" +
+            "</div>" + recs +
+            '<button class="detail-link">查看明细 ›</button>';
+          body.querySelector(".detail-link").addEventListener("click", () => openDetail(name));
+          card.appendChild(body);
+        }
+        wrap.appendChild(card);
+      });
+    }
+
+    function renderLedger() {
+      const rs = monthRecords();
+      const wrap = $("ledger");
+      wrap.innerHTML = "";
+      $("ledger-sub").textContent =
+        "共 " + rs.length + " 条 · " + (state.ledgerOpen ? "收起 ⌃" : "展开 ›");
+      wrap.classList.toggle("ledger-collapsed", !state.ledgerOpen);
+      if (!rs.length) {
+        wrap.innerHTML = '<div class="empty-hint">本月还没有流水</div>';
+        return;
+      }
+      let lastDate = null;
+      let listEl = null;
+      rs.forEach((r) => {
+        if (r.date !== lastDate) {
+          lastDate = r.date;
+          const g = document.createElement("div");
+          g.className = "date-group";
+          g.textContent = longDate(r.date);
+          wrap.appendChild(g);
+          listEl = document.createElement("div");
+          listEl.className = "ledger-list";
+          wrap.appendChild(listEl);
+        }
+        const row = document.createElement("div");
+        row.className = "ledger-row";
+        row.innerHTML =
+          dirTag(r) +
+          "<div><strong>" + r.asset + '</strong><span class="sub">' + r.platform + (r.synced ? "" : " · 待同步") + "</span></div>" +
+          '<div class="amount">' + amountHtml(r) + "</div>";
+        listEl.appendChild(row);
+      });
+    }
+
+    function renderAll() {
+      $("month-label").textContent = MONTHS.find((m) => m.key === state.month).label;
+      renderMonthMenu();
+      renderHero();
+      renderSyncBar();
+      renderAssetCards();
+      renderLedger();
+    }
+
+    $("ledger-toggle").addEventListener("click", () => {
+      state.ledgerOpen = !state.ledgerOpen;
+      renderLedger();
+    });
+
+    // ---------- 资产明细面板 ----------
+    function openDetail(name) {
+      const a = assetOf(name);
+      const list = monthRecords().filter((r) => r.asset === name);
+      const buys = list.filter((r) => r.dir === "buy").reduce((s, r) => s + cnyOf(r), 0);
+      const sells = list.filter((r) => r.dir === "sell").reduce((s, r) => s + cnyOf(r), 0);
+      $("detail-title").textContent = name;
+      let html =
+        '<div class="detail-summary">' +
+        "<div><span>买入合计</span><b>" + fmtCny(buys) + "</b></div>" +
+        "<div><span>卖出合计</span><b>" + fmtCny(sells) + "</b></div>" +
+        "<div><span>净投入</span><b>" + (buys - sells < 0 ? "−" : "") + fmtCny(Math.abs(buys - sells)) + "</b></div>" +
+        "</div>" +
+        (a.lastMonthValue != null
+          ? '<div class="mv-ref">' + MONTH_END_VALUE[state.month].label + "市值 " + fmtCny(a.lastMonthValue) + "（参考）</div>"
+          : "");
+      let lastDate = null;
+      list.forEach((r) => {
+        if (r.date !== lastDate) {
+          lastDate = r.date;
+          html += '<div class="date-group">' + longDate(r.date) + "</div>";
+        }
+        html +=
+          '<div class="ledger-row" style="margin-bottom:10px">' + dirTag(r) +
+          "<div><strong>" + fmtAmt(r) + '</strong><span class="sub">' + r.platform + "</span></div>" +
+          '<div class="amount">' + (r.cur !== "CNY" ? "<small>≈ " + fmtCny(cnyOf(r)) + "</small>" : "") + "</div></div>";
+      });
+      $("detail-body").innerHTML = html;
+      $("detail-body").scrollTop = 0;
+      phone.classList.add("detail-open");
+    }
+    $("detail-back").addEventListener("click", () => phone.classList.remove("detail-open"));
+
+    // ---------- 同步状态条（本模块只显示，不同步） ----------
+    $("sync-bar").addEventListener("click", () => showToast("请在记账页顶部统一同步全部草稿"));
+
+    // ---------- 记录表单 ----------
+    function renderAssetList() {
+      $("asset-list").innerHTML = "";
+      assets.forEach((a, i) => {
+        const btn = document.createElement("button");
+        btn.className = "asset-row" + (i === form.asset ? " selected" : "");
+        btn.innerHTML =
+          '<i class="dot ' + a.dot + '"></i>' +
+          "<div><strong>" + a.name + "</strong><span>" + a.type + " · " + a.cur + " · " + a.platform + "</span></div>" +
+          '<span class="check">✓</span>';
+        btn.addEventListener("click", () => {
+          form.asset = i;
+          form.cur = a.cur;
+          syncCurrencySeg();
+          renderAssetList();
+        });
+        $("asset-list").appendChild(btn);
+      });
+    }
+
+    function goStep(n) {
+      [1, 2, 3].forEach((i) => {
+        $("pane-" + i).classList.toggle("on", i === n);
+        $("st-" + i).classList.toggle("on", i <= n);
+      });
+      $("step-label").textContent =
+        "第 " + n + " 步 · " + { 1: "选择资产", 2: "方向与金额", 3: "汇率与确认" }[n];
+      if (n === 3) prepareStep3();
+    }
+
+    function openForm() {
+      renderAssetList();
+      goStep(1);
+      phone.classList.add("form-open");
+    }
+    function closeForm() { phone.classList.remove("form-open"); }
+
+    $("fab").addEventListener("click", openForm);
+    $("sheet-close").addEventListener("click", closeForm);
+    $("sheet-mask").addEventListener("click", closeForm);
+    $("to-step-2").addEventListener("click", () => goStep(2));
+    $("to-step-3").addEventListener("click", () => goStep(3));
+    document.querySelectorAll("[data-back]").forEach((b) =>
+      b.addEventListener("click", () => goStep(Number(b.dataset.back)))
+    );
+
+    $("dir-seg").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      form.dir = b.dataset.dir;
+      [...$("dir-seg").children].forEach((x) => x.classList.toggle("active", x === b));
+    });
+
+    function syncCurrencySeg() {
+      [...$("cur-seg").children].forEach((x) =>
+        x.classList.toggle("active", x.dataset.cur === form.cur)
+      );
+      $("amount-cur").textContent = CUR_SYMBOL[form.cur];
+    }
+
+    $("cur-seg").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      form.cur = b.dataset.cur;
+      syncCurrencySeg();
+    });
+
+    function convertedCny() {
+      const amt = parseFloat($("amount").value) || 0;
+      if (form.cur === "CNY") return amt;
+      const rate = parseFloat($("fx-rate").value) || 0;
+      return amt * rate;
+    }
+
+    function updatePreview() {
+      if (form.cur === "CNY") {
+        $("preview-label").textContent = "记录金额";
+        $("preview-value").textContent = fmtCny(convertedCny());
+      } else {
+        $("preview-label").textContent = "按汇率 " + (parseFloat($("fx-rate").value) || 0).toFixed(2) + " 折算";
+        $("preview-value").textContent = "≈ " + fmtCny(convertedCny());
+      }
+    }
+
+    function prepareStep3() {
+      const foreign = form.cur !== "CNY";
+      $("fx-block").hidden = !foreign;
+      if (foreign) {
+        $("fx-cur").textContent = form.cur;
+        $("fx-rate").value = FX[form.cur].toFixed(2);
+      }
+      updatePreview();
+    }
+
+    $("fx-rate").addEventListener("input", updatePreview);
+    $("amount").addEventListener("input", updatePreview);
+
+    // ---------- 新增资产 ----------
+    function openMini() { phone.classList.add("mini-open"); }
+    $("btn-new-asset").addEventListener("click", openMini);
+    $("na-cancel").addEventListener("click", () => phone.classList.remove("mini-open"));
+    $("na-cur-seg").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      newAssetCur = b.dataset.cur;
+      [...$("na-cur-seg").children].forEach((x) => x.classList.toggle("active", x === b));
+    });
+    $("na-save").addEventListener("click", () => {
+      const name = $("na-name").value.trim() || "未命名资产";
+      assets.push({
+        name,
+        type: $("na-type").value,
+        cur: newAssetCur,
+        platform: $("na-platform").value.trim() || "未填写平台",
+        dot: DOTS[assets.length % DOTS.length],
+      });
+      form.asset = assets.length - 1;
+      form.cur = newAssetCur;
+      syncCurrencySeg();
+      $("na-name").value = "";
+      $("na-platform").value = "";
+      phone.classList.remove("mini-open");
+      renderAssetList();
+    });
+
+    // ---------- 保存 ----------
+    function showToast(text) {
+      const t = $("toast");
+      t.textContent = text;
+      t.classList.add("show");
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => t.classList.remove("show"), 2200);
+    }
+
+    $("btn-save").addEventListener("click", () => {
+      const a = assets[form.asset];
+      const amt = parseFloat($("amount").value) || 0;
+      let d = $("date").value || TODAY;
+      if (d > TODAY) d = TODAY; // 双保险：不允许未来日期
+      records.push({
+        date: d,
+        asset: a.name,
+        dir: form.dir,
+        amount: amt,
+        cur: form.cur,
+        rate: form.cur !== "CNY" ? parseFloat($("fx-rate").value) || FX[form.cur] : null,
+        platform: a.platform,
+        synced: false,
+      });
+      closeForm();
+      $("amount").value = "";
+      renderAll();
+      showToast("已保存草稿，待同步");
+    });
+
+    // ---------- 初始化 ----------
+    $("date").value = TODAY;
+    $("date").max = TODAY;
+    renderAll();
+    if (location.hash === "#open-form") openForm();
+    if (location.hash === "#expand-first") {
+      const first = monthRecords()[0];
+      if (first) { state.expanded = first.asset; renderAssetCards(); }
+    }
+  </script>
+</body>
+</html>

@@ -74,6 +74,12 @@ One SQLite file, separated by tables:
 - Single-day DCA overrides are stored in `monthly_dca_cashflow_overrides`.
 - Confirmed DCA buys are written into `investment_cashflows` with `source_kind = 'dca_auto'`.
 
+## Mobile Investment Flows
+
+- The mobile PWA 「投资」tab records buy/sell drafts (`record_kind = 'investment_flow'`) and syncs them to the desktop inbox (`mobile_sync_inbox`).
+- New assets created on mobile are inserted into `assets` at sync time (`monthly_update_managed = 1`, fallback category `asset_cat_other`).
+- Cashflows are not written at sync time. At month-end, pending flows are merged into the asset entry list, and saved with `source_kind = 'mobile_investment'` after user confirmation.
+
 ## Historical Import Rules
 
 - `scripts/import_numbers_history.py` rebuilds 2025-01 to 2026-04 historical records from Numbers exports.
