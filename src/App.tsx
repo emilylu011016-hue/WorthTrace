@@ -4970,7 +4970,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
           previous_unbilled_amount: Number(card.previous_unbilled_amount) || 0,
           previous_unbilled_override: Boolean(card.previous_unbilled_override),
           previous_unbilled_override_reason: card.previous_unbilled_override_reason || null,
-          net_adjustment: -(Number(card.billed_amount) || 0) - (Number(card.unbilled_amount) || 0) + (Number(card.previous_unbilled_amount) || 0),
+          net_adjustment: -(Number(card.billed_amount) || 0) - (Number(card.unbilled_amount) || 0),
           confirmed: true
         }))
       });

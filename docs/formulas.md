@@ -13,12 +13,20 @@ If income is zero, savings rate is treated as unavailable.
 
 ## Credit Card Net Adjustment
 
+Credit card debt is treated as a liability and subtracted from the gross asset
+value. The net adjustment for a single card is the negative of the total amount
+currently owed:
+
 ```text
 credit_card_net_adjustment =
   - current_billed_amount
   - current_unbilled_amount
-  + previous_unbilled_amount
 ```
+
+`current_billed_amount` is the amount on the current statement and
+`current_unbilled_amount` is any pending/unbilled spending. The previous month's
+unbilled amount is not added back because it is either already included in the
+current billed amount or still reflected in the current unbilled amount.
 
 For multiple cards:
 

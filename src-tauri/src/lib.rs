@@ -25,7 +25,7 @@ const MOBILE_PWA_STYLES: &str = include_str!("../../mobile/pwa/styles.css");
 const MOBILE_PWA_SW: &str = include_str!("../../mobile/pwa/sw.js");
 const MOBILE_PWA_MANIFEST: &str = include_str!("../../mobile/pwa/manifest.webmanifest");
 const MOBILE_PWA_LOGO: &str = include_str!("../../mobile/assets/logo-qianji-a.svg");
-const MOBILE_PWA_VERSION: &str = "0.4.1";
+const MOBILE_PWA_VERSION: &str = "0.4.2";
 
 struct Database {
   work_connection: Mutex<Connection>,
@@ -9605,7 +9605,7 @@ fn save_credit_card_entries(
           |row| row.get::<_, i64>(0),
         )? > 0
     };
-    let net_adjustment = -entry.billed_amount - entry.unbilled_amount + previous_unbilled_amount;
+    let net_adjustment = -entry.billed_amount - entry.unbilled_amount;
     connection.execute(
       "
       insert into monthly_credit_card_entries (

@@ -528,7 +528,7 @@ def import_credit_cards(conn: sqlite3.Connection, stats: Counter):
             unbilled = normalize_amount(ws.cell(unbilled_row, col).value)
             if billed == 0 and previous == 0 and unbilled == 0:
                 continue
-            net_adjustment = round(-billed - unbilled + previous, 2)
+            net_adjustment = round(-billed - unbilled, 2)
             entry_id = make_id("credit_month", f"{card_id}|{period}")
             conn.execute(
                 """
