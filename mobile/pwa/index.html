@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f8f0e2" />
   <title>钱迹WorthTrace Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?mobileVersion=0.4.0" />
+  <link rel="stylesheet" href="./styles.css?mobileVersion=0.4.1" />
 </head>
 <body class="theme-champagne privacy-on needs-binding">
   <main class="mobile-shell">
@@ -228,8 +228,11 @@
       </button>
 
       <article class="hero-card invest-hero">
-        <p id="investHeroTitle">本月净买入（折人民币）</p>
-        <strong id="investHeroNet" class="money" data-value="CNY 0.00">••••••</strong>
+        <p id="investHeroTitle">本月买入 / 卖出（折人民币）</p>
+        <div class="invest-hero-split">
+          <div class="invest-hero-row"><span>买入</span><strong id="investHeroBuy" class="money" data-value="CNY 0.00">••••••</strong></div>
+          <div class="invest-hero-row"><span>卖出</span><strong id="investHeroSell" class="money" data-value="CNY 0.00">••••••</strong></div>
+        </div>
         <div class="invest-hero-lines">
           <p id="investHeroTotalRow">累计投入（总本金） <b id="investHeroTotal" class="money" data-value="CNY 0.00">••••••</b>（全量口径，不随月份变化）</p>
           <p id="investHeroMvRow"><span id="investHeroMvLabel">上月末总市值</span> <b id="investHeroMv" class="money" data-value="CNY 0.00">••••••</b>（月末更新，参考口径）</p>
@@ -517,6 +520,6 @@
 
   <div class="info-toast" id="infoToast" role="status" aria-live="polite" hidden></div>
 
-  <script src="./app.js?mobileVersion=0.4.0" type="module"></script>
+  <script src="./app.js?mobileVersion=0.4.1" type="module"></script>
 </body>
 </html>

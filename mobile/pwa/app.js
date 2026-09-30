@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.4.0";
+const MOBILE_APP_VERSION = "0.4.1";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -212,7 +212,8 @@ const investTodayButton = document.querySelector("#investTodayButton");
 const investSyncBar = document.querySelector("#investSyncBar");
 const investSyncText = document.querySelector("#investSyncText");
 const investHeroTitle = document.querySelector("#investHeroTitle");
-const investHeroNet = document.querySelector("#investHeroNet");
+const investHeroBuy = document.querySelector("#investHeroBuy");
+const investHeroSell = document.querySelector("#investHeroSell");
 const investHeroTotalRow = document.querySelector("#investHeroTotalRow");
 const investHeroTotal = document.querySelector("#investHeroTotal");
 const investHeroMvRow = document.querySelector("#investHeroMvRow");
@@ -3664,10 +3665,17 @@ function renderInvestView() {
   const syncedCount = state.records.filter((record) => record.record_kind === "investment_flow" && record.sync_status === "synced" && !isDeletedRecord(record)).length;
   investSyncText.textContent = `待同步 ${pendingCount} 条 · 已同步 ${syncedCount} 条`;
 
-  const net = records.reduce((sum, record) => sum + investFlowSignedCny(record), 0);
-  investHeroTitle.textContent = `${monthLabel}净买入（折人民币）`;
-  investHeroNet.dataset.value = signedCnyLabel(net);
-  investHeroNet.textContent = state.privacy ? "••••••" : investHeroNet.dataset.value;
+  const buyTotal = records
+    .filter((record) => investFlowType(record) === "buy")
+    .reduce((sum, record) => sum + investFlowAmountCny(record), 0);
+  const sellTotal = records
+    .filter((record) => investFlowType(record) === "sell")
+    .reduce((sum, record) => sum + investFlowAmountCny(record), 0);
+  investHeroTitle.textContent = `${monthLabel}买入 / 卖出（折人民币）`;
+  investHeroBuy.dataset.value = formatPlainMoney(buyTotal);
+  investHeroBuy.textContent = state.privacy ? "••••••" : investHeroBuy.dataset.value;
+  investHeroSell.dataset.value = formatPlainMoney(sellTotal);
+  investHeroSell.textContent = state.privacy ? "••••••" : investHeroSell.dataset.value;
 
   const localDraftNet = investmentFlowRecords()
     .filter((record) => record.sync_status !== "synced")
@@ -3743,7 +3751,7 @@ function renderInvestAssetCards(records, month, prevMonth) {
         <button class="invest-asset-card-head" data-invest-expand="${escapeHtml(entry.key)}" type="button">
           <i class="tile ${INVEST_DOT_CLASSES[index % INVEST_DOT_CLASSES.length]}"></i>
           <div><strong>${escapeHtml(asset.name || "未命名资产")}${asset.is_dca ? '<span class="invest-dca-tag">定投</span>' : ""}</strong><span class="sub">${escapeHtml(sub || "手机新增资产")}</span></div>
-          <span class="net">本月净投入 ${investPrivacy(signedCnyLabel(entry.net))}<i>›</i></span>
+          <span class="net">买入 ${investPrivacy(formatPlainMoney(entry.buys))} · 卖出 ${investPrivacy(formatPlainMoney(entry.sells))}<i>›</i></span>
         </button>
         ${open ? `
         <div class="invest-asset-card-body">
