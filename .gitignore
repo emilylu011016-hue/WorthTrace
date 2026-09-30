@@ -36,3 +36,5 @@ demo/edit/
 *.mov
 *.gif
 worthtrace_video*/
+.vercel
+.env*
