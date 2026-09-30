@@ -43,7 +43,7 @@ import {
   Upload,
   WalletCards
 } from "lucide-react";
-import { type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 type PortfolioTargetSummary = {
   category: string;
@@ -531,6 +531,7 @@ type AssetEntryItem = {
   dividend?: string;
   month_status?: string;
   confirmed?: boolean;
+  dirty?: boolean;
   cashflows?: AssetCashflowItem[];
   dca_plans?: DcaPlanItem[];
 };
@@ -1883,6 +1884,7 @@ export function App() {
   const [addingCategoryRowId, setAddingCategoryRowId] = useState<string | null>(null);
   const [newCategoryDraft, setNewCategoryDraft] = useState<NewCategoryDraft>({ name: "", rigidity: "flexible", isPersonal: true, note: "" });
   const [assetItems, setAssetItems] = useState<AssetEntryItem[]>([]);
+  const initialAssetItemsRef = useRef<Record<string, AssetEntryItem>>({});
   const [clearedWithoutSellOverrides, setClearedWithoutSellOverrides] = useState<Record<string, boolean>>({});
   const [savingAssets, setSavingAssets] = useState(false);
   const [showAssetCreator, setShowAssetCreator] = useState(false);
@@ -2806,7 +2808,9 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
 			      setOnboardingMainTargetDraftPercents({});
 			      setOnboardingSkipTargets(Boolean(status.skip_allocation_targets ?? editorTargets.length === 0));
 		      const preferenceAssets = await invoke<AssetEntryItem[]>("get_asset_entry_items", { periodMonth: selectedMonth || nextMonthlyUpdateMonth() });
-			      setAssetItems(normalizeAssetEntryItems(preferenceAssets));
+              const normalizedPreferenceAssets = normalizeAssetEntryItems(preferenceAssets);
+			      setAssetItems(normalizedPreferenceAssets);
+              initialAssetItemsRef.current = Object.fromEntries(normalizedPreferenceAssets.map((asset) => [asset.id, JSON.parse(JSON.stringify(asset))]));
 			      setOnboardingTargets(editorTargets);
 			      setEditedMainTargetIds(new Set());
 			      setOnboardingMainTargetDraftPercents({});
@@ -3433,7 +3437,9 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       if (unmatchedFlows.length) {
         console.warn("[loadReview] 手机投资草稿对应资产不在本月录入清单", unmatchedFlows.map((flow) => flow.asset_name || flow.asset_id));
       }
-      setAssetItems(normalizeAssetEntryItems(mergedAssets));
+      const normalizedMergedAssets = normalizeAssetEntryItems(mergedAssets);
+      setAssetItems(normalizedMergedAssets);
+      initialAssetItemsRef.current = Object.fromEntries(normalizedMergedAssets.map((asset) => [asset.id, JSON.parse(JSON.stringify(asset))]));
       setDcaCashflows(dcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
       setCreditCards(cards);
       if (applyStatus) {
@@ -4792,7 +4798,16 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       setMonthlyMessage("还没有资产清单，请先创建资产。");
       return;
     }
-    const monthAmountIssues = assetItems
+    const assetsToSave = assetItems.filter((asset) => {
+      const initial = initialAssetItemsRef.current[asset.id];
+      const isDirty = !initial || JSON.stringify(asset) !== JSON.stringify(initial);
+      return isDirty || !asset.confirmed;
+    });
+    if (assetsToSave.length === 0) {
+      setSuccessBanner("没有资产需要保存。");
+      return;
+    }
+    const monthAmountIssues = assetsToSave
       .map((asset) => ({ asset, issue: assetMonthAmountIssue(asset) }))
       .filter((item): item is { asset: AssetEntryItem; issue: string } => Boolean(item.issue));
     if (monthAmountIssues.length > 0) {
@@ -4801,7 +4816,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       setMonthlyMessage(message);
       return;
     }
-    const clearedWithoutSellIssues = assetItems
+    const clearedWithoutSellIssues = assetsToSave
       .map((asset) => ({ asset, issue: assetClearedWithoutSellIssue(asset, Boolean(clearedWithoutSellOverrides[asset.id])) }))
       .filter((item): item is { asset: AssetEntryItem; issue: string } => Boolean(item.issue));
     if (clearedWithoutSellIssues.length > 0) {
@@ -4811,31 +4826,31 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       setExpandedAssetIds((current) => ({ ...current, [clearedWithoutSellIssues[0].asset.id]: true }));
       return;
     }
-    const missingDcaPlans = assetItems.filter((asset) => Boolean(asset.is_dca) && (asset.dca_plans ?? []).length === 0);
+    const missingDcaPlans = assetsToSave.filter((asset) => Boolean(asset.is_dca) && (asset.dca_plans ?? []).length === 0);
     if (missingDcaPlans.length > 0) {
       const message = `还有 ${missingDcaPlans.length} 个定投资产缺少定投计划：${missingDcaPlans.map((asset) => asset.name).join("、")}。`;
       setAssetValidationIssue({ message, assetId: missingDcaPlans[0]?.id });
       setMonthlyMessage(message);
       return;
     }
-    const unconfirmedFlows = assetItems.flatMap((asset) =>
+    const unconfirmedFlows = assetsToSave.flatMap((asset) =>
       (asset.cashflows ?? [])
         .filter((flow) => !flow.confirmed)
         .map((flow) => `${asset.name} ${flow.flow_date}`)
     );
     if (unconfirmedFlows.length > 0) {
       const message = `还有 ${unconfirmedFlows.length} 条买入/卖出/分红明细未确认：${unconfirmedFlows.slice(0, 6).join("、")}。`;
-      setAssetValidationIssue({ message, assetId: assetItems.find((asset) => (asset.cashflows ?? []).some((flow) => !flow.confirmed))?.id });
+      setAssetValidationIssue({ message, assetId: assetsToSave.find((asset) => (asset.cashflows ?? []).some((flow) => !flow.confirmed))?.id });
       setMonthlyMessage(message);
       return;
     }
     const latestDcaCashflows = generateDcaCashflowsForAssets(assetItems, selectedMonth, dcaCashflows);
     const missingAssetRates = [
-      ...assetItems
+      ...assetsToSave
         .filter((asset) => isAssetCountedInMonth(asset))
         .filter((asset) => convertAmount(Number(asset.month_end_amount) || 0, monthEndDate(), asset.currency ?? "CNY", "CNY") === null)
         .map((asset) => `${asset.name} 月末市值`),
-      ...assetItems.flatMap((asset) =>
+      ...assetsToSave.flatMap((asset) =>
         [...(asset.cashflows ?? []), ...latestDcaCashflows.filter((flow) => flow.asset_id === asset.id)]
           .filter((flow) => {
             if (mobileFlowAmountCny(flow) !== null) return false;
@@ -4864,7 +4879,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
     try {
       const status = await invoke<MonthlyStepStatus>("save_asset_month_entries", {
         periodMonth: selectedMonth,
-        entries: assetItems.map((asset) => ({
+        entries: assetsToSave.map((asset) => ({
           ...(() => {
             const monthStatus = assetMonthStatus(asset);
             const monthAmount = monthStatus === "held" ? Number(asset.month_end_amount) || 0 : 0;
@@ -4929,7 +4944,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       applyMonthlyStatus(status);
       setAssetValidationIssue(null);
       // 保存成功后才把本次 merge 进来的手机投资草稿标记为已处理；失败则不标记
-      const savedMobileLocalIds = assetItems.flatMap((asset) =>
+      const savedMobileLocalIds = assetsToSave.flatMap((asset) =>
         (asset.cashflows ?? [])
           .filter((flow) => flow.source_kind === "mobile_investment" && flow.mobile_local_id)
           .map((flow) => flow.mobile_local_id as string)
@@ -4943,11 +4958,17 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
         }
       }
       setCompletedSteps((current) => ({ ...current, assets: true }));
-      setAssetItems((current) => current.map((asset) => ({ ...asset, confirmed: true })));
+      const savedAssetIds = new Set(assetsToSave.map((asset) => asset.id));
+      setAssetItems((current) =>
+        current.map((asset) => (savedAssetIds.has(asset.id) ? { ...asset, confirmed: true, dirty: false } : asset))
+      );
+      for (const asset of assetsToSave) {
+        initialAssetItemsRef.current[asset.id] = JSON.parse(JSON.stringify(asset));
+      }
       const nextDcaFlows = await invoke<AssetCashflowItem[]>("get_generated_dca_cashflows", { periodMonth: selectedMonth });
       setDcaCashflows(nextDcaFlows.map((flow) => ({ ...flow, currency: (flow.currency || "CNY") as CurrencyCode })));
       await loadDashboard(monthlyRevisionMonth ?? undefined);
-      setSuccessBanner("资产录入已确认，月末市值和投资现金流已保存。");
+      setSuccessBanner(`${assetsToSave.length} 个资产已确认保存，月末市值和投资现金流已写入。`);
       setMonthlyMessage("资产录入已确认。");
     } catch (err) {
       setSuccessBanner(null);
@@ -4970,7 +4991,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
           previous_unbilled_amount: Number(card.previous_unbilled_amount) || 0,
           previous_unbilled_override: Boolean(card.previous_unbilled_override),
           previous_unbilled_override_reason: card.previous_unbilled_override_reason || null,
-          net_adjustment: -(Number(card.billed_amount) || 0) - (Number(card.unbilled_amount) || 0) + (Number(card.previous_unbilled_amount) || 0),
+          net_adjustment: -(Number(card.billed_amount) || 0) - (Number(card.unbilled_amount) || 0),
           confirmed: true
         }))
       });
@@ -8032,6 +8053,10 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
     const previousSnapshotAssets = assetItems.filter((asset) => Number(asset.previous_month_amount) > 0);
     const dcaAssetCount = assetItems.filter((asset) => asset.is_dca).length;
     const savedAssetCards = assetItems.filter((asset) => asset.confirmed).length;
+    const pendingSaveCount = assetItems.filter((asset) => {
+      const initial = initialAssetItemsRef.current[asset.id];
+      return !initial || JSON.stringify(asset) !== JSON.stringify(initial) || !asset.confirmed;
+    }).length;
     const previousSnapshotMonth = previousPeriodMonth(selectedMonth);
     const hasInheritedAssets = previousSnapshotAssets.length > 0;
     return (
@@ -8048,7 +8073,15 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
               onClick={() => void saveAssetEntries()}
               type="button"
             >
-              {savingAssets ? "保存中..." : completedSteps.assets ? "已确认，可修改" : "确认资产录入"}
+              {savingAssets
+                ? "保存中..."
+                : completedSteps.assets
+                  ? pendingSaveCount > 0
+                    ? `确认 ${pendingSaveCount} 个修改过的资产`
+                    : "已确认，可修改"
+                  : pendingSaveCount > 0
+                    ? `确认 ${pendingSaveCount} 个资产录入`
+                    : "确认资产录入"}
             </button>
             <button className="secondary-button compact" onClick={() => toggleSection("assets")} type="button">
               {expandedSections.assets ? "收起" : "展开"}
@@ -8059,8 +8092,14 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
         {expandedSections.assets ? (
           <>
         <div className="confirm-total">
-          <strong>{completedSteps.assets ? "已确认" : "待整页确认"}</strong>
-          <span>{completedSteps.assets ? "本月资产录入已确认。" : "填写完后整页确认一次。"}</span>
+          <strong>{completedSteps.assets ? (pendingSaveCount > 0 ? "有待保存修改" : "已确认") : "待确认"}</strong>
+          <span>
+            {completedSteps.assets
+              ? pendingSaveCount > 0
+                ? `本月已确认，另有 ${pendingSaveCount} 个资产被修改，点击上方按钮保存。`
+                : "本月资产录入已确认。"
+              : `只需确认 ${pendingSaveCount} 个有变动或未保存的资产，其余已保存的无需重复检查。`}
+          </span>
         </div>
         {monthlyMessage?.includes("资产") || monthlyMessage?.includes("月末市值") || monthlyMessage?.includes("定投") ? (
           <p className="form-message">{monthlyMessage}</p>

@@ -451,7 +451,7 @@ def anonymize_credit_cards(conn: sqlite3.Connection) -> None:
         billed = fake_money(row["billed_amount"], f"card-billed|{row['id']}", minimum=20)
         unbilled = fake_money(row["unbilled_amount"], f"card-unbilled|{row['id']}", minimum=20)
         previous = fake_money(row["previous_unbilled_amount"], f"card-previous|{row['id']}", minimum=20)
-        net = round(-billed - unbilled + previous, 2)
+        net = round(-billed - unbilled, 2)
         conn.execute(
             """
             update monthly_credit_card_entries
@@ -473,7 +473,7 @@ def anonymize_credit_cards(conn: sqlite3.Connection) -> None:
         billed = fake_money(row["current_billed_amount"], f"old-card-billed|{row['id']}", minimum=20)
         unbilled = fake_money(row["current_unbilled_amount"], f"old-card-unbilled|{row['id']}", minimum=20)
         previous = fake_money(row["previous_unbilled_amount"], f"old-card-previous|{row['id']}", minimum=20)
-        net = round(-billed - unbilled + previous, 2)
+        net = round(-billed - unbilled, 2)
         conn.execute(
             """
             update credit_card_adjustments
