@@ -1,4 +1,4 @@
-const MOBILE_APP_VERSION = "0.4.2";
+const MOBILE_APP_VERSION = "0.4.3";
 const DB_NAME = "worthtrace_mobile_v3";
 const DB_VERSION = 1;
 const RECORD_STORE = "offline_records";
@@ -801,11 +801,23 @@ function isDeletedRecord(record) {
 }
 
 function transactionRecordsForMonth(month) {
-  return state.records.filter((record) => {
+  const dashboardRecords = (mobileDashboardSnapshot.transactionDetails || []).map((record) => ({
+    ...record,
+    record_kind: "transaction",
+    sync_status: "synced",
+    local_id: `dashboard-${record.transaction_date}-${record.transaction_type}-${record.category}-${record.amount}`
+  }));
+  const mergedRecords = [...dashboardRecords, ...state.records];
+  const seen = new Set();
+  const uniqueRecords = mergedRecords.filter((record) => {
     if ((record.record_kind || "transaction") !== "transaction" || isDeletedRecord(record)) return false;
     if (record.transaction_type !== "income" && record.transaction_type !== "expense") return false;
+    const key = [record.transaction_date, record.transaction_type, record.amount, record.category || "未分类", record.note || ""].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
     return String(record.transaction_date || "").slice(0, 7) === month;
   });
+  return uniqueRecords;
 }
 
 function dateFromKey(value) {
