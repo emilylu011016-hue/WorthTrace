@@ -2033,6 +2033,47 @@ fn mobile_investment_flow_from_payload(
   }))
 }
 
+fn save_mobile_investment_fx_rate(tx: &rusqlite::Transaction<'_>, payload: &serde_json::Value) -> Result<(), AppError> {
+  let Some(parsed) = mobile_investment_flow_from_payload("investment_flow", None, Some(payload))? else {
+    return Ok(());
+  };
+  if parsed.currency == "CNY" || parsed.fx_rate_to_cny <= 0.0 {
+    return Ok(());
+  }
+  let id = make_id("fx_rate", &format!("{}|{}|CNY", parsed.flow_date, parsed.currency));
+  tx.execute(
+    "
+    insert into fx_rate_cache (
+      id, rate_date, source_date, from_currency, to_currency, rate, primary_source,
+      secondary_rate, secondary_source, variance_pct, status, message, fetched_at, updated_at
+    )
+    values (?1, ?2, ?3, ?4, ?5, ?6, ?7, null, null, null, 'ready', ?8, current_timestamp, current_timestamp)
+    on conflict(rate_date, from_currency, to_currency) do update set
+      source_date = excluded.source_date,
+      rate = excluded.rate,
+      primary_source = excluded.primary_source,
+      secondary_rate = null,
+      secondary_source = null,
+      variance_pct = null,
+      status = excluded.status,
+      message = excluded.message,
+      fetched_at = current_timestamp,
+      updated_at = current_timestamp
+    ",
+    params![
+      id,
+      parsed.flow_date,
+      parsed.flow_date,
+      parsed.currency,
+      "CNY",
+      parsed.fx_rate_to_cny,
+      "mobile",
+      "手机投资草稿带入"
+    ],
+  )?;
+  Ok(())
+}
+
 fn mobile_investment_main_category(connection: &Connection, preferred: Option<&str>) -> Result<Option<String>, AppError> {
   // 投资模块不创建现金类资产：现金类一律走兜底
   if let Some(preferred) = preferred.filter(|value| *value != "asset_cat_cash") {
@@ -2480,6 +2521,8 @@ fn store_mobile_sync_records(
             asset.insert("asset_id".to_string(), serde_json::Value::String(asset_id));
           }
         }
+        // 把手机投资草稿自带的外币汇率写入缓存，避免电脑端月末确认时再去找外部汇率
+        save_mobile_investment_fx_rate(&tx, &payload)?;
       }
     }
     let payload_json = serde_json::to_string(&record)
@@ -2605,6 +2648,8 @@ fn import_cloud_mobile_drafts_into_connection(
             asset.insert("asset_id".to_string(), serde_json::Value::String(asset_id));
           }
         }
+        // 把手机投资草稿自带的外币汇率写入缓存，避免电脑端月末确认时再去找外部汇率
+        save_mobile_investment_fx_rate(&tx, &payload_value)?;
       }
     }
     let payload_json = payload_value.to_string();
