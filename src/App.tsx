@@ -2021,6 +2021,9 @@ export function App() {
 	          }
 	          setLoadState("ready");
 	          void loadContentTemplates();
+	          if (cloudSession && result[0].snapshot_month) {
+	            void autoPushDashboardSnapshotToCloud(result[0], cloudSession);
+	          }
 	        }
 	      })
       .catch((err: unknown) => {
@@ -3263,6 +3266,29 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       portfolio_targets: sourceSummary.portfolio_targets,
       spending_anomalies: sourceSummary.spending_anomalies
     };
+  }
+
+  async function autoPushDashboardSnapshotToCloud(
+    sourceSummary: DashboardSeedSummary = summary,
+    session: CloudSession | null = cloudSession
+  ) {
+    if (!session || !sourceSummary.snapshot_month) return;
+    const cacheKey = "worthtrace-last-auto-push-month";
+    const lastPushed = window.localStorage.getItem(cacheKey);
+    if (lastPushed === sourceSummary.snapshot_month) return;
+    try {
+      await upsertCloudDashboardSnapshot(session, sourceSummary.snapshot_month, cloudDashboardPayload(sourceSummary));
+      window.localStorage.setItem(cacheKey, sourceSummary.snapshot_month);
+    } catch (err) {
+      if (!isCloudTokenExpiredError(err)) return;
+      try {
+        const refreshed = await refreshRememberedCloudSession(session);
+        await upsertCloudDashboardSnapshot(refreshed, sourceSummary.snapshot_month, cloudDashboardPayload(sourceSummary));
+        window.localStorage.setItem(cacheKey, sourceSummary.snapshot_month);
+      } catch {
+        // 静默忽略，不影响启动流程。
+      }
+    }
   }
 
   async function pushDashboardSnapshotToCloud() {
