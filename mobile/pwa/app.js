@@ -1,7 +1,8 @@
-const MOBILE_APP_VERSION = "0.4.3";
+const MOBILE_APP_VERSION = "0.4.4";
 const DB_NAME = "worthtrace_mobile_v3";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const RECORD_STORE = "offline_records";
+const SNAPSHOT_STORE = "dashboard_snapshots";
 const SETTINGS_KEY = "worthtrace_mobile_settings_v2";
 const CUSTOM_CATEGORIES_KEY = "worthtrace_mobile_custom_categories_v2";
 const RELEASE_RESET_KEY = "worthtrace_mobile_release_reset_v3";
@@ -1998,7 +1999,9 @@ async function fetchDesktopDashboardSnapshot() {
   const response = await fetch(`${syncEndpoint}/mobile-sync/dashboard`);
   if (!response.ok) throw new Error(await response.text());
   const data = await response.json();
-  return normalizeDashboardSnapshot(data);
+  const snapshot = normalizeDashboardSnapshot(data);
+  await saveDashboardSnapshot(snapshot);
+  return snapshot;
 }
 
 function renderLoadedDashboardSnapshot(snapshot) {
@@ -2009,6 +2012,15 @@ function renderLoadedDashboardSnapshot(snapshot) {
 }
 
 async function loadMobileDashboardSnapshot() {
+  async function fallbackToCachedSnapshot() {
+    const cached = await loadCachedDashboardSnapshot();
+    if (cached?.snapshotMonth) {
+      renderLoadedDashboardSnapshot(cached);
+      return;
+    }
+    renderLoadedDashboardSnapshot(makeEmptyDashboardSnapshot());
+  }
+
   if (cloudSession?.access_token) {
     try {
       const response = await cloudFetch(
@@ -2023,6 +2035,7 @@ async function loadMobileDashboardSnapshot() {
       const rows = await response.json();
       if (Array.isArray(rows) && rows[0]?.payload_json) {
         const cloudSnapshot = normalizeDashboardSnapshot(rows[0].payload_json, rows[0].snapshot_month || "");
+        await saveDashboardSnapshot(cloudSnapshot);
         try {
           const desktopSnapshot = await fetchDesktopDashboardSnapshot();
           renderLoadedDashboardSnapshot(desktopSnapshot.snapshotMonth ? desktopSnapshot : cloudSnapshot);
@@ -2035,19 +2048,19 @@ async function loadMobileDashboardSnapshot() {
       try {
         renderLoadedDashboardSnapshot(await fetchDesktopDashboardSnapshot());
       } catch {
-        renderLoadedDashboardSnapshot(makeEmptyDashboardSnapshot());
+        await fallbackToCachedSnapshot();
       }
       return;
     }
   }
   if (!canUseDesktopData()) {
-    renderLoadedDashboardSnapshot(makeEmptyDashboardSnapshot());
+    await fallbackToCachedSnapshot();
     return;
   }
   try {
     renderLoadedDashboardSnapshot(await fetchDesktopDashboardSnapshot());
   } catch {
-    renderLoadedDashboardSnapshot(makeEmptyDashboardSnapshot());
+    await fallbackToCachedSnapshot();
   }
 }
 
@@ -4242,6 +4255,9 @@ function openDatabase() {
         store.createIndex("transaction_date", "transaction_date");
         store.createIndex("updated_at", "updated_at");
       }
+      if (!db.objectStoreNames.contains(SNAPSHOT_STORE)) {
+        db.createObjectStore(SNAPSHOT_STORE, { keyPath: "id" });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -4289,5 +4305,26 @@ async function replaceRecords(records) {
     records.forEach((record) => store.put(record));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function saveDashboardSnapshot(snapshot) {
+  if (!snapshot || !snapshot.snapshotMonth) return;
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SNAPSHOT_STORE, "readwrite");
+    tx.objectStore(SNAPSHOT_STORE).put({ id: "latest", snapshot, cachedAt: new Date().toISOString() });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadCachedDashboardSnapshot() {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SNAPSHOT_STORE, "readonly");
+    const request = tx.objectStore(SNAPSHOT_STORE).get("latest");
+    request.onsuccess = () => resolve(request.result?.snapshot || null);
+    request.onerror = () => reject(request.error);
   });
 }
