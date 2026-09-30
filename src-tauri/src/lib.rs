@@ -2884,8 +2884,7 @@ fn mobile_transaction_details(
     from confirmed_transactions ct
     left join categories c on c.id = ct.category_id
     left join raw_transactions rt on rt.id = ct.raw_transaction_id
-    where ct.period_month <= ?1
-      and ct.include_in_stats = 1
+    where ct.include_in_stats = 1
       and ct.confirmation_status = 'confirmed'
       and ct.transaction_type in ('expense', 'income')
     union all
