@@ -2989,6 +2989,30 @@ dialog p {
   white-space: nowrap;
 }
 
+.invest-hero-split {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.invest-hero-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.invest-hero-row > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.invest-hero-row strong {
+  font-size: 26px;
+  white-space: nowrap;
+}
+
 .invest-hero-lines {
   display: grid;
   gap: 4px;
@@ -3058,7 +3082,8 @@ dialog p {
   font-size: 13px;
   font-weight: 800;
   text-align: right;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.45;
 }
 
 .invest-asset-card-head .net i {
