@@ -2033,7 +2033,7 @@ fn mobile_investment_flow_from_payload(
   }))
 }
 
-fn save_mobile_investment_fx_rate(tx: &rusqlite::Transaction<'_>, payload: &serde_json::Value) -> Result<(), AppError> {
+fn save_mobile_investment_fx_rate(connection: &Connection, payload: &serde_json::Value) -> Result<(), AppError> {
   let Some(parsed) = mobile_investment_flow_from_payload("investment_flow", None, Some(payload))? else {
     return Ok(());
   };
@@ -2041,7 +2041,7 @@ fn save_mobile_investment_fx_rate(tx: &rusqlite::Transaction<'_>, payload: &serd
     return Ok(());
   }
   let id = make_id("fx_rate", &format!("{}|{}|CNY", parsed.flow_date, parsed.currency));
-  tx.execute(
+  connection.execute(
     "
     insert into fx_rate_cache (
       id, rate_date, source_date, from_currency, to_currency, rate, primary_source,
@@ -2842,6 +2842,7 @@ fn pending_mobile_investment_flows(connection: &Connection, period_month: &str) 
       .query_row("select name from assets where id = ?1", params![asset_id], |row| row.get::<_, String>(0))
       .optional()?
       .unwrap_or(parsed.asset_name);
+    save_mobile_investment_fx_rate(connection, &payload)?;
     let phone_local_id = payload
       .get("local_id")
       .and_then(|value| value.as_str())
