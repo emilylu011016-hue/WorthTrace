@@ -2651,6 +2651,18 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
     return amount * rate;
   }
 
+  function mobileFlowAmountCny(flow: AssetCashflowItem): number | null {
+    if (flow.source_kind !== "mobile_investment") return null;
+    const value = Number(flow.amount_cny);
+    return Number.isFinite(value) && value > 0.000_001 ? value : null;
+  }
+
+  function mobileFlowFxRateToCny(flow: AssetCashflowItem): number | null {
+    if (flow.source_kind !== "mobile_investment") return null;
+    const value = Number(flow.fx_rate_to_cny);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
   function formatRowAmount(row: TransactionReviewRow) {
     const converted = convertAmount(row.amount, row.transaction_date, row.currency ?? "CNY");
     if (converted === null) return `缺少汇率`;
@@ -4825,7 +4837,10 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
         .map((asset) => `${asset.name} 月末市值`),
       ...assetItems.flatMap((asset) =>
         [...(asset.cashflows ?? []), ...latestDcaCashflows.filter((flow) => flow.asset_id === asset.id)]
-          .filter((flow) => convertAmount(Number(flow.amount) || 0, flow.flow_date, flow.currency ?? asset.currency ?? "CNY", "CNY") === null)
+          .filter((flow) => {
+            if (mobileFlowAmountCny(flow) !== null) return false;
+            return convertAmount(Number(flow.amount) || 0, flow.flow_date, flow.currency ?? asset.currency ?? "CNY", "CNY") === null;
+          })
           .map((flow) => `${asset.name} ${flow.flow_date} ${flow.flow_type}`)
       )
     ];
@@ -4892,21 +4907,23 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
           cashflows: [
             ...(asset.cashflows ?? []),
             ...latestDcaCashflows.filter((flow) => flow.asset_id === asset.id)
-          ].map((flow) => ({
-            id: flow.id,
-            asset_id: flow.asset_id,
-            flow_date: flow.flow_date,
-            flow_type: flow.flow_type,
-            amount: Number(flow.amount) || 0,
-            currency: flow.currency || asset.currency || "CNY",
-            fx_rate_to_cny: getRate(flow.flow_date, flow.currency || asset.currency || "CNY", "CNY") ?? 1,
-            amount_cny:
-              convertAmount(Number(flow.amount) || 0, flow.flow_date, flow.currency || asset.currency || "CNY", "CNY") ?? 0,
-            source_kind: flow.source_kind,
-            dca_plan_id: flow.dca_plan_id ?? null,
-            note: flow.note ?? null,
-            included: flow.included
-          }))
+          ].map((flow) => {
+            const currency = flow.currency || asset.currency || "CNY";
+            return {
+              id: flow.id,
+              asset_id: flow.asset_id,
+              flow_date: flow.flow_date,
+              flow_type: flow.flow_type,
+              amount: Number(flow.amount) || 0,
+              currency,
+              fx_rate_to_cny: mobileFlowFxRateToCny(flow) ?? getRate(flow.flow_date, currency, "CNY") ?? 1,
+              amount_cny: mobileFlowAmountCny(flow) ?? convertAmount(Number(flow.amount) || 0, flow.flow_date, currency, "CNY") ?? 0,
+              source_kind: flow.source_kind,
+              dca_plan_id: flow.dca_plan_id ?? null,
+              note: flow.note ?? null,
+              included: flow.included
+            };
+          })
         }))
       });
       applyMonthlyStatus(status);
@@ -7975,8 +7992,13 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
     const manualFlows = assetItems.flatMap((asset) => asset.cashflows ?? []);
     const includedDcaFlows = dcaCashflows.filter((flow) => flow.included);
     const allAssetFlows = [...manualFlows, ...includedDcaFlows];
-    const flowDisplayAmount = (flow: AssetCashflowItem) =>
-      convertAmount(Number(flow.amount) || 0, flow.flow_date, flow.currency ?? "CNY", displayCurrency) ?? 0;
+    const flowDisplayAmount = (flow: AssetCashflowItem) => {
+      if (displayCurrency === "CNY") {
+        const mobileCny = mobileFlowAmountCny(flow);
+        if (mobileCny !== null) return mobileCny;
+      }
+      return convertAmount(Number(flow.amount) || 0, flow.flow_date, flow.currency ?? "CNY", displayCurrency) ?? 0;
+    };
     const flowTotal = (type: AssetCashflowItem["flow_type"], sourceKind?: AssetCashflowItem["source_kind"]) =>
       allAssetFlows
         .filter((flow) => flow.flow_type === type && (!sourceKind || flow.source_kind === sourceKind))
