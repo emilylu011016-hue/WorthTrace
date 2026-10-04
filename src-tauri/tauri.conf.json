@@ -31,7 +31,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM5NDQ2MTZGMUFGMTgzOTYKUldTV2cvRWFiMkZFeWJmMEpNK01KY29yYzdGMFVCOGJoeGNhSnY2NkhldDRhWkw4aDRoZVdPakQK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgQjAzODVBMzE1OTgwRjUxMgpSV1FTOVlCWk1WbzRzRU5RdWdyYjFpWDREeVZyMHdVaklmMUxUSU8zUmw1VGd0NjBGNUFoSDg5RQo=",
       "endpoints": [
         "https://github.com/emilylu011016-hue/WorthTrace/releases/latest/download/latest.json"
       ]
