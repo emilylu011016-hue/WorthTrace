@@ -467,6 +467,7 @@ struct YearlyInvestmentPerformance {
   year: String,
   label: String,
   gain: f64,
+  total_return_rate: Option<f64>,
   annualized_return_rate: Option<f64>,
 }
 
@@ -4692,15 +4693,22 @@ fn yearly_investment_performances(
     if ending_value.abs() > 0.000_001 {
       flows.push((month_end_date(&end_month), ending_value));
     }
+    let gain = ending_value - beginning_value - buy + sell + dividend;
+    let net_invested = beginning_value + buy - sell - dividend;
     out.push(YearlyInvestmentPerformance {
       label: if year == snapshot_year {
         format!("{} 至今", year)
       } else {
         year.clone()
       },
-      gain: ending_value - beginning_value - buy + sell + dividend,
-      annualized_return_rate: xirr(&flows),
       year,
+      gain,
+      total_return_rate: if net_invested.abs() > 0.000_001 {
+        Some(gain / net_invested)
+      } else {
+        None
+      },
+      annualized_return_rate: xirr(&flows),
     });
   }
   Ok(out)

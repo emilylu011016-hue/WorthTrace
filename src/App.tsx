@@ -160,6 +160,7 @@ type YearlyInvestmentPerformance = {
   year: string;
   label: string;
   gain: number;
+  total_return_rate?: number | null;
   annualized_return_rate?: number | null;
 };
 
@@ -10580,7 +10581,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
                 ) : null}
                 {dashboardItemEnabled("investment_yearly_xirr_table") ? (
                   <>
-                    <h3 className="dashboard-subtitle">年度资金加权年化收益率</h3>
+                    <h3 className="dashboard-subtitle">年度收益率</h3>
                     <div className="dashboard-table">
                       {summary.yearly_investment_performances.length === 0 ? (
                         <div className="dashboard-empty-state compact">暂无数据：缺少年度投资数据。</div>
@@ -10592,13 +10593,14 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
                             type="button"
                             {...tooltipEvents(
                               item.label,
-                              `资金加权年化 ${item.annualized_return_rate === null || item.annualized_return_rate === undefined ? "待计算" : formatPercent(item.annualized_return_rate)}｜收益金额 ${item.gain >= 0 ? "+" : ""}${formatCurrency(item.gain, privacyMode)}`
+                              `累计收益 ${item.total_return_rate === null || item.total_return_rate === undefined ? "待计算" : formatPercent(item.total_return_rate)}｜资金加权年化 ${item.annualized_return_rate === null || item.annualized_return_rate === undefined ? "待计算" : formatPercent(item.annualized_return_rate)}｜收益金额 ${item.gain >= 0 ? "+" : ""}${formatCurrency(item.gain, privacyMode)}`
                             )}
                           >
                             <strong>{item.label}</strong>
                             <span>收益 {item.gain >= 0 ? "+" : ""}{formatCurrency(item.gain, privacyMode)}</span>
+                            <span>{item.total_return_rate === null || item.total_return_rate === undefined ? "累计待算" : `累计 ${formatPercent(item.total_return_rate)}`}</span>
                             <span>{item.annualized_return_rate === null || item.annualized_return_rate === undefined ? "年化待算" : `年化 ${formatPercent(item.annualized_return_rate)}`}</span>
-                            <small>资金加权口径</small>
+                            <small>累计为实际收益/净投入；年化为资金加权 XIRR</small>
                           </button>
                         ))
                       )}

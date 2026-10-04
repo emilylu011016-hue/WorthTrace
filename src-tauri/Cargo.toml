@@ -1,6 +1,6 @@
 [package]
 name = "financial-planning"
-version = "2.12.5"
+version = "2.12.6"
 description = "Local financial planning desktop app"
 authors = ["Emily Lu"]
 edition = "2021"
