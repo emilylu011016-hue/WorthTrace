@@ -9125,7 +9125,11 @@ fn save_asset_month_entries_for_connection(
       )?;
     }
 
-    for cashflow in cashflows.iter().filter(|item| item.included && item.amount.abs() > 0.000_001) {
+    // prepaid_expense 流水已由上方预花费专用分支写入，这里跳过避免重复插入。
+    for cashflow in cashflows
+      .iter()
+      .filter(|item| item.included && item.amount.abs() > 0.000_001 && item.source_kind != "prepaid_expense")
+    {
       if cashflow.source_kind == "dca_auto" && mobile_buy_dates.contains(&cashflow.flow_date) {
         continue;
       }
@@ -9170,6 +9174,34 @@ fn save_asset_month_entries_for_connection(
         ],
       )?;
     }
+  }
+
+  // 预花费是系统自动计算账户：即使本次保存列表里没有它（已确认、无改动），
+  // 也随资产步保存把最新自动值写入快照，避免快照随未来月份记账而过期。
+  {
+    let snapshot_id = make_id(
+      "asset_snapshot",
+      &format!("{}|{}|v1", PREPAID_EXPENSE_ASSET_ID, period_month),
+    );
+    tx.execute(
+      "
+      insert into monthly_asset_snapshots (
+        id, asset_id, period_month, snapshot_date, original_amount,
+        currency, fx_rate_to_cny, amount_cny, status, version_no, note
+      )
+      values (?1, ?2, ?3, ?4, ?5, 'CNY', 1, ?5, 'held', 1, '系统自动计算：未来月份已记账支出')
+      on conflict(asset_id, period_month, version_no) do update set
+        snapshot_date = excluded.snapshot_date,
+        original_amount = excluded.original_amount,
+        currency = excluded.currency,
+        fx_rate_to_cny = excluded.fx_rate_to_cny,
+        amount_cny = excluded.amount_cny,
+        status = excluded.status,
+        note = excluded.note,
+        updated_at = current_timestamp
+      ",
+      params![snapshot_id, PREPAID_EXPENSE_ASSET_ID, &period_month, snapshot_date, prepaid_amount],
+    )?;
   }
 
   let all_confirmed = !entries.is_empty() && entries.iter().all(|entry| entry.confirmed);

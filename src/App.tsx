@@ -4822,7 +4822,19 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
 	  async function saveAssetEntries(allowAllocationPreferenceMismatch = false) {
     setSuccessBanner(null);
     if (assetItems.length === 0) {
-      setMonthlyMessage("还没有资产清单，请先创建资产。");
+      // 没有资产清单时也允许把资产步标记完成（如 reopen 后无资产可改），
+      // 否则总确认步会被卡死无法生成月报。
+      try {
+        const status = await invoke<MonthlyStepStatus>("set_monthly_step_status", {
+          periodMonth: selectedMonth,
+          stepKey: "assets",
+          completed: true
+        });
+        applyMonthlyStatus(status);
+        setMonthlyMessage("没有资产清单，资产步骤已标记完成。");
+      } catch (err) {
+        setMonthlyMessage(`资产步骤标记失败：${String(err)}`);
+      }
       return;
     }
     const assetsToSave = assetItems.filter((asset) => {
@@ -4831,7 +4843,20 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
       return isDirty || !asset.confirmed;
     });
     if (assetsToSave.length === 0) {
-      setSuccessBanner("没有资产需要保存。");
+      // 全部资产均已保存（常见于 reopen 后回看）：直接把资产步置为完成，
+      // 与支出/收入/信用卡步一样允许单独完成，不强制要求有写入发生。
+      try {
+        const status = await invoke<MonthlyStepStatus>("set_monthly_step_status", {
+          periodMonth: selectedMonth,
+          stepKey: "assets",
+          completed: true
+        });
+        applyMonthlyStatus(status);
+        setSuccessBanner("没有资产需要保存，资产步骤已标记完成。");
+        setMonthlyMessage("资产录入已确认。");
+      } catch (err) {
+        setMonthlyMessage(`资产步骤标记失败：${String(err)}`);
+      }
       return;
     }
     const monthAmountIssues = assetsToSave
@@ -8946,7 +8971,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
     const unmapped = [...(expenseReview?.rows ?? []), ...(incomeReview?.rows ?? [])].filter((row) => !row.category_id).length;
     const unresolvedDuplicates = [...(expenseReview?.rows ?? []), ...(incomeReview?.rows ?? [])].filter((row) => isPendingDuplicate(row) && (row.include_in_stats ?? true)).length;
     const creditNet = creditCards.reduce(
-      (sum, card) => sum + (-(Number(card.billed_amount) || 0) - (Number(card.unbilled_amount) || 0) + (Number(card.previous_unbilled_amount) || 0)),
+      (sum, card) => sum + (-(Number(card.billed_amount) || 0) - (Number(card.unbilled_amount) || 0)),
       0
     );
     const projectedAssetGross = assetItems.reduce(
@@ -8984,7 +9009,7 @@ const effectiveDashboardItems = normalizeDashboardItemIds(onboardingStatus?.dash
         ].join("\n")
       : "本月月末资产市值合计 = 暂无资产明细。";
     const creditNetFormula =
-      `信用卡净调整 = -本月已出账单 - 本月未出账单 + 上月未出账单 = ${formatCurrency(creditNet, privacyMode)}。`;
+      `信用卡净调整 = -本月已出账单 - 本月未出账单 = ${formatCurrency(creditNet, privacyMode)}。`;
     const previousMonth = previousPeriodMonth(selectedMonth);
     const previousMonthTrend = summary.monthly_trends.find((item) => item.period_month === previousMonth);
     const previousNetWorth = previousMonthTrend?.net_worth ?? (summary.snapshot_month === previousMonth ? summary.net_worth : 0);
